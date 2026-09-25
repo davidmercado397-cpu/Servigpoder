@@ -67,6 +67,18 @@ Documentación de la API: http://localhost:8000/api/docs
 3. Asignar el dominio al servicio **frontend** (puerto 3000). No exponer `backend` ni `db`.
 4. El volumen `pgdata` guarda la base de datos; configurar respaldos en Coolify.
 
+## Motor de cobertura (F2)
+
+`backend/app/services/cobertura.py` cruza la matriz comercial del mes con la última carga de SIESA.
+Cada puesto se evalúa en bloques de 30 minutos comparando personas vendidas contra personas
+programadas trabajando: el faltante son **horas descubiertas** y el sobrante **horas en exceso**.
+Los turnos que cruzan la medianoche se atribuyen al día en que empiezan. Las novedades (VAC, IEG,
+IND, PSA…) no cuentan como cobertura. El **titular** de una persona es el puesto donde más turnos
+tiene en el mes; los titulares de cada puesto se comparan con los hombres presupuestados.
+
+El análisis se calcula al subir la programación (si existe la matriz del mes) o con "Recalcular",
+y se marca como desactualizado si la matriz cambia o llega una carga más reciente.
+
 ## Formato de respuesta de la API
 
 Todas las respuestas JSON usan el mismo sobre (`backend/app/core/respuestas.py`):
@@ -129,6 +141,6 @@ Administrador, Programador y Nómina.
 
 - [x] F0 Base: acceso, usuarios, roles dinámicos, Docker
 - [x] F1 Maestros, matriz comercial (con proyección mensual) y carga de programación SIESA
-- [ ] F2 Motor de cobertura, tablero y vista de puesto
+- [x] F2 Motor de cobertura, tablero y vista de puesto
 - [ ] F3 Cubrimientos, bandeja de nómina y bolsas
 - [ ] F4 Histórico, comparación de cargas y alertas

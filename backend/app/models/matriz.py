@@ -27,6 +27,8 @@ class MatrizPeriodo(Base):
     estado: Mapped[str] = mapped_column(String(20), default=BORRADOR)
     proyectado_desde_id: Mapped[int | None] = mapped_column(ForeignKey("matriz_periodo.id"), nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Última modificación de la matriz del mes: permite saber si un análisis quedó desactualizado
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     puestos: Mapped[list["MatrizPuesto"]] = relationship(back_populates="periodo", cascade="all, delete-orphan")
 

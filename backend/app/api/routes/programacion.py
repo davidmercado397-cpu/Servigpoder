@@ -8,6 +8,7 @@ from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import ProgramacionCarga, Usuario
 from app.schemas.f1 import CargaOut
+from app.services import cobertura
 from app.services.programacion import ErrorProgramacion, cargar
 
 router = APIRouter(prefix="/programacion", tags=["programación"])
@@ -26,7 +27,13 @@ async def subir(request: Request, db: DbSession, archivo: UploadFile = File(...)
     auditar(db, request, "programacion_cargada", actual.id, carga_id=carga.id, archivo=carga.archivo,
             desde=str(carga.desde), hasta=str(carga.hasta), filas=carga.resumen.get("filas"))
     db.commit()
-    return ok(carga)
+    # Si ya existe la matriz del mes, el análisis de cobertura se calcula de inmediato
+    analisis_id = None
+    try:
+        analisis_id = cobertura.analizar(db, carga, actual.id).id
+    except cobertura.ErrorAnalisis:
+        db.rollback()
+    return ok(carga, analisis_id=analisis_id)
 
 
 @router.get("/cargas", response_model=ApiResponse[list[CargaOut]])

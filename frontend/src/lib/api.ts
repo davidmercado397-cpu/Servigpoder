@@ -102,3 +102,23 @@ export type Carga = {
     codigos_desconocidos: { codigo: string; veces: number }[];
   };
 };
+
+export type ResumenAnalisis = {
+  desde: string; hasta: string; anio: number; mes: number; cobertura_pct: number | null;
+  requeridas?: number; programadas?: number; descubiertas?: number; exceso?: number;
+  puestos?: number; puestos_ok?: number; puestos_hueco?: number; puestos_exceso?: number; puestos_mixto?: number;
+  puestos_sin_matriz?: number; puestos_sin_programacion?: number; hombres?: number; fijos?: number;
+  puestos_fijos_de_mas?: number; puestos_fijos_de_menos?: number; filas_sin_puesto?: number;
+  por_ciudad: Record<string, { puestos?: number; requeridas?: number; descubiertas?: number; exceso?: number; cobertura_pct: number | null;
+    puestos_hueco?: number; puestos_exceso?: number; puestos_mixto?: number }>;
+};
+export type Analisis = { id: number; carga_id: number; periodo_id: number; generado_en: string; resumen: ResumenAnalisis; desactualizado: boolean; motivo_desactualizado: string | null };
+export type MesDisponible = { anio: number; mes: number; carga_id: number; desde: string; hasta: string; analisis_id: number | null; tiene_matriz: boolean };
+export type PuestoAnalisis = {
+  puesto: Puesto; hombres: string; fijos: number; personas: number; horas_requeridas: string; horas_programadas: string;
+  horas_descubiertas: string; horas_exceso: string; dias_hueco: number; dias_exceso: number; estado: string;
+};
+export type Tramo = { tipo: "hueco" | "exceso"; inicio: string; fin: string; personas: number };
+export type DiaAnalisis = { fecha: string; horas_requeridas: string; horas_programadas: string; horas_descubiertas: string; horas_exceso: string; estado: string; detalle: Tramo[] };
+export type PersonaPuesto = { cedula: string; nombre: string; titular: boolean; puesto_titular: string | null; dias: Record<string, string>; clases: Record<string, string> };
+export type DetallePuesto = { resumen: PuestoAnalisis; franjas: Franja[]; incluye_festivos: boolean | null; festivos: Record<string, string>; dias: DiaAnalisis[]; personas: PersonaPuesto[] };

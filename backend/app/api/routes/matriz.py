@@ -1,4 +1,5 @@
 import calendar
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import case, func, select
@@ -31,6 +32,8 @@ def _periodo(db: DbSession, periodo_id: int) -> MatrizPeriodo:
 def _editable(p: MatrizPeriodo) -> None:
     if p.estado == CERRADO:
         raise ApiError(409, f"La matriz de {p.mes:02d}/{p.anio} está cerrada y no se puede modificar")
+    # Toda edición marca la matriz como modificada: los análisis previos quedan desactualizados
+    p.actualizado_en = datetime.now(timezone.utc)
 
 
 def _matriz_puesto(db: DbSession, mp_id: int) -> MatrizPuesto:

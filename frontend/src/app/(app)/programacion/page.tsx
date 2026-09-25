@@ -113,6 +113,7 @@ function DetalleCarga({ carga }: { carga: Carga }) {
       ) : (
         <Alerta tipo="ok">Todos los puestos se cruzaron con la matriz.</Alerta>
       )}
+      <Link href="/cobertura" className="btn-primario">Ver cobertura de este mes →</Link>
     </section>
   );
 }

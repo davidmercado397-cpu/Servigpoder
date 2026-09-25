@@ -13,7 +13,7 @@ const MENU: { grupo: string; items: Item[] }[] = [
     grupo: "Operación",
     items: [
       { href: "/programacion", texto: "Programación SIESA", permiso: "analisis.ver" },
-      { href: "/cobertura", texto: "Cobertura", permiso: "analisis.ver", proximamente: true },
+      { href: "/cobertura", texto: "Cobertura", permiso: "analisis.ver" },
       { href: "/cubrimientos", texto: "Cubrimientos (nómina)", permiso: "cubrimientos.aprobar", proximamente: true },
     ],
   },

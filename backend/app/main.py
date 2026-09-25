@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.routes import auth, catalogos, maestros, matriz, programacion, roles, usuarios
+from app.api.routes import analisis, auth, catalogos, maestros, matriz, programacion, roles, usuarios
 from app.core.config import API_VERSION, get_settings
 from app.core.middleware import registrar_middlewares
 from app.core.respuestas import ApiResponse, ok, registrar_manejadores
@@ -24,7 +24,7 @@ registrar_manejadores(app)
 registrar_middlewares(app)
 
 api = APIRouter(prefix="/api")
-for modulo in (auth, usuarios, roles, catalogos, maestros, matriz, programacion):
+for modulo in (auth, usuarios, roles, catalogos, maestros, matriz, programacion, analisis):
     api.include_router(modulo.router)
 
 

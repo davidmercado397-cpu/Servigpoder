@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-marca-50: #eef6ff;
+  --color-marca-100: #d9eaff;
+  --color-marca-600: #1d5fbf;
+  --color-marca-700: #174c99;
+  --color-marca-900: #0f2d5c;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+  font-family: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition disabled:opacity-50;
+}
+@utility btn-primario {
+  @apply btn bg-marca-600 text-white hover:bg-marca-700;
+}
+@utility btn-secundario {
+  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-100;
+}
+@utility input {
+  @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-marca-600 focus:ring-2 focus:ring-marca-100;
+}
+@utility label {
+  @apply mb-1 block text-sm font-medium text-slate-700;
+}
+@utility tarjeta {
+  @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+}
+
+@layer components {
+  .tabla {
+    @apply w-full text-left text-sm;
+  }
+  .tabla th {
+    @apply border-b border-slate-200 bg-slate-50 px-4 py-2 font-semibold text-slate-600;
+  }
+  .tabla td {
+    @apply border-b border-slate-100 px-4 py-2;
+  }
+}

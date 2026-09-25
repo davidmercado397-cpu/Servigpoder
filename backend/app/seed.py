@@ -11,6 +11,7 @@ from app.core.db import SessionLocal
 from app.core.permisos import PERMISOS, ROLES_BASE
 from app.core.security import hash_password
 from app.models import Permiso, Rol, Usuario
+from app.services.alertas import sembrar_parametros
 from app.services.catalogos import sembrar_novedades
 
 
@@ -35,6 +36,7 @@ def seed(db: Session) -> None:
     db.flush()
 
     sembrar_novedades(db)
+    sembrar_parametros(db)
 
     if db.scalar(select(Usuario).limit(1)) is None:
         s = get_settings()

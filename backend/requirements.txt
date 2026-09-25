@@ -13,3 +13,4 @@ python-multipart==0.0.*
 polars==1.*
 holidays==0.*
 xlsxwriter==3.*
+tzdata

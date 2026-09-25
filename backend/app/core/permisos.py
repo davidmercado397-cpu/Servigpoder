@@ -17,6 +17,7 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "programacion.cargar": ("Programación", "Cargar el Excel de programación de SIESA"),
     "analisis.ver": ("Análisis", "Ver tablero, cobertura, hallazgos y reportes"),
     "cubrimientos.aprobar": ("Nómina", "Aprobar o rechazar cubrimientos y turnos adicionales"),
+    "parametros.gestionar": ("Administración", "Configurar umbrales de alertas y parámetros del sistema"),
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {

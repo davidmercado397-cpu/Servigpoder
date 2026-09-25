@@ -122,3 +122,24 @@ export type Tramo = { tipo: "hueco" | "exceso"; inicio: string; fin: string; per
 export type DiaAnalisis = { fecha: string; horas_requeridas: string; horas_programadas: string; horas_descubiertas: string; horas_exceso: string; estado: string; detalle: Tramo[] };
 export type PersonaPuesto = { cedula: string; nombre: string; titular: boolean; puesto_titular: string | null; dias: Record<string, string>; clases: Record<string, string> };
 export type DetallePuesto = { resumen: PuestoAnalisis; franjas: Franja[]; incluye_festivos: boolean | null; festivos: Record<string, string>; dias: DiaAnalisis[]; personas: PersonaPuesto[] };
+
+export type Cubrimiento = {
+  id: number; puesto: Puesto; fecha: string; cedula: string; nombre: string; codigo_turno: string; horas: string;
+  puesto_titular: string | null; motivo: "novedad" | "descanso" | "sin_motivo"; referencia: { cedula: string; nombre: string; codigo: string }[];
+  genera_exceso: boolean; doble_turno: boolean; estado_auto: string; estado: string;
+  comentario: string | null; decidido_por: string | null; decidido_en: string | null;
+};
+export type PersonaBolsa = { cedula: string; nombre: string; bolsas: string[]; dias_sin_puesto: string[]; horas_sin_puesto: number; dias_en_puesto: number };
+export type AlertaT = { nivel: "critica" | "advertencia" | "info"; titulo: string; detalle: string; enlace: string | null; items: Record<string, string | number>[] };
+export type Historico = {
+  carga_id: number; anio: number; mes: number; desde: string; hasta: string; cargado_en: string; archivo: string; analisis_id: number | null;
+  cobertura_pct: number | null; requeridas: number | null; descubiertas: number | null; exceso: number | null; puestos: number | null;
+  puestos_hueco: number | null; puestos_exceso: number | null; puestos_mixto: number | null; cubrimientos: number | null; cubrimientos_pendiente: number | null;
+};
+export type Comparacion = {
+  anterior: number; actual: number; desde: string; hasta: string; total: number; por_tipo: Record<string, number>; personas: number; puestos: number;
+  cambios: { tipo: string; cedula: string; nombre: string; puesto: string; fecha: string; antes: string | null; despues: string | null }[];
+  truncado: boolean;
+  impacto: { puesto_id: number; puesto: string; descubiertas_antes: number; descubiertas_despues: number; exceso_antes: number; exceso_despues: number }[];
+};
+export type Parametro = { clave: string; valor: string; descripcion: string };

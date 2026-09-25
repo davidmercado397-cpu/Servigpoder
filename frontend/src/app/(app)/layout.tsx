@@ -14,7 +14,9 @@ const MENU: { grupo: string; items: Item[] }[] = [
     items: [
       { href: "/programacion", texto: "Programación SIESA", permiso: "analisis.ver" },
       { href: "/cobertura", texto: "Cobertura", permiso: "analisis.ver" },
-      { href: "/cubrimientos", texto: "Cubrimientos (nómina)", permiso: "cubrimientos.aprobar", proximamente: true },
+      { href: "/cubrimientos", texto: "Cubrimientos (nómina)", permiso: "analisis.ver" },
+      { href: "/bolsas", texto: "Personas en bolsa", permiso: "analisis.ver" },
+      { href: "/historico", texto: "Histórico y novedades", permiso: "analisis.ver" },
     ],
   },
   {
@@ -29,6 +31,7 @@ const MENU: { grupo: string; items: Item[] }[] = [
     items: [
       { href: "/admin/usuarios", texto: "Usuarios", permiso: "usuarios.ver" },
       { href: "/admin/roles", texto: "Roles y permisos", permiso: "roles.ver" },
+      { href: "/admin/parametros", texto: "Parámetros de alertas", permiso: "parametros.gestionar" },
     ],
   },
 ];

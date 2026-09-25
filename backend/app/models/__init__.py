@@ -1,4 +1,5 @@
 from app.models.analisis import Analisis, AnalisisDia, AnalisisPuesto
+from app.models.cubrimientos import Cubrimiento, CubrimientoDecision, Parametro
 from app.models.maestros import Novedad, Puesto, PuestoEquivalencia, Turno, TurnoFranja, Ubicacion
 from app.models.matriz import MatrizExcepcion, MatrizFranja, MatrizPeriodo, MatrizPuesto
 from app.models.programacion import ProgramacionCarga, ProgramacionDia, ProgramacionFila
@@ -8,6 +9,9 @@ __all__ = [
     "Analisis",
     "AnalisisDia",
     "AnalisisPuesto",
+    "Cubrimiento",
+    "CubrimientoDecision",
+    "Parametro",
     "Auditoria",
     "MatrizExcepcion",
     "MatrizFranja",

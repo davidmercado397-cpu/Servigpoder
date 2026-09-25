@@ -79,6 +79,40 @@ tiene en el mes; los titulares de cada puesto se comparan con los hombres presup
 El análisis se calcula al subir la programación (si existe la matriz del mes) o con "Recalcular",
 y se marca como desactualizado si la matriz cambia o llega una carga más reciente.
 
+## Cubrimientos y bolsas (F3)
+
+`backend/app/services/cubrimientos.py`: un cubrimiento es un turno de una persona en un puesto donde
+no es titular. Se justifica solo si un titular del puesto tiene una **novedad** que requiere
+cubrimiento o está de **descanso** ese día, y el turno no se cruza con horas en exceso. Lo demás queda
+**pendiente** para nómina. Las decisiones de nómina se guardan por (mes, cédula, puesto, día) y se
+conservan al recalcular. El reporte de **personas en bolsa** lista quienes tienen turnos en 05/06 los
+días en que no cubren ningún puesto.
+
+## Histórico y alertas (F4)
+
+Cada carga de SIESA queda guardada con su análisis. Se puede comparar una carga con la anterior del
+mismo mes (turnos agregados, eliminados o cambiados y su impacto en la cobertura). Las alertas de
+Inicio se evalúan con los umbrales de Administración → Parámetros de alertas.
+
+## Respaldos
+
+La base vive en el volumen `pgdata`. En Coolify, programe una tarea (Scheduled Task) sobre el servicio
+`db`, por ejemplo diaria:
+
+```bash
+pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /var/lib/postgresql/data/respaldo_$(date +%F).dump
+```
+
+y copie los respaldos fuera del servidor. Restaurar:
+
+```bash
+docker compose exec -T db pg_restore -U capacidad -d capacidad --clean < respaldo.dump
+```
+
+## Validación QA
+
+Lista completa de pruebas funcionales y de seguridad, con valores esperados: [`docs/QA.md`](docs/QA.md).
+
 ## Formato de respuesta de la API
 
 Todas las respuestas JSON usan el mismo sobre (`backend/app/core/respuestas.py`):
@@ -142,5 +176,6 @@ Administrador, Programador y Nómina.
 - [x] F0 Base: acceso, usuarios, roles dinámicos, Docker
 - [x] F1 Maestros, matriz comercial (con proyección mensual) y carga de programación SIESA
 - [x] F2 Motor de cobertura, tablero y vista de puesto
-- [ ] F3 Cubrimientos, bandeja de nómina y bolsas
-- [ ] F4 Histórico, comparación de cargas y alertas
+- [x] F3 Cubrimientos, bandeja de nómina y bolsas
+- [x] F4 Histórico, comparación de cargas, alertas y parámetros
+- [ ] F5 Puesta en producción en Coolify (ver guía QA en `docs/QA.md`)

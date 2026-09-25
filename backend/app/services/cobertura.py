@@ -24,23 +24,13 @@ from app.models import (
 )
 from app.models.analisis import EXCESO, HUECO, MIXTO, OK, SIN_SERVICIO
 from app.models.maestros import BOLSA, TRABAJO
+from app.services import cubrimientos
+from app.services.bloques import BLOQUE_MIN, BLOQUES_DIA
+from app.services.bloques import bloques as _bloques
 from app.services.matriz import festivos, requerimiento
-
-BLOQUE_MIN = 30
-BLOQUES_DIA = 24 * 60 // BLOQUE_MIN
-
 
 class ErrorAnalisis(ValueError):
     pass
-
-
-def _bloques(inicio: time, fin: time) -> range:
-    """Bloques de 30 min desde las 00:00 del día; si fin <= inicio la franja pasa al día siguiente."""
-    a = (inicio.hour * 60 + inicio.minute) // BLOQUE_MIN
-    b = (fin.hour * 60 + fin.minute) // BLOQUE_MIN
-    if b <= a:
-        b += BLOQUES_DIA
-    return range(a, b)
 
 
 def _hora(bloque: int) -> str:
@@ -123,14 +113,6 @@ def evaluar(linea: Linea, desde: date, hasta: date) -> dict[date, ResultadoDia]:
     return dias
 
 
-def _titulares(filas: list[tuple[str, int, date]]) -> dict[str, int]:
-    """Puesto titular de cada persona: donde tiene más días trabajados en el mes."""
-    conteo: dict[str, Counter] = defaultdict(Counter)
-    for cedula, puesto_id, _ in filas:
-        conteo[cedula][puesto_id] += 1
-    return {c: cnt.most_common(1)[0][0] for c, cnt in conteo.items()}
-
-
 def _estado_puesto(dias_hueco: int, dias_exceso: int) -> str:
     if dias_hueco and dias_exceso:
         return MIXTO
@@ -161,15 +143,10 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
     puestos = {p.id: p for p in db.scalars(select(Puesto))}
     matriz = {mp.puesto_id: mp for mp in db.scalars(select(MatrizPuesto).where(MatrizPuesto.periodo_id == periodo.id))}
 
-    # Días trabajados de la carga en puestos del maestro
-    trabajados = db.execute(
-        select(ProgramacionFila.cedula, ProgramacionFila.puesto_id, ProgramacionDia.fecha, ProgramacionDia.codigo)
-        .join(ProgramacionDia, ProgramacionDia.fila_id == ProgramacionFila.id)
-        .where(ProgramacionFila.carga_id == carga.id, ProgramacionDia.clase == TRABAJO)
-    ).all()
-    en_puesto = [(c, pid, f, cod) for c, pid, f, cod in trabajados if pid is not None]
-    operativos = [(c, pid, f) for c, pid, f, _ in en_puesto if puestos[pid].tipo != BOLSA]
-    titular = _titulares(operativos)
+    # Todo lo programado en la carga; los días trabajados en puestos del maestro alimentan la cobertura
+    registros = cubrimientos.registros_carga(db, carga.id)
+    en_puesto = [(r.cedula, r.puesto_id, r.fecha, r.codigo) for r in registros if r.clase == TRABAJO and r.puesto_id]
+    titular = cubrimientos.titulares(registros, puestos)
 
     lineas: dict[int, Linea] = defaultdict(Linea)
     personas: dict[int, set[str]] = defaultdict(set)
@@ -248,6 +225,10 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
             elif ap.fijos < float(mp.hombres) - 0.5:
                 tot["puestos_fijos_de_menos"] += 1
         tot["fijos"] += ap.fijos
+
+    # Cubrimientos y turnos adicionales (F3), con el análisis de días ya guardado
+    db.flush()
+    tot.update(cubrimientos.detectar(db, analisis, registros, puestos, titular, franjas_turno))
 
     requeridas = tot["requeridas"]
     analisis.resumen = {

@@ -65,6 +65,19 @@ export default function MatrizPage() {
     }, "Matriz proyectada al mes siguiente. Corrija solo los puestos que cambian.");
   }
 
+  async function cambiarFestivos(mp: MatrizPuesto, incluye: boolean) {
+    setMsg(null);
+    // Cambio optimista: la casilla responde de inmediato y se revierte si falla
+    setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, incluye_festivos: incluye } : p)));
+    try {
+      const r = await api<MatrizPuesto>(`/matriz/puestos/${mp.id}`, { method: "PATCH", json: { incluye_festivos: incluye } });
+      if (seleccion?.id === mp.id) setSeleccion(r);
+    } catch (e) {
+      setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, incluye_festivos: !incluye } : p)));
+      setMsg({ tipo: "error", texto: mensajeError(e) });
+    }
+  }
+
   async function cambiarEstado(estado: string) {
     if (!periodo) return;
     if (estado === "cerrado" && !confirm("Un mes cerrado ya no se puede modificar. ¿Cerrar?")) return;
@@ -121,7 +134,11 @@ export default function MatrizPage() {
             <div className="tarjeta max-h-[70vh] overflow-auto">
               <table className="tabla">
                 <thead className="sticky top-0">
-                  <tr><th>Puesto</th><th>Ubicación</th><th>Hombres</th><th>Secuencia</th><th>Cobertura vendida</th><th>Festivos</th><th /></tr>
+                  <tr>
+                    <th>Puesto</th><th>Ubicación</th><th>Hombres</th><th>Secuencia</th><th>Cobertura vendida</th>
+                    <th className="text-center" title="Marque si el servicio vendido se presta también los días festivos">¿Incluye festivos?</th>
+                    <th />
+                  </tr>
                 </thead>
                 <tbody>
                   {puestos.map((mp) => (
@@ -135,7 +152,18 @@ export default function MatrizPage() {
                       <td>{Number(mp.hombres).toLocaleString("es-CO")}</td>
                       <td className="text-xs">{mp.secuencia}</td>
                       <td className="text-xs">{mp.puesto.excluido ? "Excluido" : mp.franjas.map(franjaTexto).join(" · ") || "—"}</td>
-                      <td>{mp.incluye_festivos ? "Sí" : "No"}</td>
+                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <label className="inline-flex cursor-pointer items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-marca-600"
+                            checked={mp.incluye_festivos}
+                            disabled={!editable || mp.puesto.excluido}
+                            onChange={(e) => cambiarFestivos(mp, e.target.checked)}
+                          />
+                          <span className="text-xs">{mp.incluye_festivos ? "Sí" : "No"}</span>
+                        </label>
+                      </td>
                       <td>{mp.requiere_revision && <Insignia color="bg-amber-100 text-amber-800">Revisar</Insignia>}</td>
                     </tr>
                   ))}
@@ -145,7 +173,7 @@ export default function MatrizPage() {
           </div>
           {seleccion && (
             <Editor
-              key={seleccion.id}
+              key={`${seleccion.id}-${seleccion.incluye_festivos}`}
               mp={seleccion}
               editable={!!editable}
               onGuardado={(mp) => { setSeleccion(mp); cargarPuestos(); cargarPeriodos(); }}
@@ -270,9 +298,17 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
           <div><label className="label">Hombres</label><input className="input" value={hombres} onChange={(e) => setHombres(e.target.value)} /></div>
           <div><label className="label">Secuencia</label><input className="input" value={secuencia} onChange={(e) => setSecuencia(e.target.value)} /></div>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={festivos} onChange={(e) => setFestivos(e.target.checked)} /> Incluye festivos (el servicio se presta en festivos)
-        </label>
+        <div className="rounded-md border border-marca-100 bg-marca-50 p-3">
+          <p className="mb-2 text-sm font-semibold text-marca-900">¿El servicio vendido incluye festivos?</p>
+          <div className="flex gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="radio" name={`festivos-${mp.id}`} checked={festivos} onChange={() => setFestivos(true)} /> Sí, se cubre en festivos
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name={`festivos-${mp.id}`} checked={!festivos} onChange={() => setFestivos(false)} /> No, los festivos no se cubren
+            </label>
+          </div>
+        </div>
 
         <div>
           <p className="label">Cobertura vendida (franjas)</p>

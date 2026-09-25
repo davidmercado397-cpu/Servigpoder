@@ -1,9 +1,11 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.core.security import validar_password
 
 
 class LoginIn(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=60)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class PermisoOut(BaseModel):
@@ -28,8 +30,8 @@ class RolOut(RolResumen):
 
 class RolIn(BaseModel):
     nombre: str = Field(min_length=2, max_length=60)
-    descripcion: str = ""
-    permisos: list[str] = []
+    descripcion: str = Field(default="", max_length=200)
+    permisos: list[str] = Field(default=[], max_length=100)
 
 
 class UsuarioOut(BaseModel):
@@ -48,16 +50,26 @@ class SesionOut(UsuarioOut):
 
 
 class UsuarioCrear(BaseModel):
-    username: str = Field(min_length=3, max_length=60)
+    username: str = Field(min_length=3, max_length=60, pattern=r"^[A-Za-z0-9._-]+$")
     nombre: str = Field(min_length=2, max_length=120)
-    email: str | None = None
-    password: str = Field(min_length=8)
-    roles: list[int] = []
+    email: EmailStr | None = None
+    password: str
+    roles: list[int] = Field(default=[], max_length=20)
+
+    @field_validator("password")
+    @classmethod
+    def _pwd(cls, v: str) -> str:
+        return validar_password(v)
 
 
 class UsuarioEditar(BaseModel):
     nombre: str | None = Field(default=None, min_length=2, max_length=120)
-    email: str | None = None
-    password: str | None = Field(default=None, min_length=8)
+    email: EmailStr | None = None
+    password: str | None = None
     activo: bool | None = None
-    roles: list[int] | None = None
+    roles: list[int] | None = Field(default=None, max_length=20)
+
+    @field_validator("password")
+    @classmethod
+    def _pwd(cls, v: str | None) -> str | None:
+        return validar_password(v) if v else None

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError, type Permiso, type Rol } from "@/lib/api";
+import { api, mensajeError, type Permiso, type Rol } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Form = { id?: number; nombre: string; descripcion: string; permisos: string[] };
@@ -47,7 +47,7 @@ export default function RolesPage() {
       setForm(null);
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error al guardar");
+      setError(mensajeError(err));
     }
   }
 
@@ -57,7 +57,7 @@ export default function RolesPage() {
       await api(`/roles/${rol.id}`, { method: "DELETE" });
       cargar();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Error al eliminar");
+      alert(mensajeError(err));
     }
   }
 

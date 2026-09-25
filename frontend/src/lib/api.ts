@@ -1,43 +1,104 @@
+/** Formato estándar de respuesta del backend. */
+export type Envelope<T> = {
+  success: boolean;
+  data: T | null;
+  error: { code: string; message: string; details?: unknown[] | null } | null;
+  meta: { api_version: string; request_id: string; timestamp: string; extra?: Record<string, unknown> | null };
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code = "ERROR",
+    public requestId = "",
+    public details: unknown[] | null = null,
   ) {
     super(message);
   }
 }
 
-export async function api<T>(path: string, options: RequestInit & { json?: unknown } = {}): Promise<T> {
+type Opciones = RequestInit & { json?: unknown };
+
+export async function apiEnvelope<T>(path: string, options: Opciones = {}): Promise<Envelope<T>> {
   const { json, headers, ...rest } = options;
   const res = await fetch(`/api${path}`, {
     ...rest,
     credentials: "same-origin",
-    headers: { ...(json !== undefined ? { "Content-Type": "application/json" } : {}), ...headers },
+    headers: {
+      // Defensa CSRF: el backend exige esta cabecera en toda petición que modifica datos
+      "X-Requested-With": "fetch",
+      ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/login")) {
+  let body: Envelope<T> | null = null;
+  try {
+    body = (await res.json()) as Envelope<T>;
+  } catch {}
+
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/")) {
     window.location.href = "/login";
   }
-  if (!res.ok) {
-    let detalle = res.statusText;
-    try {
-      const body = await res.json();
-      detalle = typeof body.detail === "string" ? body.detail : "Datos inválidos";
-    } catch {}
-    throw new ApiError(res.status, detalle);
+  if (!res.ok || !body?.success) {
+    const e = body?.error;
+    throw new ApiError(res.status, e?.message ?? `Error ${res.status}`, e?.code, body?.meta?.request_id, e?.details ?? null);
   }
-  return (res.status === 204 ? undefined : await res.json()) as T;
+  return body;
 }
 
+export async function api<T>(path: string, options: Opciones = {}): Promise<T> {
+  return (await apiEnvelope<T>(path, options)).data as T;
+}
+
+export function subirArchivo<T>(path: string, archivo: File, campos: Record<string, string> = {}): Promise<T> {
+  const form = new FormData();
+  form.append("archivo", archivo);
+  Object.entries(campos).forEach(([k, v]) => form.append(k, v));
+  return api<T>(path, { method: "POST", body: form });
+}
+
+export function mensajeError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const detalles = (err.details ?? [])
+      .map((d) => (typeof d === "object" && d && "mensaje" in d ? `${(d as { campo?: string }).campo ?? ""}: ${(d as { mensaje: string }).mensaje}` : ""))
+      .filter(Boolean);
+    return [err.message, ...detalles].join(" · ");
+  }
+  return "No fue posible conectar con el servidor";
+}
+
+// ---- Tipos ----------------------------------------------------------------
+
 export type RolResumen = { id: number; nombre: string };
-export type Usuario = {
-  id: number;
-  username: string;
-  nombre: string;
-  email: string | null;
-  activo: boolean;
-  roles: RolResumen[];
-};
+export type Usuario = { id: number; username: string; nombre: string; email: string | null; activo: boolean; roles: RolResumen[] };
 export type Sesion = Usuario & { permisos: string[] };
 export type Rol = RolResumen & { descripcion: string; permisos: string[] };
 export type Permiso = { codigo: string; modulo: string; descripcion: string };
+
+export type Ubicacion = { id: number; codigo: string; nombre: string; nit: string | null; ciudad: string | null };
+export type Puesto = { id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion };
+export type Turno = { codigo: string; descripcion: string; clase: string; franjas: { inicio: string; fin: string }[] };
+export type Novedad = { codigo: string; descripcion: string; requiere_cubrimiento: boolean };
+export type PorAclarar = { codigo_siesa: string; descripcion: string; filas: number; motivo: string; puesto_sugerido: Puesto | null };
+
+export type Periodo = {
+  id: number; anio: number; mes: number; estado: string; proyectado_desde_id: number | null; creado_en: string;
+  puestos: number; hombres: string; requieren_revision: number; excluidos: number;
+};
+export type Franja = { id?: number; dias: number; inicio: string; fin: string; cantidad: number };
+export type Excepcion = { id: number; fecha: string; sin_servicio: boolean; inicio: string | null; fin: string | null; cantidad: number; observacion: string };
+export type MatrizPuesto = {
+  id: number; puesto: Puesto; hombres: string; secuencia: string; jornada: string; incluye_festivos: boolean;
+  requiere_revision: boolean; nota: string; franjas: Franja[]; excepciones: Excepcion[];
+};
+export type DiaRequerido = { fecha: string; festivo: string | null; franjas: { inicio: string; fin: string }[]; horas: number };
+export type Carga = {
+  id: number; archivo: string; compania: string; desde: string; hasta: string; anio: number; mes: number; cargado_en: string;
+  resumen: {
+    filas: number; empleados: number; puestos: number; dias_por_clase: Record<string, number>;
+    puestos_sin_equivalencia: { codigo: string; descripcion: string }[];
+    codigos_desconocidos: { codigo: string; veces: number }[];
+  };
+};

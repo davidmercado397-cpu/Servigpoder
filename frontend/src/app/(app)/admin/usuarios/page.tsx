@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type Rol, type Usuario } from "@/lib/api";
+import { api, mensajeError, type Rol, type Usuario } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Form = { id?: number; username: string; nombre: string; email: string; password: string; roles: number[]; activo: boolean };
@@ -47,7 +47,7 @@ export default function UsuariosPage() {
       setForm(null);
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error al guardar");
+      setError(mensajeError(err));
     }
   }
 
@@ -84,7 +84,7 @@ export default function UsuariosPage() {
           </div>
           <div>
             <label className="label">{form.id ? "Nueva contraseña (dejar vacío para no cambiar)" : "Contraseña"}</label>
-            <input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!form.id} minLength={8} autoComplete="new-password" />
+            <input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!form.id} minLength={10} autoComplete="new-password" />
           </div>
           <div className="md:col-span-2">
             <p className="label">Roles</p>

@@ -4,8 +4,8 @@ import { useSesion } from "@/lib/sesion";
 
 const FASES = [
   { fase: "F0", nombre: "Base: acceso, usuarios, roles y despliegue", estado: "Listo" },
-  { fase: "F1", nombre: "Maestros, matriz comercial y carga de programación SIESA", estado: "En construcción" },
-  { fase: "F2", nombre: "Motor de cobertura, tablero y vista de puesto", estado: "Pendiente" },
+  { fase: "F1", nombre: "Maestros, matriz comercial (con proyección) y carga de programación SIESA", estado: "Listo" },
+  { fase: "F2", nombre: "Motor de cobertura, tablero y vista de puesto", estado: "En construcción" },
   { fase: "F3", nombre: "Cubrimientos, bandeja de nómina y bolsas", estado: "Pendiente" },
   { fase: "F4", nombre: "Histórico, comparación de cargas y alertas", estado: "Pendiente" },
 ];

@@ -11,6 +11,7 @@ from app.core.db import SessionLocal
 from app.core.permisos import PERMISOS, ROLES_BASE
 from app.core.security import hash_password
 from app.models import Permiso, Rol, Usuario
+from app.services.catalogos import sembrar_novedades
 
 
 def seed(db: Session) -> None:
@@ -32,6 +33,8 @@ def seed(db: Session) -> None:
             # El administrador siempre conserva todos los permisos, incluidos los nuevos.
             rol.permisos = list(permisos.values())
     db.flush()
+
+    sembrar_novedades(db)
 
     if db.scalar(select(Usuario).limit(1)) is None:
         s = get_settings()

@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     login_max_intentos: int = 5  # fallidos por usuario antes de bloquear
     login_bloqueo_minutos: int = 15
 
+    # Asistente de IA (F6). La clave se lee de ANTHROPIC_API_KEY (la usa el SDK directamente).
+    anthropic_api_key: str = ""
+    asistente_modelo: str = "claude-opus-5"
+    # Aprobado por protección de datos: nombres y cédulas pueden enviarse a la API de Anthropic
+    asistente_datos_personales: bool = True
+    asistente_fallbacks: bool = True
+    asistente_max_diario: int = 100  # preguntas por usuario y día
+
     admin_username: str = "admin"
     admin_password: str = "admin"
     admin_nombre: str = "Administrador"

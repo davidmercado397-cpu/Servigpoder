@@ -43,3 +43,12 @@ body {
     @apply border-b border-slate-100 px-4 py-2;
   }
 }
+
+/* Texto del asistente (markdown) */
+.prose-asistente p { @apply my-1.5 leading-relaxed; }
+.prose-asistente ul { @apply my-1.5 list-disc pl-5; }
+.prose-asistente ol { @apply my-1.5 list-decimal pl-5; }
+.prose-asistente li { @apply my-0.5; }
+.prose-asistente strong { @apply font-semibold text-slate-900; }
+.prose-asistente code { @apply rounded bg-slate-100 px-1 text-[12px]; }
+.prose-asistente h1, .prose-asistente h2, .prose-asistente h3 { @apply mt-2 mb-1 font-semibold text-marca-900; }

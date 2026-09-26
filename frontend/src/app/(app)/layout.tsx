@@ -6,7 +6,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { Asistente } from "@/components/asistente";
 import { api } from "@/lib/api";
 import { SesionProvider, useSesion } from "@/lib/sesion";
 
@@ -213,6 +214,12 @@ function Shell({ children }: { children: React.ReactNode }) {
 
         <main className="flex-1 overflow-x-auto p-4 lg:p-8">{children}</main>
       </div>
+
+      {sesion.permisos.includes("asistente.usar") && (
+        <Suspense fallback={null}>
+          <Asistente />
+        </Suspense>
+      )}
     </div>
   );
 }

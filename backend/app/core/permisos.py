@@ -18,6 +18,7 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "analisis.ver": ("Análisis", "Ver tablero, cobertura, hallazgos y reportes"),
     "cubrimientos.aprobar": ("Nómina", "Aprobar o rechazar cubrimientos y turnos adicionales"),
     "parametros.gestionar": ("Administración", "Configurar umbrales de alertas y parámetros del sistema"),
+    "asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre los datos que su rol puede ver"),
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
@@ -31,10 +32,11 @@ ROLES_BASE: dict[str, tuple[str, list[str]]] = {
             "matriz.gestionar",
             "programacion.cargar",
             "analisis.ver",
+            "asistente.usar",
         ],
     ),
     "Nómina": (
         "Revisa y aprueba cubrimientos y turnos adicionales",
-        ["maestros.ver", "matriz.ver", "analisis.ver", "cubrimientos.aprobar"],
+        ["maestros.ver", "matriz.ver", "analisis.ver", "cubrimientos.aprobar", "asistente.usar"],
     ),
 }

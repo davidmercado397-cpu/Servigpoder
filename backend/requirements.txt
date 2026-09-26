@@ -14,3 +14,4 @@ polars==1.*
 holidays==0.*
 xlsxwriter==3.*
 tzdata
+anthropic>=1.8,<2

@@ -94,6 +94,17 @@ Cada carga de SIESA queda guardada con su análisis. Se puede comparar una carga
 mismo mes (turnos agregados, eliminados o cambiados y su impacto en la cobertura). Las alertas de
 Inicio se evalúan con los umbrales de Administración → Parámetros de alertas.
 
+## Asistente de IA (F6)
+
+`backend/app/services/asistente.py`: agente con el Tool Runner del SDK de Anthropic. Claude recibe la
+metodología en sus instrucciones y consulta los datos con **herramientas de solo lectura** (resumen de
+cobertura, lista y detalle de puestos, cubrimientos, comparación de cargas, alertas, estado de datos)
+que verifican los permisos del usuario que pregunta. Requiere `ANTHROPIC_API_KEY` (cuenta de API en
+console.anthropic.com, facturación por uso). Controles: permiso `asistente.usar`, rate limit, tope diario
+por usuario, auditoría de cada pregunta (pregunta recortada, herramientas y tokens) y conversación
+guardada solo en la pestaña del navegador. `ASISTENTE_DATOS_PERSONALES=false` reemplaza nombres y
+cédulas por seudónimos.
+
 ## Respaldos
 
 La base vive en el volumen `pgdata`. En Coolify, programe una tarea (Scheduled Task) sobre el servicio
@@ -179,3 +190,4 @@ Administrador, Programador y Nómina.
 - [x] F3 Cubrimientos, bandeja de nómina y bolsas
 - [x] F4 Histórico, comparación de cargas, alertas y parámetros
 - [ ] F5 Puesta en producción en Coolify (ver guía QA en `docs/QA.md`)
+- [x] F6 Asistente de IA (Claude) que explica de dónde salen los datos

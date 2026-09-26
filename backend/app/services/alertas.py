@@ -36,6 +36,8 @@ class Alerta:
     detalle: str
     enlace: str | None = None
     items: list[dict] = field(default_factory=list)
+    clave: str = ""  # identificador estable para contadores del menú
+    valor: int = 0
 
 
 def hoy() -> date:
@@ -96,7 +98,7 @@ def evaluar(db: Session, fecha: date | None = None) -> list[dict]:
         if sin_puesto or aproximadas:
             alertas.append(Alerta(ADVERTENCIA, "Puestos de SIESA por aclarar",
                                   f"{sin_puesto} códigos sin equivalencia y {aproximadas} por confirmar: sus turnos no entran a la cobertura.",
-                                  "/maestros"))
+                                  "/maestros", clave="por_aclarar", valor=sin_puesto + aproximadas))
 
     analisis = db.scalar(select(Analisis).where(Analisis.carga_id == carga.id)) if carga else None
     if carga and periodo and analisis is None:
@@ -143,7 +145,8 @@ def evaluar(db: Session, fecha: date | None = None) -> list[dict]:
                       if (c.cedula, c.puesto_id, c.fecha) not in decididos]
         if pendientes:
             alertas.append(Alerta(ADVERTENCIA, f"{len(pendientes)} cubrimientos pendientes de revisión de nómina",
-                                  f"{sum(float(c.horas) for c in pendientes):,.0f} horas sin justificación automática.", "/cubrimientos"))
+                                  f"{sum(float(c.horas) for c in pendientes):,.0f} horas sin justificación automática.", "/cubrimientos",
+                                  clave="cubrimientos_pendientes", valor=len(pendientes)))
 
     orden = {CRITICA: 0, ADVERTENCIA: 1, INFO: 2}
     return [asdict(a) for a in sorted(alertas, key=lambda a: orden[a.nivel])]

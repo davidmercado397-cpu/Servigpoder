@@ -31,6 +31,19 @@ def alertas(db: DbSession, _=Depends(require("analisis.ver"))):
     return ok(lista, fecha=svc_alertas.hoy().isoformat(), total=len(lista))
 
 
+@router.get("/menu/contadores", response_model=ApiResponse[dict])
+def contadores(db: DbSession, _=Depends(require("analisis.ver"))):
+    """Contadores para las insignias del menú lateral."""
+    lista = svc_alertas.evaluar(db)
+    valores = {a["clave"]: a["valor"] for a in lista if a["clave"]}
+    return ok({
+        "alertas": len(lista),
+        "alertas_criticas": sum(1 for a in lista if a["nivel"] == svc_alertas.CRITICA),
+        "cubrimientos_pendientes": valores.get("cubrimientos_pendientes", 0),
+        "por_aclarar": valores.get("por_aclarar", 0),
+    })
+
+
 @router.get("/historico", response_model=ApiResponse[list[dict]])
 def historico(db: DbSession, _=Depends(require("analisis.ver"))):
     return ok(svc_historico.historico(db))

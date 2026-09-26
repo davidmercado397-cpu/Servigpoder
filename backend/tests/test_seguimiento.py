@@ -60,3 +60,9 @@ def test_parametros(admin):
     assert admin.put("/api/parametros/umbral_cobertura", json={"valor": "90"}).json()["data"]["valor"] == "90"
     assert admin.put("/api/parametros/umbral_cobertura", json={"valor": "abc"}).status_code == 422
     assert admin.put("/api/parametros/no_existe", json={"valor": "1"}).status_code == 404
+
+
+def test_contadores_menu(admin):
+    _cargar(admin)
+    c = admin.get("/api/menu/contadores").json()["data"]
+    assert c["alertas"] >= 1 and c["cubrimientos_pendientes"] == 1

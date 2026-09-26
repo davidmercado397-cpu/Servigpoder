@@ -5,6 +5,7 @@ from app.api.deps import DbSession, require
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import ProgramacionCarga, Usuario
 from app.apps.capacidad.schemas.f1 import CargaOut
@@ -37,9 +38,9 @@ async def subir(request: Request, db: DbSession, archivo: UploadFile = File(...)
 
 
 @router.get("/cargas", response_model=ApiResponse[list[CargaOut]])
-def listar(db: DbSession, _=Depends(require("capacidad.analisis.ver"))):
-    cargas = list(db.scalars(select(ProgramacionCarga).order_by(ProgramacionCarga.id.desc()).limit(100)))
-    return ok(cargas, total=len(cargas))
+def listar(db: DbSession, p: Paginacion, _=Depends(require("capacidad.analisis.ver"))):
+    cargas, meta = paginar_consulta(db, select(ProgramacionCarga).order_by(ProgramacionCarga.id.desc()), p)
+    return ok(cargas, **meta)
 
 
 @router.get("/cargas/{carga_id}", response_model=ApiResponse[CargaOut])

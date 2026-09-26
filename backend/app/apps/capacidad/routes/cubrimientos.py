@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import Analisis, Cubrimiento, CubrimientoDecision, ProgramacionCarga, Puesto, Turno, Ubicacion, Usuario
 from app.apps.capacidad.models.cubrimientos import APROBADO, JUSTIFICADO, PENDIENTE, RECHAZADO
@@ -84,7 +85,7 @@ def _out(c: Cubrimiento, d: CubrimientoDecision | None, usuarios: dict[int, str]
 @router.get("/{analisis_id}", response_model=ApiResponse[list[CubrimientoOut]])
 def listar(analisis_id: int, db: DbSession, estado: str = Query("", max_length=20), motivo: str = Query("", max_length=20),
            q: str = Query("", max_length=100), solo_doble: bool = False, solo_exceso: bool = False,
-           _=Depends(require("capacidad.analisis.ver"))):
+           p: Paginacion = None, _=Depends(require("capacidad.analisis.ver"))):
     a, carga = _analisis(db, analisis_id)
     consulta = (select(Cubrimiento).join(Cubrimiento.puesto).join(Puesto.ubicacion)
                 .where(Cubrimiento.analisis_id == a.id).order_by(Cubrimiento.fecha, Puesto.codigo, Cubrimiento.nombre))
@@ -104,7 +105,9 @@ def listar(analisis_id: int, db: DbSession, estado: str = Query("", max_length=2
     conteo = {e: sum(1 for c in lista if c.estado == e) for e in (PENDIENTE, JUSTIFICADO, APROBADO, RECHAZADO)}
     if estado:
         lista = [c for c in lista if c.estado == estado]
-    return ok(lista, total=len(lista), por_estado=conteo, horas=float(sum(c.horas for c in lista)))
+    horas = float(sum(c.horas for c in lista))
+    pagina, meta = paginar_lista(lista, p)
+    return ok(pagina, **meta, por_estado=conteo, horas=horas)
 
 
 @router.post("/{analisis_id}/decidir", response_model=ApiResponse[dict], dependencies=[Depends(limitar("cubrimientos", 60, 60))])
@@ -135,10 +138,15 @@ def decidir(analisis_id: int, data: DecisionIn, request: Request, db: DbSession,
 
 
 @router.get("/{analisis_id}/bolsas", response_model=ApiResponse[list[PersonaBolsaOut]])
-def bolsas(analisis_id: int, db: DbSession, todas: bool = False, _=Depends(require("capacidad.analisis.ver"))):
+def bolsas(analisis_id: int, db: DbSession, p: Paginacion, todas: bool = False, q: str = Query("", max_length=100),
+           _=Depends(require("capacidad.analisis.ver"))):
     """Personas programadas en bolsas (disponibles, relevantes…) los días que no cubren ningún puesto."""
     a, carga = _analisis(db, analisis_id)
     franjas = {t.codigo: [(f.inicio, f.fin) for f in t.franjas] for t in db.scalars(select(Turno)) if t.clase == TRABAJO}
     lista = svc.personas_en_bolsa(db, carga.id, svc.horas_por_turno(franjas), todas)
-    return ok([PersonaBolsaOut(**p.__dict__) for p in lista], total=len(lista),
-              horas=round(sum(p.horas_sin_puesto for p in lista), 1))
+    if q.strip():
+        buscar = q.strip().lower()
+        lista = [x for x in lista if buscar in f"{x.nombre} {x.cedula}".lower()]
+    horas = round(sum(x.horas_sin_puesto for x in lista), 1)
+    pagina, meta = paginar_lista(lista, p)
+    return ok([PersonaBolsaOut(**x.__dict__) for x in pagina], **meta, horas=horas)

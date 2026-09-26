@@ -2,10 +2,11 @@ from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require
 from app.apps import APPS
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiResponse, ok
 from app.models import Auditoria, Usuario
 
@@ -41,7 +42,7 @@ class AuditoriaOut(BaseModel):
 
 @router.get("/auditoria", response_model=ApiResponse[list[AuditoriaOut]])
 def auditoria(db: DbSession, accion: str = Query("", max_length=60), usuario: str = Query("", max_length=60),
-              desde: date | None = None, hasta: date | None = None, limite: int = Query(200, ge=1, le=1000),
+              desde: date | None = None, hasta: date | None = None, p: Paginacion = None,
               _=Depends(require("auditoria.ver"))):
     """Bitácora de seguridad y cambios, la más reciente primero."""
     q = select(Auditoria, Usuario.username).outerjoin(Usuario, Usuario.id == Auditoria.usuario_id).order_by(Auditoria.id.desc())
@@ -53,6 +54,7 @@ def auditoria(db: DbSession, accion: str = Query("", max_length=60), usuario: st
         q = q.where(Auditoria.fecha >= datetime.combine(desde, time.min))
     if hasta:
         q = q.where(Auditoria.fecha < datetime.combine(hasta + timedelta(days=1), time.min))
-    filas = db.execute(q.limit(limite)).all()
+    total = db.scalar(q.with_only_columns(func.count(), maintain_column_froms=True).order_by(None)) or 0
+    filas = db.execute(q.limit(p.tamano).offset(p.offset)).all()
     return ok([AuditoriaOut(id=a.id, fecha=a.fecha, usuario=u or a.detalle.get("username"), accion=a.accion,
-                            detalle=a.detalle or {}, ip=a.ip, request_id=a.request_id) for a, u in filas], total=len(filas))
+                            detalle=a.detalle or {}, ip=a.ip, request_id=a.request_id) for a, u in filas], **p.meta(total))

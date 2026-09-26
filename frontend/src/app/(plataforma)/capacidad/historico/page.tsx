@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { num } from "@/components/estado";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
-import { api, mensajeError, type Comparacion, type Historico } from "@/lib/api";
+import { apiEnvelope, mensajeError, type Comparacion, type Historico } from "@/lib/api";
 import { nombreMes } from "@/lib/formato";
 
 const TIPO: Record<string, [string, string]> = {
@@ -20,9 +21,34 @@ export default function HistoricoPage() {
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
 
+  const [metaH, setMetaH] = useState<MetaPagina | null>(null);
+  const pagH = usePaginacion();
+  const [metaC, setMetaC] = useState<MetaPagina | null>(null);
+  const pagC = usePaginacion([sel.anterior, sel.actual, q]);
+
   useEffect(() => {
-    api<Historico[]>("/capacidad/historico").then(setFilas);
-  }, []);
+    apiEnvelope<Historico[]>(`/capacidad/historico?${pagH.query}`).then((r) => {
+      setFilas(r.data ?? []);
+      setMetaH(metaDe(r));
+    });
+  }, [pagH.query]);
+
+  // Los cambios de la comparación se piden paginados (y filtrados) al servidor
+  useEffect(() => {
+    if (!sel.anterior || !sel.actual) return;
+    const t = setTimeout(async () => {
+      try {
+        const r = await apiEnvelope<Comparacion>(
+          `/capacidad/programacion/comparar?anterior=${sel.anterior}&actual=${sel.actual}&q=${encodeURIComponent(q)}&${pagC.query}`);
+        setComp(r.data);
+        setMetaC(metaDe(r));
+      } catch (e) {
+        setComp(null);
+        setError(mensajeError(e));
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [sel.anterior, sel.actual, q, pagC.query]);
 
   const porMes = useMemo(() => {
     const m = new Map<string, Historico[]>();
@@ -30,18 +56,13 @@ export default function HistoricoPage() {
     return [...m.values()];
   }, [filas]);
 
-  async function comparar(anterior: number, actual: number) {
+  function comparar(anterior: number, actual: number) {
     setError("");
+    setQ("");
     setSel({ anterior, actual });
-    try {
-      setComp(await api<Comparacion>(`/capacidad/programacion/comparar?anterior=${anterior}&actual=${actual}`));
-    } catch (e) {
-      setComp(null);
-      setError(mensajeError(e));
-    }
   }
 
-  const cambios = (comp?.cambios ?? []).filter((c) => !q || `${c.nombre} ${c.cedula} ${c.puesto}`.toLowerCase().includes(q.toLowerCase()));
+  const cambios = comp?.cambios ?? [];
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -65,7 +86,7 @@ export default function HistoricoPage() {
             </thead>
             <tbody>
               {cargas.map((c, i) => {
-                const previa = cargas[i + 1];
+                const previa = c.anterior_id ? { carga_id: c.anterior_id } : null;
                 return (
                   <tr key={c.carga_id} className={sel.actual === c.carga_id ? "bg-marca-50" : ""}>
                     <td>#{c.carga_id}</td>
@@ -94,6 +115,7 @@ export default function HistoricoPage() {
         </section>
       ))}
       {filas.length === 0 && <Alerta tipo="info">Aún no hay cargas de programación.</Alerta>}
+      {filas.length > 0 && <Paginador className="tarjeta" meta={metaH} onPagina={pagH.setPagina} onTamano={pagH.setTamano} />}
 
       {comp && (
         <section className="space-y-3">
@@ -144,8 +166,8 @@ export default function HistoricoPage() {
                 ))}
               </tbody>
             </table>
+            <Paginador className="sticky bottom-0" meta={metaC} onPagina={pagC.setPagina} onTamano={pagC.setTamano} />
           </div>
-          {comp.truncado && <p className="text-xs text-slate-500">Se muestran los primeros 3.000 cambios.</p>}
         </section>
       )}
     </div>

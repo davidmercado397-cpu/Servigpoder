@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import Parametro, ProgramacionCarga, Usuario
 from app.apps.capacidad.services import alertas as svc_alertas
@@ -45,14 +46,18 @@ def contadores(db: DbSession, _=Depends(require("capacidad.analisis.ver"))):
 
 
 @router.get("/historico", response_model=ApiResponse[list[dict]])
-def historico(db: DbSession, _=Depends(require("capacidad.analisis.ver"))):
-    return ok(svc_historico.historico(db))
+def historico(db: DbSession, p: Paginacion, _=Depends(require("capacidad.analisis.ver"))):
+    lista, meta = paginar_lista(svc_historico.historico(db), p)
+    return ok(lista, **meta)
 
 
 @router.get("/programacion/comparar", response_model=ApiResponse[dict], dependencies=[Depends(limitar("comparar", 20, 60))])
-def comparar(db: DbSession, actual: int | None = Query(None), anterior: int | None = Query(None),
-             _=Depends(require("capacidad.analisis.ver"))):
-    """Compara dos cargas. Sin parámetros: la última carga contra la anterior del mismo mes."""
+def comparar(db: DbSession, p: Paginacion, actual: int | None = Query(None), anterior: int | None = Query(None),
+             q: str = Query("", max_length=100), _=Depends(require("capacidad.analisis.ver"))):
+    """Compara dos cargas. Sin parámetros: la última carga contra la anterior del mismo mes.
+
+    Los cambios celda a celda vienen paginados (y filtrables por persona o puesto con `q`).
+    """
     carga_b = db.get(ProgramacionCarga, actual) if actual else db.scalar(
         select(ProgramacionCarga).order_by(ProgramacionCarga.id.desc()).limit(1))
     if carga_b is None:
@@ -67,7 +72,13 @@ def comparar(db: DbSession, actual: int | None = Query(None), anterior: int | No
         raise ApiError(404, "No hay una carga anterior del mismo mes para comparar")
     if (carga_a.anio, carga_a.mes) != (carga_b.anio, carga_b.mes):
         raise ApiError(400, "Solo se comparan cargas del mismo mes")
-    return ok(svc_historico.comparar(db, carga_a, carga_b))
+    resultado = svc_historico.comparar(db, carga_a, carga_b)
+    cambios = resultado["cambios"]
+    if q.strip():
+        buscar = q.strip().lower()
+        cambios = [c for c in cambios if buscar in f"{c['nombre']} {c['cedula']} {c['puesto']}".lower()]
+    resultado["cambios"], meta = paginar_lista(cambios, p)
+    return ok(resultado, **meta)
 
 
 @router.get("/parametros", response_model=ApiResponse[list[ParametroOut]])

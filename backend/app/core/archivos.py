@@ -20,15 +20,23 @@ async def leer_xlsx(archivo: UploadFile) -> bytes:
     - firma real del archivo (ZIP) y estructura de libro de Excel
     - tamaño subido y tamaño descomprimido
     El XML interno se procesa con defusedxml (instalado: openpyxl lo usa automáticamente).
-    """
-    nombre = (archivo.filename or "").lower()
-    if not nombre.endswith(".xlsx"):
-        raise ApiError(415, "Solo se aceptan archivos de Excel .xlsx")
-    if archivo.content_type and archivo.content_type not in XLSX_MIME:
-        raise ApiError(415, "El tipo de archivo no corresponde a un Excel .xlsx")
 
-    limite = get_settings().max_upload_mb * 1024 * 1024
-    contenido = await archivo.read(limite + 1)
+    Los archivos NO se guardan en el servidor: el contenido se procesa en memoria y el archivo
+    temporal que crea el servidor web al recibir la subida se cierra (y se borra) aquí mismo,
+    se acepte o se rechace. En la base solo quedan los datos extraídos y el nombre del archivo.
+    """
+    try:
+        nombre = (archivo.filename or "").lower()
+        if not nombre.endswith(".xlsx"):
+            raise ApiError(415, "Solo se aceptan archivos de Excel .xlsx")
+        if archivo.content_type and archivo.content_type not in XLSX_MIME:
+            raise ApiError(415, "El tipo de archivo no corresponde a un Excel .xlsx")
+
+        limite = get_settings().max_upload_mb * 1024 * 1024
+        contenido = await archivo.read(limite + 1)
+    finally:
+        await archivo.close()
+
     if len(contenido) > limite:
         raise ApiError(413, f"El archivo supera el tamaño máximo de {get_settings().max_upload_mb} MB")
     if not contenido.startswith(b"PK\x03\x04"):

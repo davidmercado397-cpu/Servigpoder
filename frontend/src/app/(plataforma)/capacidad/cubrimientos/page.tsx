@@ -1,5 +1,6 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useMesAnalizado } from "@/components/selector-mes";
@@ -46,15 +47,19 @@ export default function CubrimientosPage() {
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([analisisId, estado, q, soloDoble, soloExceso]);
+
   const cargar = useCallback(async () => {
     if (!analisisId) return;
     const p = new URLSearchParams({ estado, q, solo_doble: String(soloDoble), solo_exceso: String(soloExceso) });
-    const r = await apiEnvelope<Cubrimiento[]>(`/capacidad/cubrimientos/${analisisId}?${p}`);
+    const r = await apiEnvelope<Cubrimiento[]>(`/capacidad/cubrimientos/${analisisId}?${p}&${pag.query}`);
     setLista(r.data ?? []);
+    setMeta(metaDe(r));
     setConteo((r.meta.extra?.por_estado as Record<string, number>) ?? {});
     setHoras(Number(r.meta.extra?.horas ?? 0));
     setSel(new Set());
-  }, [analisisId, estado, q, soloDoble, soloExceso]);
+  }, [analisisId, estado, q, soloDoble, soloExceso, pag.query]);
 
   useEffect(() => {
     const t = setTimeout(cargar, 250);
@@ -108,7 +113,7 @@ export default function CubrimientosPage() {
             <input className="input w-72" placeholder="Buscar persona, cédula, puesto…" value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={soloExceso} onChange={(e) => setSoloExceso(e.target.checked)} /> Solo los que generan exceso</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={soloDoble} onChange={(e) => setSoloDoble(e.target.checked)} /> Solo doble turno</label>
-            <span className="text-sm text-slate-500">{lista.length} turnos · {horas.toLocaleString("es-CO")} horas</span>
+            <span className="text-sm text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} turnos · {horas.toLocaleString("es-CO")} horas</span>
             {puedeAprobar && sel.size > 0 && (
               <div className="ml-auto flex gap-2">
                 <button className="btn-primario" onClick={() => decidir("aprobado", [...sel])}>Aprobar {sel.size}</button>
@@ -124,7 +129,7 @@ export default function CubrimientosPage() {
                 <tr>
                   {puedeAprobar && (
                     <th className="w-8">
-                      <input type="checkbox" checked={todos} onChange={() => setSel(todos ? new Set() : new Set(lista.map((c) => c.id)))} aria-label="Seleccionar todos" />
+                      <input type="checkbox" checked={todos} onChange={() => setSel(todos ? new Set() : new Set(lista.map((c) => c.id)))} aria-label="Seleccionar todos los de esta página" title="Seleccionar todos los de esta página" />
                     </th>
                   )}
                   <th>Fecha</th><th>Puesto</th><th>Persona</th><th>Turno</th><th>Motivo</th><th>Estado</th>{puedeAprobar && <th />}
@@ -169,6 +174,7 @@ export default function CubrimientosPage() {
                 ))}
               </tbody>
             </table>
+            <Paginador className="sticky bottom-0" meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
           </div>
           {mes && <p className="text-xs text-slate-500">Programación del {mes.desde} al {mes.hasta}.</p>}
         </>

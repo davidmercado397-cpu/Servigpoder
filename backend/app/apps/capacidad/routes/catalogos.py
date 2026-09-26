@@ -5,6 +5,7 @@ from app.api.deps import DbSession, require
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import Novedad, Turno, Usuario
 from app.apps.capacidad.schemas.f1 import NovedadIn, NovedadOut, TurnoOut
@@ -14,9 +15,9 @@ router = APIRouter(prefix="/catalogos", tags=["catálogos"])
 
 
 @router.get("/turnos", response_model=ApiResponse[list[TurnoOut]])
-def listar_turnos(db: DbSession, _=Depends(require("capacidad.maestros.ver"))):
-    turnos = list(db.scalars(select(Turno).order_by(Turno.codigo)))
-    return ok(turnos, total=len(turnos))
+def listar_turnos(db: DbSession, p: Paginacion, _=Depends(require("capacidad.maestros.ver"))):
+    turnos, meta = paginar_consulta(db, select(Turno).order_by(Turno.codigo), p)
+    return ok(turnos, **meta)
 
 
 @router.post("/turnos/importar", response_model=ApiResponse[dict],

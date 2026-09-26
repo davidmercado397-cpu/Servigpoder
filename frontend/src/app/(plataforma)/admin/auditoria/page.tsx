@@ -1,5 +1,6 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { useCallback, useEffect, useState } from "react";
 import { Titulo } from "@/components/ui";
 import { apiEnvelope } from "@/lib/api";
@@ -14,12 +15,15 @@ const COLOR: Record<string, string> = {
 export default function AuditoriaPage() {
   const [filtros, setFiltros] = useState({ accion: "", usuario: "", desde: "", hasta: "" });
   const [lista, setLista] = useState<Registro[]>([]);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([filtros]);
 
   const cargar = useCallback(async () => {
     const p = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v));
-    const r = await apiEnvelope<Registro[]>(`/plataforma/auditoria?${p}`);
+    const r = await apiEnvelope<Registro[]>(`/plataforma/auditoria?${p}&${pag.query}`);
     setLista(r.data ?? []);
-  }, [filtros]);
+    setMeta(metaDe(r));
+  }, [filtros, pag.query]);
 
   useEffect(() => {
     const t = setTimeout(cargar, 300);
@@ -34,7 +38,7 @@ export default function AuditoriaPage() {
         <div><label className="label">Usuario</label><input className="input w-40" value={filtros.usuario} onChange={(e) => setFiltros({ ...filtros, usuario: e.target.value })} /></div>
         <div><label className="label">Desde</label><input className="input" type="date" value={filtros.desde} onChange={(e) => setFiltros({ ...filtros, desde: e.target.value })} /></div>
         <div><label className="label">Hasta</label><input className="input" type="date" value={filtros.hasta} onChange={(e) => setFiltros({ ...filtros, hasta: e.target.value })} /></div>
-        <span className="text-sm text-slate-500">{lista.length} registros (máx. 200)</span>
+        <span className="text-sm text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} registros</span>
       </div>
       <div className="tarjeta max-h-[70vh] overflow-auto">
         <table className="tabla">
@@ -53,6 +57,7 @@ export default function AuditoriaPage() {
             ))}
           </tbody>
         </table>
+        <Paginador className="sticky bottom-0" meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );

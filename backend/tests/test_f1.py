@@ -170,3 +170,27 @@ def test_nomina_no_puede_editar_matriz(admin):
     assert admin.get(f"/api/capacidad/matriz/periodos/{pid}/puestos").status_code == 200
     assert admin.post(f"/api/capacidad/matriz/periodos/{pid}/proyectar", json={}).status_code == 403
     assert date(2026, 9, 1)  # noqa
+
+
+def test_archivo_subido_no_queda_en_el_servidor():
+    """El temporal de la subida se cierra (y se borra) tras leerlo, aunque se rechace."""
+    import asyncio
+    import tempfile
+
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from app.core.archivos import leer_xlsx
+    from app.core.respuestas import ApiError
+
+    for nombre, contenido, valido in (("ok.xlsx", xlsx(MATRIZ), True), ("malo.xlsx", b"no es excel", False)):
+        temporal = tempfile.SpooledTemporaryFile(max_size=10)  # fuerza escritura en disco
+        temporal.write(contenido)
+        temporal.seek(0)
+        subido = UploadFile(temporal, filename=nombre, headers=Headers({"content-type": "application/octet-stream"}))
+        try:
+            asyncio.run(leer_xlsx(subido))
+            assert valido
+        except ApiError:
+            assert not valido
+        assert temporal.closed

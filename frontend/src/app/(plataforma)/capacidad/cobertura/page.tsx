@@ -1,10 +1,11 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { EstadoInsignia, num } from "@/components/estado";
 import { Alerta, Titulo } from "@/components/ui";
-import { api, mensajeError, type Analisis, type MesDisponible, type PuestoAnalisis } from "@/lib/api";
+import { api, apiEnvelope, mensajeError, type Analisis, type MesDisponible, type PuestoAnalisis } from "@/lib/api";
 import { nombreMes } from "@/lib/formato";
 
 const FILTROS: [string, string][] = [
@@ -41,11 +42,16 @@ export default function CoberturaPage() {
     if (mes?.analisis_id) api<Analisis>(`/capacidad/analisis/${mes.analisis_id}`).then(setAnalisis);
   }, [mes]);
 
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([analisis?.id, filtro, ciudad, q, orden]);
+
   const cargarPuestos = useCallback(async () => {
     if (!analisis) return setPuestos([]);
     const p = new URLSearchParams({ estado: filtro, ciudad, q, orden });
-    setPuestos(await api<PuestoAnalisis[]>(`/capacidad/analisis/${analisis.id}/puestos?${p}`));
-  }, [analisis, filtro, ciudad, q, orden]);
+    const r = await apiEnvelope<PuestoAnalisis[]>(`/capacidad/analisis/${analisis.id}/puestos?${p}&${pag.query}`);
+    setPuestos(r.data ?? []);
+    setMeta(metaDe(r));
+  }, [analisis, filtro, ciudad, q, orden, pag.query]);
 
   useEffect(() => {
     const t = setTimeout(cargarPuestos, 250);
@@ -203,8 +209,9 @@ export default function CoberturaPage() {
                   })}
                 </tbody>
               </table>
+              <Paginador className="sticky bottom-0" meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
             </div>
-            <p className="text-xs text-slate-500">{puestos.length} puestos. Titulares: personas cuyo puesto principal del mes es este (donde más turnos tienen).</p>
+            <p className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos. Titulares: personas cuyo puesto principal del mes es este (donde más turnos tienen).</p>
           </section>
         </>
       )}

@@ -3,6 +3,7 @@ from sqlalchemy import func, or_, select
 
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import ProgramacionCarga, ProgramacionFila, Puesto, PuestoEquivalencia, Ubicacion, Usuario
 from app.apps.capacidad.schemas.f1 import EquivalenciaIn, EquivalenciaOut, PorAclarar, PuestoEditar, PuestoOut
@@ -12,13 +13,24 @@ router = APIRouter(prefix="/maestros", tags=["maestros"])
 
 
 @router.get("/puestos", response_model=ApiResponse[list[PuestoOut]])
-def listar_puestos(db: DbSession, q: str = Query("", max_length=100), _=Depends(require("capacidad.maestros.ver"))):
+def listar_puestos(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
+                   _=Depends(require("capacidad.maestros.ver"))):
+    puestos, meta = paginar_consulta(db, _consulta_puestos(q), p)
+    return ok(puestos, **meta)
+
+
+@router.get("/puestos/opciones", response_model=ApiResponse[list[PuestoOut]])
+def opciones_puestos(db: DbSession, q: str = Query("", max_length=100), _=Depends(require("capacidad.maestros.ver"))):
+    """Hasta 20 puestos que coinciden con el texto, para selectores con búsqueda."""
+    return ok(list(db.scalars(_consulta_puestos(q).limit(20)).unique()))
+
+
+def _consulta_puestos(q: str):
     consulta = select(Puesto).join(Puesto.ubicacion).order_by(Ubicacion.codigo, Puesto.codigo)
     if q.strip():
         patron = f"%{q.strip()}%"
         consulta = consulta.where(or_(Puesto.codigo.ilike(patron), Puesto.descripcion.ilike(patron), Ubicacion.nombre.ilike(patron)))
-    puestos = list(db.scalars(consulta))
-    return ok(puestos, total=len(puestos))
+    return consulta
 
 
 @router.patch("/puestos/{puesto_id}", response_model=ApiResponse[PuestoOut])
@@ -35,8 +47,9 @@ def editar_puesto(puesto_id: int, data: PuestoEditar, request: Request, db: DbSe
 
 
 @router.get("/equivalencias", response_model=ApiResponse[list[EquivalenciaOut]])
-def listar_equivalencias(db: DbSession, _=Depends(require("capacidad.maestros.ver"))):
-    return ok(list(db.scalars(select(PuestoEquivalencia).order_by(PuestoEquivalencia.codigo_siesa))))
+def listar_equivalencias(db: DbSession, p: Paginacion, _=Depends(require("capacidad.maestros.ver"))):
+    lista, meta = paginar_consulta(db, select(PuestoEquivalencia).order_by(PuestoEquivalencia.codigo_siesa), p)
+    return ok(lista, **meta)
 
 
 @router.put("/equivalencias", response_model=ApiResponse[EquivalenciaOut])
@@ -61,11 +74,11 @@ def guardar_equivalencia(data: EquivalenciaIn, request: Request, db: DbSession,
 
 
 @router.get("/por-aclarar", response_model=ApiResponse[list[PorAclarar]])
-def por_aclarar(db: DbSession, _=Depends(require("capacidad.maestros.ver"))):
+def por_aclarar(db: DbSession, p: Paginacion, _=Depends(require("capacidad.maestros.ver"))):
     """Puestos de la última carga de programación sin equivalencia o con equivalencia aproximada."""
     carga_id = db.scalar(select(func.max(ProgramacionCarga.id)))
     if carga_id is None:
-        return ok([], mensaje="Aún no hay programación cargada")
+        return ok([], **p.meta(0), mensaje="Aún no hay programación cargada")
     filas = db.execute(
         select(ProgramacionFila.puesto_siesa, func.max(ProgramacionFila.puesto_descripcion), func.count())
         .where(ProgramacionFila.carga_id == carga_id)
@@ -81,4 +94,5 @@ def por_aclarar(db: DbSession, _=Depends(require("capacidad.maestros.ver"))):
             resultado.append(PorAclarar(codigo_siesa=codigo, descripcion=descripcion or "", filas=n, motivo="aproximada",
                                         puesto_sugerido=PuestoOut.model_validate(eq.puesto)))
     resultado.sort(key=lambda r: (r.motivo, r.codigo_siesa))
-    return ok(resultado, carga_id=carga_id, total=len(resultado))
+    pagina, meta = paginar_lista(resultado, p)
+    return ok(pagina, **meta, carga_id=carga_id)

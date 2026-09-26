@@ -1,9 +1,11 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Insignia, Pestanas, SubirArchivo, Titulo } from "@/components/ui";
-import { api, mensajeError, subirArchivo, type Novedad, type PorAclarar, type Puesto, type Turno } from "@/lib/api";
+import { api, apiEnvelope, mensajeError, subirArchivo, type Novedad, type PorAclarar, type Puesto, type Turno } from "@/lib/api";
 import { hora } from "@/lib/formato";
+import { SelectorPuesto } from "@/components/selector-puesto";
 import { usePermiso } from "@/lib/sesion";
 
 type Tab = "aclarar" | "puestos" | "turnos" | "novedades";
@@ -29,16 +31,18 @@ export default function MaestrosPage() {
 function PorAclararTab() {
   const puedeEditar = usePermiso("capacidad.maestros.gestionar");
   const [items, setItems] = useState<PorAclarar[]>([]);
-  const [puestos, setPuestos] = useState<Puesto[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion();
 
   const cargar = useCallback(async () => {
-    setItems(await api<PorAclarar[]>("/capacidad/maestros/por-aclarar"));
-  }, []);
+    const r = await apiEnvelope<PorAclarar[]>(`/capacidad/maestros/por-aclarar?${pag.query}`);
+    setItems(r.data ?? []);
+    setMeta(metaDe(r));
+  }, [pag.query]);
 
   useEffect(() => {
     cargar();
-    api<Puesto[]>("/capacidad/maestros/puestos").then(setPuestos);
   }, [cargar]);
 
   async function asignar(codigo: string, puestoId: number) {
@@ -76,16 +80,7 @@ function PorAclararTab() {
                 <td>
                   {puedeEditar ? (
                     <div className="flex items-center gap-2">
-                      <select
-                        className="input max-w-xs"
-                        defaultValue={i.puesto_sugerido?.id ?? ""}
-                        onChange={(e) => e.target.value && asignar(i.codigo_siesa, Number(e.target.value))}
-                      >
-                        <option value="">Seleccionar…</option>
-                        {puestos.map((p) => (
-                          <option key={p.id} value={p.id}>{p.codigo} · {p.ubicacion.nombre} · {p.descripcion}</option>
-                        ))}
-                      </select>
+                      <SelectorPuesto onElegir={(p) => asignar(i.codigo_siesa, p.id)} />
                       {i.puesto_sugerido && (
                         <button className="btn-secundario whitespace-nowrap" onClick={() => asignar(i.codigo_siesa, i.puesto_sugerido!.id)}>
                           Confirmar {i.puesto_sugerido.codigo}
@@ -100,6 +95,7 @@ function PorAclararTab() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );
@@ -109,10 +105,14 @@ function PuestosTab() {
   const puedeEditar = usePermiso("capacidad.maestros.gestionar");
   const [q, setQ] = useState("");
   const [puestos, setPuestos] = useState<Puesto[]>([]);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([q]);
 
   const cargar = useCallback(async () => {
-    setPuestos(await api<Puesto[]>(`/capacidad/maestros/puestos?q=${encodeURIComponent(q)}`));
-  }, [q]);
+    const r = await apiEnvelope<Puesto[]>(`/capacidad/maestros/puestos?q=${encodeURIComponent(q)}&${pag.query}`);
+    setPuestos(r.data ?? []);
+    setMeta(metaDe(r));
+  }, [q, pag.query]);
 
   useEffect(() => {
     const t = setTimeout(cargar, 250);
@@ -146,8 +146,9 @@ function PuestosTab() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
-      <p className="text-xs text-slate-500">{puestos.length} puestos. Un puesto inactivo no se proyecta al mes siguiente; uno excluido no entra al control.</p>
+      <p className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos. Un puesto inactivo no se proyecta al mes siguiente; uno excluido no entra al control.</p>
     </div>
   );
 }
@@ -156,7 +157,13 @@ function TurnosTab() {
   const puedeEditar = usePermiso("capacidad.maestros.gestionar");
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
-  const cargar = useCallback(async () => setTurnos(await api<Turno[]>("/capacidad/catalogos/turnos")), []);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion();
+  const cargar = useCallback(async () => {
+    const r = await apiEnvelope<Turno[]>(`/capacidad/catalogos/turnos?${pag.query}`);
+    setTurnos(r.data ?? []);
+    setMeta(metaDe(r));
+  }, [pag.query]);
   useEffect(() => {
     cargar();
   }, [cargar]);
@@ -195,6 +202,7 @@ function TurnosTab() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );

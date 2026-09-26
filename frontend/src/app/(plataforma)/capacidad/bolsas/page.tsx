@@ -1,5 +1,6 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useMesAnalizado } from "@/components/selector-mes";
@@ -13,15 +14,22 @@ export default function BolsasPage() {
   const [horas, setHoras] = useState(0);
   const [q, setQ] = useState("");
 
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([analisisId, todas, q]);
+
   useEffect(() => {
     if (!analisisId) return;
-    apiEnvelope<PersonaBolsa[]>(`/capacidad/cubrimientos/${analisisId}/bolsas?todas=${todas}`).then((r) => {
-      setLista(r.data ?? []);
-      setHoras(Number(r.meta.extra?.horas ?? 0));
-    });
-  }, [analisisId, todas]);
+    const t = setTimeout(() => {
+      apiEnvelope<PersonaBolsa[]>(`/capacidad/cubrimientos/${analisisId}/bolsas?todas=${todas}&q=${encodeURIComponent(q)}&${pag.query}`).then((r) => {
+        setLista(r.data ?? []);
+        setMeta(metaDe(r));
+        setHoras(Number(r.meta.extra?.horas ?? 0));
+      });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [analisisId, todas, q, pag.query]);
 
-  const filtrada = lista.filter((p) => !q || `${p.nombre} ${p.cedula}`.toLowerCase().includes(q.toLowerCase()));
+  const filtrada = lista;
 
   return (
     <div className="max-w-6xl space-y-4">
@@ -38,7 +46,7 @@ export default function BolsasPage() {
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={todas} onChange={(e) => setTodas(e.target.checked)} /> Incluir todas las bolsas (07 incapacitados, 08 vacaciones)
             </label>
-            <span className="text-sm text-slate-500">{filtrada.length} personas · {horas.toLocaleString("es-CO")} horas sin puesto</span>
+            <span className="text-sm text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} personas · {horas.toLocaleString("es-CO")} horas sin puesto</span>
           </div>
           <div className="tarjeta max-h-[70vh] overflow-auto">
             <table className="tabla">
@@ -59,6 +67,7 @@ export default function BolsasPage() {
                 ))}
               </tbody>
             </table>
+            <Paginador className="sticky bottom-0" meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
           </div>
         </>
       )}

@@ -1,7 +1,8 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { useCallback, useEffect, useState } from "react";
-import { api, mensajeError, type Rol, type Usuario } from "@/lib/api";
+import { api, apiEnvelope, mensajeError, type Rol, type Usuario } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Form = { id?: number; username: string; nombre: string; email: string; password: string; roles: number[]; activo: boolean };
@@ -13,11 +14,16 @@ export default function UsuariosPage() {
   const [roles, setRoles] = useState<Rol[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([q]);
 
   const cargar = useCallback(async () => {
-    setUsuarios(await api<Usuario[]>("/usuarios"));
+    const r = await apiEnvelope<Usuario[]>(`/usuarios?q=${encodeURIComponent(q)}&${pag.query}`);
+    setUsuarios(r.data ?? []);
+    setMeta(metaDe(r));
     setRoles(await api<Rol[]>("/roles").catch(() => []));
-  }, []);
+  }, [q, pag.query]);
 
   useEffect(() => {
     cargar();
@@ -124,6 +130,7 @@ export default function UsuariosPage() {
         </form>
       )}
 
+      <input className="input max-w-sm" placeholder="Buscar por usuario o nombre…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="tarjeta overflow-hidden">
         <table className="tabla">
           <thead>
@@ -163,6 +170,7 @@ export default function UsuariosPage() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );

@@ -1,9 +1,10 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Insignia, SubirArchivo, Titulo } from "@/components/ui";
-import { api, mensajeError, subirArchivo, type Carga } from "@/lib/api";
+import { apiEnvelope, mensajeError, subirArchivo, type Carga } from "@/lib/api";
 import { nombreMes } from "@/lib/formato";
 import { usePermiso } from "@/lib/sesion";
 
@@ -20,11 +21,16 @@ export default function ProgramacionPage() {
   const [actual, setActual] = useState<Carga | null>(null);
   const [error, setError] = useState("");
 
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion();
+
   const cargar = useCallback(async () => {
-    const lista = await api<Carga[]>("/capacidad/programacion/cargas");
+    const r = await apiEnvelope<Carga[]>(`/capacidad/programacion/cargas?${pag.query}`);
+    const lista = r.data ?? [];
     setCargas(lista);
+    setMeta(metaDe(r));
     setActual((a) => a ?? lista[0] ?? null);
-  }, []);
+  }, [pag.query]);
 
   useEffect(() => {
     cargar();
@@ -78,6 +84,7 @@ export default function ProgramacionPage() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </section>
     </div>
   );

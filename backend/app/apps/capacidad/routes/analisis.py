@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import (
     Analisis, AnalisisDia, AnalisisPuesto, MatrizPeriodo, MatrizPuesto, ProgramacionCarga, ProgramacionDia,
@@ -101,7 +102,7 @@ def obtener(analisis_id: int, db: DbSession, _=Depends(require("capacidad.analis
 @router.get("/{analisis_id}/puestos", response_model=ApiResponse[list[PuestoAnalisisOut]])
 def puestos(analisis_id: int, db: DbSession, estado: str = Query("", max_length=20), ciudad: str = Query("", max_length=80),
             q: str = Query("", max_length=100), orden: str = Query("descubiertas", max_length=20),
-            limite: int = Query(1000, ge=1, le=5000), _=Depends(require("capacidad.analisis.ver"))):
+            p: Paginacion = None, _=Depends(require("capacidad.analisis.ver"))):
     _analisis(db, analisis_id)
     consulta = (select(AnalisisPuesto).join(AnalisisPuesto.puesto).join(Puesto.ubicacion)
                 .where(AnalisisPuesto.analisis_id == analisis_id))
@@ -120,9 +121,9 @@ def puestos(analisis_id: int, db: DbSession, estado: str = Query("", max_length=
     if q.strip():
         patron = f"%{q.strip()}%"
         consulta = consulta.where(Puesto.codigo.ilike(patron) | Puesto.descripcion.ilike(patron) | Ubicacion.nombre.ilike(patron))
-    consulta = consulta.order_by(ORDENES.get(orden, ORDENES["descubiertas"]), Puesto.codigo).limit(limite)
-    lista = list(db.scalars(consulta).unique())
-    return ok(lista, total=len(lista))
+    consulta = consulta.order_by(ORDENES.get(orden, ORDENES["descubiertas"]), Puesto.codigo)
+    lista, meta = paginar_consulta(db, consulta, p)
+    return ok(lista, **meta)
 
 
 @router.get("/{analisis_id}/puestos/{puesto_id}", response_model=ApiResponse[DetallePuesto])

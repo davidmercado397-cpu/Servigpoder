@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.apps.capacidad.models import Analisis, AnalisisPuesto, ProgramacionCarga, ProgramacionDia, ProgramacionFila, Puesto
 
 AGREGADO, ELIMINADO, CAMBIADO = "agregado", "eliminado", "cambiado"
-LIMITE_CAMBIOS = 3000
 
 
 @dataclass
@@ -66,8 +65,7 @@ def comparar(db: Session, anterior: ProgramacionCarga, actual: ProgramacionCarga
         "por_tipo": dict(conteo),
         "personas": len({c.cedula for c in cambios}),
         "puestos": len({c.puesto for c in cambios}),
-        "cambios": [c.__dict__ | {"fecha": c.fecha.isoformat()} for c in cambios[:LIMITE_CAMBIOS]],
-        "truncado": len(cambios) > LIMITE_CAMBIOS,
+        "cambios": [c.__dict__ | {"fecha": c.fecha.isoformat()} for c in cambios],
         "impacto": impacto(db, anterior, actual),
     }
 
@@ -112,4 +110,8 @@ def historico(db: Session) -> list[dict]:
             **{k: r.get(k) for k in ("cobertura_pct", "requeridas", "descubiertas", "exceso", "puestos", "puestos_hueco",
                                      "puestos_exceso", "puestos_mixto", "cubrimientos", "cubrimientos_pendiente")},
         })
+    # Carga anterior del mismo mes (la lista va de la más reciente a la más antigua)
+    for i, fila in enumerate(res):
+        siguiente = res[i + 1] if i + 1 < len(res) else None
+        fila["anterior_id"] = siguiente["carga_id"] if siguiente and (siguiente["anio"], siguiente["mes"]) == (fila["anio"], fila["mes"]) else None
     return res

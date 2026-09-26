@@ -8,6 +8,7 @@ from app.api.deps import DbSession, require
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import MatrizExcepcion, MatrizFranja, MatrizPeriodo, MatrizPuesto, Puesto, Ubicacion, Usuario
 from app.apps.capacidad.models.matriz import CERRADO
@@ -82,8 +83,8 @@ async def importar(request: Request, db: DbSession, archivo: UploadFile = File(.
 
 
 @router.get("/periodos/{periodo_id}/puestos", response_model=ApiResponse[list[MatrizPuestoOut]])
-def puestos_periodo(periodo_id: int, db: DbSession, solo_revision: bool = False, q: str = Query("", max_length=100),
-                    _=Depends(require("capacidad.matriz.ver"))):
+def puestos_periodo(periodo_id: int, db: DbSession, p: Paginacion, solo_revision: bool = False,
+                    q: str = Query("", max_length=100), _=Depends(require("capacidad.matriz.ver"))):
     _periodo(db, periodo_id)
     consulta = (select(MatrizPuesto).join(MatrizPuesto.puesto).join(Puesto.ubicacion)
                 .where(MatrizPuesto.periodo_id == periodo_id).order_by(Ubicacion.codigo, Puesto.codigo))
@@ -92,8 +93,8 @@ def puestos_periodo(periodo_id: int, db: DbSession, solo_revision: bool = False,
     if q.strip():
         patron = f"%{q.strip()}%"
         consulta = consulta.where(Puesto.codigo.ilike(patron) | Puesto.descripcion.ilike(patron) | Ubicacion.nombre.ilike(patron))
-    lista = list(db.scalars(consulta).unique())
-    return ok(lista, total=len(lista))
+    lista, meta = paginar_consulta(db, consulta, p)
+    return ok(lista, **meta)
 
 
 @router.patch("/puestos/{mp_id}", response_model=ApiResponse[MatrizPuestoOut], dependencies=escritura)

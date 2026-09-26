@@ -1,8 +1,9 @@
 "use client";
 
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
-import { api, mensajeError, subirArchivo, type DiaRequerido, type Excepcion, type Franja, type MatrizPuesto, type Periodo } from "@/lib/api";
+import { api, apiEnvelope, mensajeError, subirArchivo, type DiaRequerido, type Excepcion, type Franja, type MatrizPuesto, type Periodo } from "@/lib/api";
 import { DIAS, ESTADO_COLOR, MESES, franjaTexto, hora, nombreMes } from "@/lib/formato";
 import { usePermiso } from "@/lib/sesion";
 
@@ -26,11 +27,16 @@ export default function MatrizPage() {
     setPeriodoId((id) => id ?? lista[0]?.id ?? null);
   }, []);
 
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([periodoId, q, soloRevision]);
+
   const cargarPuestos = useCallback(async () => {
     if (!periodoId) return setPuestos([]);
     const params = new URLSearchParams({ q, solo_revision: String(soloRevision) });
-    setPuestos(await api<MatrizPuesto[]>(`/capacidad/matriz/periodos/${periodoId}/puestos?${params}`));
-  }, [periodoId, q, soloRevision]);
+    const r = await apiEnvelope<MatrizPuesto[]>(`/capacidad/matriz/periodos/${periodoId}/puestos?${params}&${pag.query}`);
+    setPuestos(r.data ?? []);
+    setMeta(metaDe(r));
+  }, [periodoId, q, soloRevision, pag.query]);
 
   useEffect(() => {
     cargarPeriodos();
@@ -129,7 +135,7 @@ export default function MatrizPage() {
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={soloRevision} onChange={(e) => setSoloRevision(e.target.checked)} /> Solo los que requieren revisión
               </label>
-              <span className="text-xs text-slate-500">{puestos.length} puestos</span>
+              <span className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos</span>
             </div>
             <div className="tarjeta max-h-[70vh] overflow-auto">
               <table className="tabla">
@@ -169,6 +175,7 @@ export default function MatrizPage() {
                   ))}
                 </tbody>
               </table>
+              <Paginador className="sticky bottom-0" meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
             </div>
           </div>
           {seleccion && (

@@ -142,12 +142,11 @@ export type AlertaT = { nivel: "critica" | "advertencia" | "info"; titulo: strin
 export type Historico = {
   carga_id: number; anio: number; mes: number; desde: string; hasta: string; cargado_en: string; archivo: string; analisis_id: number | null;
   cobertura_pct: number | null; requeridas: number | null; descubiertas: number | null; exceso: number | null; puestos: number | null;
-  puestos_hueco: number | null; puestos_exceso: number | null; puestos_mixto: number | null; cubrimientos: number | null; cubrimientos_pendiente: number | null;
+  puestos_hueco: number | null; puestos_exceso: number | null; puestos_mixto: number | null; cubrimientos: number | null; cubrimientos_pendiente: number | null; anterior_id: number | null;
 };
 export type Comparacion = {
   anterior: number; actual: number; desde: string; hasta: string; total: number; por_tipo: Record<string, number>; personas: number; puestos: number;
   cambios: { tipo: string; cedula: string; nombre: string; puesto: string; fecha: string; antes: string | null; despues: string | null }[];
-  truncado: boolean;
   impacto: { puesto_id: number; puesto: string; descubiertas_antes: number; descubiertas_despues: number; exceso_antes: number; exceso_despues: number }[];
 };
 export type Parametro = { clave: string; valor: string; descripcion: string };

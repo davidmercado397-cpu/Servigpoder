@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.core.security import hash_password
 from app.models import Rol, Usuario
@@ -22,9 +23,13 @@ def _roles(db: DbSession, ids: list[int]) -> list[Rol]:
 
 
 @router.get("", response_model=ApiResponse[list[UsuarioOut]])
-def listar(db: DbSession, _=Depends(require("usuarios.ver"))):
-    usuarios = list(db.scalars(select(Usuario).order_by(Usuario.nombre)))
-    return ok(usuarios, total=len(usuarios))
+def listar(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), _=Depends(require("usuarios.ver"))):
+    consulta = select(Usuario).order_by(Usuario.nombre)
+    if q.strip():
+        patron = f"%{q.strip()}%"
+        consulta = consulta.where(Usuario.username.ilike(patron) | Usuario.nombre.ilike(patron))
+    usuarios, meta = paginar_consulta(db, consulta, p)
+    return ok(usuarios, **meta)
 
 
 @router.post("", response_model=ApiResponse[UsuarioOut], status_code=201, dependencies=gestionar)

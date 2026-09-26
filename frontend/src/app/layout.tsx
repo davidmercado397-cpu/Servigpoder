@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Capacidad Operativa · Servigpoder",
-  description: "Control de capacidad operativa de la programación de personal",
+  title: "Plataforma Servigpoder",
+  description: "Desarrollos internos de Servigpoder",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

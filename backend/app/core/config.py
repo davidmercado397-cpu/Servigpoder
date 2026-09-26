@@ -15,9 +15,15 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://capacidad:capacidad@localhost:5432/capacidad"
     secret_key: str = "dev-secret-key-change-me"
-    access_token_minutes: int = 720
     cookie_secure: bool = False
     cookie_name: str = "sesion"
+
+    # Autenticación (OWASP ASVS V2/V3)
+    mfa_obligatorio: bool = True  # verificación en dos pasos con app Authenticator para todos
+    mfa_emisor: str = "Servigpoder"  # nombre que aparece en la app Authenticator
+    sesion_inactividad_min: int = 30  # la sesión se cierra tras este tiempo sin actividad
+    sesion_max_horas: int = 12  # duración máxima de una sesión aunque haya actividad
+    preauth_minutos: int = 5  # tiempo para completar el segundo paso tras la contraseña
 
     # Hosts aceptados en la cabecera Host (coma separada). "*" = cualquiera.
     allowed_hosts: str = "*"

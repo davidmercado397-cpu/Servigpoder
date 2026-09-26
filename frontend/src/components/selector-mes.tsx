@@ -11,7 +11,7 @@ export function useMesAnalizado() {
   const [cargado, setCargado] = useState(false);
 
   useEffect(() => {
-    api<MesDisponible[]>("/analisis/meses").then((m) => {
+    api<MesDisponible[]>("/capacidad/analisis/meses").then((m) => {
       setMeses(m);
       setMes(m.find((x) => x.analisis_id) ?? m[0] ?? null);
       setCargado(true);

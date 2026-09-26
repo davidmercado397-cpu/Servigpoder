@@ -1,42 +1,32 @@
-"""Catálogo de permisos del sistema.
+"""Permisos de la plataforma.
 
-Los permisos son fijos (los define el código); los roles y su asignación a
-usuarios son dinámicos y se administran desde la aplicación.
+Los permisos del núcleo están aquí; cada app aporta los suyos (con su prefijo) en su manifest.
+Los roles y su asignación a usuarios son dinámicos y se administran desde la aplicación.
 """
 
-PERMISOS: dict[str, tuple[str, str]] = {
+PERMISOS_NUCLEO: dict[str, tuple[str, str]] = {
     # código: (módulo, descripción)
     "usuarios.ver": ("Administración", "Ver usuarios"),
-    "usuarios.gestionar": ("Administración", "Crear, editar y desactivar usuarios"),
+    "usuarios.gestionar": ("Administración", "Crear, editar, desactivar usuarios y restablecer su acceso"),
     "roles.ver": ("Administración", "Ver roles y permisos"),
     "roles.gestionar": ("Administración", "Crear y editar roles y sus permisos"),
-    "maestros.ver": ("Maestros", "Ver ubicaciones, puestos, catálogos y equivalencias"),
-    "maestros.gestionar": ("Maestros", "Editar ubicaciones, puestos, catálogos y equivalencias"),
-    "matriz.ver": ("Matriz comercial", "Ver la matriz comercial"),
-    "matriz.gestionar": ("Matriz comercial", "Editar, proyectar y aprobar la matriz comercial"),
-    "programacion.cargar": ("Programación", "Cargar el Excel de programación de SIESA"),
-    "analisis.ver": ("Análisis", "Ver tablero, cobertura, hallazgos y reportes"),
-    "cubrimientos.aprobar": ("Nómina", "Aprobar o rechazar cubrimientos y turnos adicionales"),
-    "parametros.gestionar": ("Administración", "Configurar umbrales de alertas y parámetros del sistema"),
-    "asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre los datos que su rol puede ver"),
+    "auditoria.ver": ("Administración", "Consultar la bitácora de auditoría"),
 }
 
-ROLES_BASE: dict[str, tuple[str, list[str]]] = {
-    "Administrador": ("Acceso total al sistema", list(PERMISOS)),
-    "Programador": (
-        "Carga la programación, mantiene la matriz y analiza la cobertura",
-        [
-            "maestros.ver",
-            "maestros.gestionar",
-            "matriz.ver",
-            "matriz.gestionar",
-            "programacion.cargar",
-            "analisis.ver",
-            "asistente.usar",
-        ],
-    ),
-    "Nómina": (
-        "Revisa y aprueba cubrimientos y turnos adicionales",
-        ["maestros.ver", "matriz.ver", "analisis.ver", "cubrimientos.aprobar", "asistente.usar"],
-    ),
-}
+
+def todos_los_permisos() -> dict[str, tuple[str, str]]:
+    from app.apps import APPS
+
+    permisos = dict(PERMISOS_NUCLEO)
+    for app in APPS:
+        permisos.update({c: (f"{app.nombre} · {m}", d) for c, (m, d) in app.permisos.items()})
+    return permisos
+
+
+def roles_base() -> dict[str, tuple[str, list[str]]]:
+    from app.apps import APPS
+
+    roles: dict[str, tuple[str, list[str]]] = {"Administrador": ("Acceso total a la plataforma", list(todos_los_permisos()))}
+    for app in APPS:
+        roles.update(app.roles_base)
+    return roles

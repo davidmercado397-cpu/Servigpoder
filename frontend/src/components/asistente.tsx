@@ -45,7 +45,7 @@ export function Asistente() {
   }, [mensajes]);
 
   useEffect(() => {
-    if (abierto && !estado) api<Estado>("/asistente/estado").then(setEstado).catch(() => {});
+    if (abierto && !estado) api<Estado>("/capacidad/asistente/estado").then(setEstado).catch(() => {});
   }, [abierto, estado]);
 
   async function enviar(pregunta: string) {
@@ -57,7 +57,7 @@ export function Asistente() {
     setCargando(true);
     try {
       const qs = search.toString();
-      const r = await api<Respuesta>("/asistente", {
+      const r = await api<Respuesta>("/capacidad/asistente", {
         method: "POST",
         json: { mensajes: historial.slice(-12).map(({ rol, texto }) => ({ rol, texto })), pantalla: pathname + (qs ? `?${qs}` : "") },
       });

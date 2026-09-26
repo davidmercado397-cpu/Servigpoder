@@ -1,8 +1,14 @@
-# Capacidad Operativa · Servigpoder
+# Plataforma Servigpoder · Desarrollos internos
 
-Control de la capacidad operativa de la programación de personal que se exporta de SIESA Cloud.
-Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA) para detectar
-huecos de cobertura, sobreprogramación, cubrimientos sin justificar y personal en bolsas.
+Plataforma única para los desarrollos a la medida ("desarrollos Z") que complementan SIESA. Un solo
+repositorio, un solo despliegue, un portal de inicio y un núcleo común de acceso, usuarios, roles y
+auditoría. Cada usuario ve en el portal solo las apps para las que tiene permisos.
+
+**Apps actuales**
+
+| App | Ruta | Descripción |
+|---|---|---|
+| Capacidad Operativa | `/capacidad` | Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA): huecos de cobertura, sobreprogramación, cubrimientos, bolsas y alertas |
 
 ## Stack
 
@@ -17,11 +23,34 @@ huecos de cobertura, sobreprogramación, cubrimientos sin justificar y personal 
 ## Estructura
 
 ```
-backend/    API FastAPI, modelos, migraciones (alembic/), pruebas (tests/)
-frontend/   Aplicación Next.js (src/app)
-docker-compose.yml
-.env.example
+backend/
+  app/core/            núcleo: configuración, seguridad, sesión, middlewares, auditoría, contrato App
+  app/models/          modelos del núcleo (usuarios, roles, permisos, auditoría)
+  app/api/routes/      rutas del núcleo: /api/auth, /api/usuarios, /api/roles, /api/plataforma
+  app/apps/__init__.py registro de apps (APPS)
+  app/apps/capacidad/  app Capacidad Operativa: manifest.py, models/, routes/, services/, schemas/
+  alembic/versions/    migraciones (una sola historia para toda la plataforma)
+  tests/
+frontend/src/app/
+  login/                     ingreso en dos pasos
+  (plataforma)/page.tsx      portal de aplicaciones
+  (plataforma)/admin/        usuarios, roles, auditoría
+  (plataforma)/cuenta/       seguridad de mi cuenta
+  (plataforma)/capacidad/    app Capacidad Operativa (menú lateral propio)
 ```
+
+## Agregar un desarrollo nuevo
+
+1. **Backend**: crear `backend/app/apps/<codigo>/` con `manifest.py`:
+   `APP = App(codigo="<codigo>", nombre=..., descripcion=..., icono=..., color=..., permisos={"<codigo>.x.ver": (...)}, roles_base=..., router=..., seed=...)`.
+   Los permisos **deben** empezar por `<codigo>.`; las rutas quedan bajo `/api/<codigo>`.
+   Nombrar las tablas con el prefijo de la app para evitar choques.
+2. Registrar la app en `backend/app/apps/__init__.py` (`APPS`) e importar sus modelos en `alembic/env.py`.
+3. `alembic revision --autogenerate -m "<codigo>: tablas iniciales"` y revisar la migración.
+4. **Frontend**: crear `frontend/src/app/(plataforma)/<codigo>/` con su `layout.tsx` y páginas; agregar su ícono
+   en `ICONOS` del portal (`(plataforma)/page.tsx`).
+5. Asignar sus permisos a roles desde Administración → Roles y permisos: la app aparece en el portal
+   de quienes tengan al menos un permiso de ella.
 
 El navegador solo habla con el frontend; Next.js reenvía `/api/*` al backend, por lo que la cookie
 de sesión funciona sin configurar CORS. El backend no se publica hacia afuera.
@@ -33,7 +62,8 @@ cp .env.example .env      # y cambiar las claves
 docker compose up -d --build
 ```
 
-Abrir http://localhost:3000 e ingresar con `ADMIN_USERNAME` / `ADMIN_PASSWORD` del `.env`.
+Abrir http://localhost:3000 e ingresar con `ADMIN_USERNAME` / `ADMIN_PASSWORD` del `.env`; en el primer
+ingreso se configura la verificación en dos pasos con la app Authenticator.
 El administrador inicial solo se crea si la base de datos no tiene usuarios.
 
 Al arrancar, el backend aplica las migraciones (`alembic upgrade head`) y sincroniza permisos y roles base.
@@ -176,11 +206,26 @@ réplicas debe pasarse a Redis.
 **IP del cliente**: el backend solo confía en `X-Forwarded-For` de proxies de la red interna
 (`FORWARDED_ALLOW_IPS`), así un cliente no puede falsificar su IP.
 
+## Autenticación
+
+Usuario y contraseña **más verificación en dos pasos obligatoria** (TOTP con Microsoft/Google Authenticator):
+
+1. Usuario y contraseña → cookie temporal de pre-autenticación (5 min, solo para `/api/auth`). Nunca da acceso a la API.
+2. Código de 6 dígitos de la app (o un **código de recuperación** de un solo uso) → sesión.
+   En el primer ingreso el usuario escanea un QR y recibe 10 códigos de recuperación.
+3. Si la contraseña la asignó un administrador (temporal), la sesión solo permite cambiarla.
+
+Controles: bloqueo tras 5 contraseñas o códigos incorrectos (15 min), códigos TOTP no reutilizables,
+secreto TOTP cifrado en la base (Fernet), códigos de recuperación guardados como hash, sesión que vence
+tras **30 min de inactividad** y a las **12 h** en cualquier caso, cierre de las demás sesiones al cambiar
+la contraseña, y auditoría de cada ingreso (con el método de MFA usado). Si alguien pierde el celular y
+sus códigos, un administrador puede **restablecer su MFA** desde Administración → Usuarios.
+
 ## Permisos
 
-Los **permisos** están definidos en `backend/app/core/permisos.py`. Los **roles** y los **usuarios** se
-administran desde la aplicación (Administración → Roles y permisos / Usuarios). Roles base:
-Administrador, Programador y Nómina.
+Los permisos del núcleo están en `backend/app/core/permisos.py` y los de cada app en su `manifest.py`
+(con prefijo, p. ej. `capacidad.analisis.ver`). Los **roles** y los **usuarios** se administran desde
+Administración. Roles base: Administrador (todo), Programador y Nómina (Capacidad Operativa).
 
 ## Fases
 
@@ -191,3 +236,4 @@ Administrador, Programador y Nómina.
 - [x] F4 Histórico, comparación de cargas, alertas y parámetros
 - [ ] F5 Puesta en producción en Coolify (ver guía QA en `docs/QA.md`)
 - [x] F6 Asistente de IA (Claude) que explica de dónde salen los datos
+- [x] Plataforma multi-app (portal) y autenticación con MFA obligatoria

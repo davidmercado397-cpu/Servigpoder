@@ -38,6 +38,7 @@ def crear(data: UsuarioCrear, request: Request, db: DbSession, actual: Usuario =
         email=data.email,
         password_hash=hash_password(data.password),
         roles=_roles(db, data.roles),
+        debe_cambiar_password=True,  # contraseña temporal: la cambia en su primer ingreso
     )
     db.add(user)
     db.flush()
@@ -64,6 +65,7 @@ def editar(usuario_id: int, data: UsuarioEditar, request: Request, db: DbSession
         cambios.append("email")
     if data.password:
         user.password_hash = hash_password(data.password)
+        user.debe_cambiar_password = user.id != actual.id  # restablecida por un administrador: es temporal
         cambios.append("password")
     if data.activo is not None and data.activo != user.activo:
         user.activo = data.activo
@@ -75,5 +77,18 @@ def editar(usuario_id: int, data: UsuarioEditar, request: Request, db: DbSession
     if {"password", "activo", "roles"} & set(cambios) and user.id != actual.id:
         user.sesion_version += 1
     auditar(db, request, "usuario_editado", actual.id, usuario=user.username, campos=cambios)
+    db.commit()
+    return ok(user)
+
+
+@router.post("/{usuario_id}/restablecer-mfa", response_model=ApiResponse[UsuarioOut], dependencies=gestionar)
+def restablecer_mfa(usuario_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require("usuarios.gestionar"))):
+    """Para quien perdió el teléfono y sus códigos: en su próximo ingreso configurará la MFA de nuevo."""
+    user = db.get(Usuario, usuario_id)
+    if user is None:
+        raise ApiError(404, "Usuario no encontrado")
+    user.mfa_activo, user.mfa_secreto, user.mfa_ultimo_paso, user.mfa_recuperacion = False, None, None, []
+    user.sesion_version += 1  # cierra sus sesiones abiertas
+    auditar(db, request, "mfa_restablecida", actual.id, usuario=user.username)
     db.commit()
     return ok(user)

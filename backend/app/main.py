@@ -2,7 +2,8 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.routes import analisis, asistente, auth, catalogos, cubrimientos, maestros, matriz, programacion, roles, seguimiento, usuarios
+from app.api.routes import auth, plataforma, roles, usuarios
+from app.apps import APPS
 from app.core.config import API_VERSION, get_settings
 from app.core.middleware import registrar_middlewares
 from app.core.respuestas import ApiResponse, ok, registrar_manejadores
@@ -14,7 +15,7 @@ settings = get_settings()
 docs = not settings.produccion
 
 app = FastAPI(
-    title="Capacidad Operativa Servigpoder",
+    title="Plataforma Servigpoder",
     version="0.2.0",
     docs_url="/api/docs" if docs else None,
     redoc_url=None,
@@ -24,8 +25,12 @@ registrar_manejadores(app)
 registrar_middlewares(app)
 
 api = APIRouter(prefix="/api")
-for modulo in (auth, usuarios, roles, catalogos, maestros, matriz, programacion, analisis, cubrimientos, seguimiento, asistente):
+for modulo in (auth, usuarios, roles, plataforma):
     api.include_router(modulo.router)
+# Cada desarrollo publica sus rutas bajo /api/<codigo>
+for aplicacion in APPS:
+    if aplicacion.router:
+        api.include_router(aplicacion.router())
 
 
 @api.get("/health", response_model=ApiResponse[dict], tags=["sistema"])

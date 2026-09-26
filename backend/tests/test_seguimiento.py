@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.services import alertas
+from app.apps.capacidad.services import alertas
 from tests.conftest import archivo
 from tests.test_cubrimientos import D, ESCENARIO, N, _cargar, reporte
 
@@ -11,10 +11,10 @@ def test_comparar_cargas(admin):
     nuevo = [list(p) for p in ESCENARIO]
     nuevo[0] = ("1", "TITULAR A", "25", {15: D, 16: D, 17: "[VAC]", 18: N, 19: "Z", 20: "L"})
     nuevo.append(("7", "NUEVO Q", "25", {17: N}))
-    r = admin.post("/api/programacion/cargas", files=archivo(reporte([tuple(p) for p in nuevo])))
+    r = admin.post("/api/capacidad/programacion/cargas", files=archivo(reporte([tuple(p) for p in nuevo])))
     assert r.status_code == 201
 
-    c = admin.get("/api/programacion/comparar").json()["data"]
+    c = admin.get("/api/capacidad/programacion/comparar").json()["data"]
     assert c["por_tipo"] == {"cambiado": 1, "agregado": 1}
     cambio = next(x for x in c["cambios"] if x["tipo"] == "cambiado")
     assert (cambio["nombre"], cambio["fecha"], cambio["antes"], cambio["despues"]) == ("TITULAR A", "2026-09-17", N, "VAC")
@@ -24,13 +24,13 @@ def test_comparar_cargas(admin):
 
 def test_comparar_sin_carga_anterior(admin):
     _cargar(admin)
-    r = admin.get("/api/programacion/comparar")
+    r = admin.get("/api/capacidad/programacion/comparar")
     assert r.status_code == 404
 
 
 def test_historico(admin):
     _cargar(admin)
-    h = admin.get("/api/historico").json()["data"]
+    h = admin.get("/api/capacidad/historico").json()["data"]
     assert len(h) == 1 and h[0]["analisis_id"] and h[0]["cubrimientos"] == 3
 
 
@@ -44,7 +44,7 @@ def test_alertas(admin, db):
     assert any("borrador" in t for t in titulos)
     assert lista[0]["nivel"] == "critica"  # ordenadas por gravedad
     # Endpoint (con la fecha real) responde en formato estándar
-    assert admin.get("/api/alertas").json()["success"] is True
+    assert admin.get("/api/capacidad/alertas").json()["success"] is True
 
 
 def test_alerta_falta_proyectar(admin, db):
@@ -55,14 +55,14 @@ def test_alerta_falta_proyectar(admin, db):
 
 
 def test_parametros(admin):
-    ps = {p["clave"]: p for p in admin.get("/api/parametros").json()["data"]}
+    ps = {p["clave"]: p for p in admin.get("/api/capacidad/parametros").json()["data"]}
     assert ps["umbral_cobertura"]["valor"] == "95"
-    assert admin.put("/api/parametros/umbral_cobertura", json={"valor": "90"}).json()["data"]["valor"] == "90"
-    assert admin.put("/api/parametros/umbral_cobertura", json={"valor": "abc"}).status_code == 422
-    assert admin.put("/api/parametros/no_existe", json={"valor": "1"}).status_code == 404
+    assert admin.put("/api/capacidad/parametros/umbral_cobertura", json={"valor": "90"}).json()["data"]["valor"] == "90"
+    assert admin.put("/api/capacidad/parametros/umbral_cobertura", json={"valor": "abc"}).status_code == 422
+    assert admin.put("/api/capacidad/parametros/no_existe", json={"valor": "1"}).status_code == 404
 
 
 def test_contadores_menu(admin):
     _cargar(admin)
-    c = admin.get("/api/menu/contadores").json()["data"]
+    c = admin.get("/api/capacidad/menu/contadores").json()["data"]
     assert c["alertas"] >= 1 and c["cubrimientos_pendientes"] == 1

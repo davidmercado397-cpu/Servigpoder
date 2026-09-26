@@ -9,7 +9,16 @@ export function SesionProvider({ children }: { children: React.ReactNode }) {
   const [sesion, setSesion] = useState<Sesion | null>(null);
 
   useEffect(() => {
-    api<Sesion>("/auth/me").then(setSesion).catch(() => {});
+    api<Sesion>("/auth/me")
+      .then((s) => {
+        // Con contraseña temporal solo se permite la pantalla de cambio
+        if (s.debe_cambiar_password && !window.location.pathname.startsWith("/cuenta")) {
+          window.location.href = "/cuenta?forzado=1";
+          return;
+        }
+        setSesion(s);
+      })
+      .catch(() => {});
   }, []);
 
   if (!sesion) {

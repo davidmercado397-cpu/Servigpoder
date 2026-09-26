@@ -2,10 +2,10 @@ from datetime import time
 
 import pytest
 
-from app.services.codigos import canonico, compacto
-from app.services.jornada import L_S, L_V, SABADO, proponer
-from app.models.matriz import TODOS_LOS_DIAS
-from app.services.programacion import normalizar_codigo
+from app.apps.capacidad.services.codigos import canonico, compacto
+from app.apps.capacidad.services.jornada import L_S, L_V, SABADO, proponer
+from app.apps.capacidad.models.matriz import TODOS_LOS_DIAS
+from app.apps.capacidad.services.programacion import normalizar_codigo
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-from tests.conftest import archivo, xlsx
+from tests.conftest import entrar, archivo, xlsx
 from tests.test_f1 import HORARIOS, importar_matriz
 
 D, N = "06:00 - 18:00", "18:00 - 06:00"
@@ -38,8 +38,8 @@ ESCENARIO = [
 
 def _cargar(admin):
     importar_matriz(admin)
-    admin.post("/api/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
-    r = admin.post("/api/programacion/cargas", files=archivo(reporte(ESCENARIO)))
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
+    r = admin.post("/api/capacidad/programacion/cargas", files=archivo(reporte(ESCENARIO)))
     assert r.status_code == 201, r.text
     return r.json()["meta"]["extra"]["analisis_id"]
 
@@ -50,7 +50,7 @@ def _por_persona(lista):
 
 def test_cubrimientos_justificados_y_pendientes(admin):
     analisis_id = _cargar(admin)
-    r = admin.get(f"/api/cubrimientos/{analisis_id}").json()
+    r = admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()
     cubs = _por_persona(r["data"])
     assert set(cubs) == {("RELEVO R", "15"), ("RELEVO S", "19"), ("EXTRA Y", "15")}
 
@@ -66,30 +66,30 @@ def test_cubrimientos_justificados_y_pendientes(admin):
     assert float(ry["horas"]) == 12
     assert r["meta"]["extra"]["por_estado"]["pendiente"] == 1
 
-    resumen = admin.get(f"/api/analisis/{analisis_id}").json()["data"]["resumen"]
+    resumen = admin.get(f"/api/capacidad/analisis/{analisis_id}").json()["data"]["resumen"]
     assert resumen["cubrimientos"] == 3 and resumen["cubrimientos_pendiente"] == 1
 
 
 def test_nomina_aprueba_rechaza_y_se_conserva_al_recalcular(admin):
     analisis_id = _cargar(admin)
-    cubs = _por_persona(admin.get(f"/api/cubrimientos/{analisis_id}").json()["data"])
+    cubs = _por_persona(admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()["data"])
     y = cubs[("EXTRA Y", "15")]
 
     # Rechazar exige comentario
-    r = admin.post(f"/api/cubrimientos/{analisis_id}/decidir", json={"ids": [y["id"]], "estado": "rechazado"})
+    r = admin.post(f"/api/capacidad/cubrimientos/{analisis_id}/decidir", json={"ids": [y["id"]], "estado": "rechazado"})
     assert r.status_code == 400
-    r = admin.post(f"/api/cubrimientos/{analisis_id}/decidir",
+    r = admin.post(f"/api/capacidad/cubrimientos/{analisis_id}/decidir",
                    json={"ids": [y["id"]], "estado": "rechazado", "comentario": "No autorizado por operaciones"})
     assert r.status_code == 200
 
     # Al recalcular se genera un análisis nuevo y la decisión se mantiene
-    nuevo = admin.post("/api/analisis", json={"anio": 2026, "mes": 9}).json()["data"]["id"]
-    y2 = _por_persona(admin.get(f"/api/cubrimientos/{nuevo}").json()["data"])[("EXTRA Y", "15")]
+    nuevo = admin.post("/api/capacidad/analisis", json={"anio": 2026, "mes": 9}).json()["data"]["id"]
+    y2 = _por_persona(admin.get(f"/api/capacidad/cubrimientos/{nuevo}").json()["data"])[("EXTRA Y", "15")]
     assert (y2["estado"], y2["comentario"], y2["decidido_por"]) == ("rechazado", "No autorizado por operaciones", "Administrador")
 
     # Deshacer la decisión vuelve al estado automático
-    admin.post(f"/api/cubrimientos/{nuevo}/decidir", json={"ids": [y2["id"]], "estado": "pendiente"})
-    y3 = _por_persona(admin.get(f"/api/cubrimientos/{nuevo}").json()["data"])[("EXTRA Y", "15")]
+    admin.post(f"/api/capacidad/cubrimientos/{nuevo}/decidir", json={"ids": [y2["id"]], "estado": "pendiente"})
+    y3 = _por_persona(admin.get(f"/api/capacidad/cubrimientos/{nuevo}").json()["data"])[("EXTRA Y", "15")]
     assert y3["estado"] == "pendiente" and y3["comentario"] is None
 
 
@@ -98,17 +98,17 @@ def test_programador_no_puede_aprobar(admin):
     roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
     admin.post("/api/usuarios", json={"username": "prog", "nombre": "Programador", "password": "clave-segura-1",
                                       "roles": [roles["Programador"]]})
-    cid = admin.get(f"/api/cubrimientos/{analisis_id}").json()["data"][0]["id"]
+    cid = admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()["data"][0]["id"]
     admin.post("/api/auth/logout")
-    admin.post("/api/auth/login", json={"username": "prog", "password": "clave-segura-1"})
-    assert admin.get(f"/api/cubrimientos/{analisis_id}").status_code == 200
-    r = admin.post(f"/api/cubrimientos/{analisis_id}/decidir", json={"ids": [cid], "estado": "aprobado"})
+    entrar(admin, "prog", "clave-segura-1")
+    assert admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").status_code == 200
+    r = admin.post(f"/api/capacidad/cubrimientos/{analisis_id}/decidir", json={"ids": [cid], "estado": "aprobado"})
     assert r.status_code == 403
 
 
 def test_personas_en_bolsa(admin):
     analisis_id = _cargar(admin)
-    r = admin.get(f"/api/cubrimientos/{analisis_id}/bolsas").json()
+    r = admin.get(f"/api/capacidad/cubrimientos/{analisis_id}/bolsas").json()
     assert [p["nombre"] for p in r["data"]] == ["DISPONIBLE P"]
     p = r["data"][0]
     assert p["dias_sin_puesto"] == ["2026-09-15"] and p["horas_sin_puesto"] == 12 and p["dias_en_puesto"] == 1

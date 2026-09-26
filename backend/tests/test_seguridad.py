@@ -1,3 +1,4 @@
+from tests.conftest import entrar
 from app.models import Auditoria
 
 
@@ -41,9 +42,9 @@ def test_crear_usuario_y_permisos_por_rol(admin):
     assert r.json()["data"]["username"] == "nomina1"
 
     admin.post("/api/auth/logout")
-    assert admin.post("/api/auth/login", json={"username": "nomina1", "password": "clave-segura-1"}).status_code == 200
+    assert entrar(admin, "nomina1", "clave-segura-1").status_code == 200
     me = admin.get("/api/auth/me").json()["data"]
-    assert "cubrimientos.aprobar" in me["permisos"]
+    assert "capacidad.cubrimientos.aprobar" in me["permisos"]
     r = admin.get("/api/usuarios")
     assert r.status_code == 403 and r.json()["error"]["code"] == "SIN_PERMISO"
 
@@ -58,11 +59,11 @@ def test_politica_de_contrasena(admin):
 
 
 def test_rol_dinamico(admin):
-    r = admin.post("/api/roles", json={"nombre": "Consulta", "descripcion": "Solo lectura", "permisos": ["analisis.ver"]})
+    r = admin.post("/api/roles", json={"nombre": "Consulta", "descripcion": "Solo lectura", "permisos": ["capacidad.analisis.ver"]})
     assert r.status_code == 201
     rid = r.json()["data"]["id"]
-    r = admin.put(f"/api/roles/{rid}", json={"nombre": "Consulta", "permisos": ["analisis.ver", "matriz.ver"]})
-    assert r.json()["data"]["permisos"] == ["analisis.ver", "matriz.ver"]
+    r = admin.put(f"/api/roles/{rid}", json={"nombre": "Consulta", "permisos": ["capacidad.analisis.ver", "capacidad.matriz.ver"]})
+    assert r.json()["data"]["permisos"] == ["capacidad.analisis.ver", "capacidad.matriz.ver"]
     assert admin.post("/api/roles", json={"nombre": "XY", "permisos": ["no.existe"]}).status_code == 400
 
 
@@ -71,19 +72,19 @@ def test_usuario_desactivado_pierde_sesion(admin, client):
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "temp")
     admin.patch(f"/api/usuarios/{uid}", json={"activo": False})
     admin.post("/api/auth/logout")
-    assert admin.post("/api/auth/login", json={"username": "temp", "password": "clave-segura-1"}).status_code == 401
+    assert entrar(admin, "temp", "clave-segura-1").status_code == 401
 
 
 def test_cambio_de_contrasena_invalida_sesiones(admin, db):
     from fastapi.testclient import TestClient
 
     from app.main import app
-    from tests.conftest import CSRF
+    from tests.conftest import entrar, CSRF
 
     admin.post("/api/usuarios", json={"username": "prog", "nombre": "Programador", "password": "clave-segura-1"})
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "prog")
     with TestClient(app, headers=CSRF) as otro:
-        assert otro.post("/api/auth/login", json={"username": "prog", "password": "clave-segura-1"}).status_code == 200
+        assert entrar(otro, "prog", "clave-segura-1").status_code == 200
         assert otro.get("/api/auth/me").status_code == 200
         admin.patch(f"/api/usuarios/{uid}", json={"password": "otra-clave-2"})
         assert otro.get("/api/auth/me").status_code == 401
@@ -125,14 +126,14 @@ def test_cabeceras_de_seguridad(client):
 
 
 def test_cookie_segura(client):
-    r = client.post("/api/auth/login", json={"username": "admin", "password": "admin-clave-123"})
+    r = entrar(client, "admin", "admin-clave-123")
     cookie = r.headers["set-cookie"].lower()
-    assert "httponly" in cookie and "samesite=strict" in cookie
+    assert "sesion=" in cookie and "httponly" in cookie and "samesite=strict" in cookie
 
 
 def test_limite_de_tamano(admin):
     grande = b"PK\x03\x04" + b"0" * (16 * 1024 * 1024)
-    r = admin.post("/api/programacion/cargas", files={"archivo": ("x.xlsx", grande, "application/octet-stream")})
+    r = admin.post("/api/capacidad/programacion/cargas", files={"archivo": ("x.xlsx", grande, "application/octet-stream")})
     assert r.status_code == 413
 
 
@@ -140,3 +141,24 @@ def test_auditoria_registra_login(admin, db):
     with db() as s:
         acciones = [a.accion for a in s.query(Auditoria).all()]
     assert "login_exitoso" in acciones
+
+
+def test_portal_muestra_apps_segun_permisos(admin):
+    apps = admin.get("/api/plataforma/apps").json()["data"]
+    assert [a["codigo"] for a in apps] == ["capacidad"] and apps[0]["ruta"] == "/capacidad"
+    # Un usuario sin permisos de la app no la ve en el portal
+    admin.post("/api/roles", json={"nombre": "Solo admin usuarios", "permisos": ["usuarios.ver"]})
+    rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo admin usuarios")
+    admin.post("/api/usuarios", json={"username": "otro", "nombre": "Otro", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/auth/logout")
+    entrar(admin, "otro", "clave-segura-1")
+    assert admin.get("/api/plataforma/apps").json()["data"] == []
+    assert admin.get("/api/capacidad/analisis/meses").status_code == 403
+
+
+def test_permisos_de_app_con_prefijo():
+    from app.core.plataforma import App
+
+    import pytest
+    with pytest.raises(ValueError):
+        App(codigo="x", nombre="X", descripcion="", icono="", color="", permisos={"otro.ver": ("M", "D")})

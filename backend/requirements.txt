@@ -15,3 +15,6 @@ holidays==0.*
 xlsxwriter==3.*
 tzdata
 anthropic>=1.8,<2
+pyotp==2.*
+cryptography>=43
+qrcode==8.*

@@ -43,6 +43,8 @@ class UsuarioOut(BaseModel):
     email: str | None
     activo: bool
     roles: list[RolResumen]
+    mfa_activo: bool = False
+    debe_cambiar_password: bool = False
 
 
 class SesionOut(UsuarioOut):

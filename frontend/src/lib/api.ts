@@ -38,8 +38,13 @@ export async function apiEnvelope<T>(path: string, options: Opciones = {}): Prom
     body = (await res.json()) as Envelope<T>;
   } catch {}
 
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/")) {
-    window.location.href = "/login";
+  if (typeof window !== "undefined") {
+    // Sesión vencida (inactividad o duración máxima) o revocada
+    if (res.status === 401 && !path.startsWith("/auth/")) window.location.href = "/login?expirada=1";
+    // Contraseña temporal: solo puede cambiarla
+    if (res.status === 403 && body?.error?.code === "CAMBIO_PASSWORD_REQUERIDO" && !window.location.pathname.startsWith("/cuenta")) {
+      window.location.href = "/cuenta?forzado=1";
+    }
   }
   if (!res.ok || !body?.success) {
     const e = body?.error;
@@ -72,7 +77,10 @@ export function mensajeError(err: unknown): string {
 // ---- Tipos ----------------------------------------------------------------
 
 export type RolResumen = { id: number; nombre: string };
-export type Usuario = { id: number; username: string; nombre: string; email: string | null; activo: boolean; roles: RolResumen[] };
+export type Usuario = {
+  id: number; username: string; nombre: string; email: string | null; activo: boolean; roles: RolResumen[];
+  mfa_activo: boolean; debe_cambiar_password: boolean;
+};
 export type Sesion = Usuario & { permisos: string[] };
 export type Rol = RolResumen & { descripcion: string; permisos: string[] };
 export type Permiso = { codigo: string; modulo: string; descripcion: string };

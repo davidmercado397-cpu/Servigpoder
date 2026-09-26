@@ -1,6 +1,6 @@
 from datetime import date, time
 
-from app.services.cobertura import BLOQUES_DIA, Linea, evaluar
+from app.apps.capacidad.services.cobertura import BLOQUES_DIA, Linea, evaluar
 from tests.conftest import archivo, xlsx
 from tests.test_f1 import HORARIOS, importar_matriz, programacion
 
@@ -64,8 +64,8 @@ def test_turno_partido():
 
 def _preparar(admin, dias):
     importar_matriz(admin)
-    admin.post("/api/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
-    return admin.post("/api/programacion/cargas", files=archivo(xlsx(programacion(dias))))
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
+    return admin.post("/api/capacidad/programacion/cargas", files=archivo(xlsx(programacion(dias))))
 
 
 def test_analisis_automatico_al_cargar(admin):
@@ -75,16 +75,16 @@ def test_analisis_automatico_al_cargar(admin):
     analisis_id = r.json()["meta"]["extra"]["analisis_id"]
     assert analisis_id
 
-    a = admin.get(f"/api/analisis/{analisis_id}").json()["data"]
+    a = admin.get(f"/api/capacidad/analisis/{analisis_id}").json()["data"]
     assert a["desactualizado"] is False
     assert a["resumen"]["cobertura_pct"] is not None
 
-    lista = admin.get(f"/api/analisis/{analisis_id}/puestos?q=25").json()["data"]
+    lista = admin.get(f"/api/capacidad/analisis/{analisis_id}/puestos?q=25").json()["data"]
     p25 = next(p for p in lista if p["puesto"]["codigo"] == "25")
     assert p25["estado"] == "hueco" and p25["dias_hueco"] >= 2
 
     puesto_id = p25["puesto"]["id"]
-    det = admin.get(f"/api/analisis/{analisis_id}/puestos/{puesto_id}").json()["data"]
+    det = admin.get(f"/api/capacidad/analisis/{analisis_id}/puestos/{puesto_id}").json()["data"]
     dia15 = next(d for d in det["dias"] if d["fecha"] == "2026-09-15")
     assert dia15["estado"] == "hueco" and float(dia15["horas_descubiertas"]) == 12
     assert len(det["franjas"]) == 2 and det["personas"]
@@ -93,27 +93,27 @@ def test_analisis_automatico_al_cargar(admin):
 def test_analisis_desactualizado_al_editar_matriz(admin):
     r = _preparar(admin, {"25": ["06:00 - 18:00"]})
     analisis_id = r.json()["meta"]["extra"]["analisis_id"]
-    periodo_id = admin.get("/api/matriz/periodos").json()["data"][0]["id"]
-    mp = next(p for p in admin.get(f"/api/matriz/periodos/{periodo_id}/puestos").json()["data"] if p["puesto"]["codigo"] == "25")
-    admin.patch(f"/api/matriz/puestos/{mp['id']}", json={"incluye_festivos": False})
-    a = admin.get(f"/api/analisis/{analisis_id}").json()["data"]
+    periodo_id = admin.get("/api/capacidad/matriz/periodos").json()["data"][0]["id"]
+    mp = next(p for p in admin.get(f"/api/capacidad/matriz/periodos/{periodo_id}/puestos").json()["data"] if p["puesto"]["codigo"] == "25")
+    admin.patch(f"/api/capacidad/matriz/puestos/{mp['id']}", json={"incluye_festivos": False})
+    a = admin.get(f"/api/capacidad/analisis/{analisis_id}").json()["data"]
     assert a["desactualizado"] is True and "matriz" in a["motivo_desactualizado"]
 
-    nuevo = admin.post("/api/analisis", json={"anio": 2026, "mes": 9}).json()["data"]
+    nuevo = admin.post("/api/capacidad/analisis", json={"anio": 2026, "mes": 9}).json()["data"]
     assert nuevo["desactualizado"] is False
 
 
 def test_sin_matriz_no_analiza(admin):
-    admin.post("/api/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
-    r = admin.post("/api/programacion/cargas", files=archivo(xlsx(programacion({"25": ["Z"]}))))
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
+    r = admin.post("/api/capacidad/programacion/cargas", files=archivo(xlsx(programacion({"25": ["Z"]}))))
     assert r.status_code == 201 and r.json()["meta"]["extra"]["analisis_id"] is None
-    r = admin.post("/api/analisis", json={"anio": 2026, "mes": 9})
+    r = admin.post("/api/capacidad/analisis", json={"anio": 2026, "mes": 9})
     assert r.status_code == 409 and "matriz" in r.json()["error"]["message"]
 
 
 def test_exportar_excel(admin):
     analisis_id = _preparar(admin, {"25": ["06:00 - 18:00"]}).json()["meta"]["extra"]["analisis_id"]
-    r = admin.get(f"/api/analisis/{analisis_id}/exportar")
+    r = admin.get(f"/api/capacidad/analisis/{analisis_id}/exportar")
     assert r.status_code == 200
     assert r.content[:4] == b"PK\x03\x04"
     assert "attachment" in r.headers["content-disposition"]

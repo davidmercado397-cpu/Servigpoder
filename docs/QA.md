@@ -24,6 +24,17 @@ docker compose up -d --build
 - [ ] En los logs del backend aparecen las migraciones `0001` a `0004` y "Seed completado" (`docker compose logs backend`).
 - [ ] http://localhost:3000 redirige a `/login`.
 
+### Ingreso y portal (plataforma)
+- [ ] Usuario y contraseña correctos llevan al paso 2; **no** hay acceso sin el código.
+- [ ] Primer ingreso: se muestra el QR; escanearlo con Microsoft/Google Authenticator; el código activa la MFA.
+- [ ] Se muestran **10 códigos de recuperación** una sola vez; "Copiar códigos" funciona.
+- [ ] Ingresos siguientes piden solo el código de 6 dígitos; un código incorrecto se rechaza.
+- [ ] "No tengo mi teléfono": un código de recuperación permite entrar **una sola vez**.
+- [ ] 5 códigos incorrectos seguidos bloquean temporalmente.
+- [ ] El portal (`/`) muestra la tarjeta **Capacidad Operativa** y, para el administrador, Administración (Usuarios, Roles, Auditoría).
+- [ ] Un usuario sin permisos de Capacidad no ve la tarjeta y la API le responde 403.
+- [ ] 30 minutos sin actividad: la siguiente acción lleva a `/login` con el aviso "Su sesión se cerró por inactividad".
+
 ---
 
 ## F1. Maestros, matriz comercial y carga de programación
@@ -32,18 +43,18 @@ docker compose up -d --build
 - [ ] Ingresar con `admin` y `ADMIN_PASSWORD` del `.env`: lleva a Inicio.
 - [ ] Una contraseña errada muestra "Usuario o contraseña incorrectos" (no dice si el usuario existe).
 
-### Horarios de SIESA (Maestros → Horarios SIESA)
+### Horarios de SIESA (Capacidad → Maestros → Horarios SIESA)
 - [ ] Cargar `GenConsultaMaestroGrid`: **64 horarios cargados**.
 - [ ] `T.P.` y `TURNO PARTIDO` muestran **dos franjas** (05:30–12:00 y 14:30–20:30).
 - [ ] `Z` y `L` aparecen como **Descanso**.
 - [ ] `08:00 - 22:00*` muestra 08:00–20:00 (se toma la entrada y salida registradas).
 - [ ] Subir un archivo que no es Excel (un .pdf renombrado a .xlsx) es rechazado con un mensaje claro.
 
-### Novedades (Maestros → Novedades)
+### Novedades (Capacidad → Maestros → Novedades)
 - [ ] Existen VAC, PRV, LNR, LRM, LIC, LUT, IEG, AT, AUS, IND, IND NOCHE, PSA y PSB, todas con "Requiere cubrimiento".
 - [ ] Se puede agregar una novedad nueva y desmarcar "Requiere cubrimiento".
 
-### Matriz comercial (Configuración → Matriz comercial)
+### Matriz comercial (Capacidad → Configuración → Matriz comercial)
 - [ ] "Importar matriz desde Excel" con mes **Septiembre 2026**: aparece el aviso *"198-3: Hombres '15,' interpretado como 1,5"*.
 - [ ] Resumen: **738 puestos**, **57 por revisar** y **22 excluidos**.
 - [ ] Los repetidos quedan separados: 86 / 86-1, 95 / 95-1, 99 / 99-1 / 99-2 y 135 / 135-1.
@@ -62,12 +73,12 @@ docker compose up -d --build
 - [ ] Un puesto marcado **inactivo** en Maestros no se proyecta al mes siguiente.
 - [ ] "Cerrar mes" pide confirmación. Después, la matriz ya no se puede editar (campos y casillas bloqueados).
 
-### Programación SIESA (Operación → Programación SIESA)
+### Programación SIESA (Capacidad → Operación → Programación SIESA)
 - [ ] Subir `ReporteAsignacionResumido`: **2.181 filas**, **1.870 empleados**, **724 puestos**.
 - [ ] Clases: turnos 19.639 · descansos 9.030 · novedades 1.358 · **ninguno sin interpretar**.
 - [ ] Aviso de puestos sin equivalencia, con enlace a Maestros.
 
-### Puestos por aclarar (Maestros → Puestos por aclarar)
+### Puestos por aclarar (Capacidad → Maestros → Puestos por aclarar)
 - [ ] **23 "Sin equivalencia"** y **18 "Verificar"** (SENA `283-15-x` → `283-15x`).
 - [ ] "Confirmar 283-151" (u otro) pasa la fila a resuelta.
 - [ ] Asignar un puesto con el selector la quita de la lista.
@@ -77,7 +88,7 @@ docker compose up -d --build
 
 ## F2. Motor de cobertura, tablero y vista por puesto
 
-### Tablero (Operación → Cobertura)
+### Tablero (Capacidad → Operación → Cobertura)
 - [ ] Al subir la programación el análisis se calcula solo. Si no hay matriz del mes, muestra el aviso.
 - [ ] Cobertura **≈ 89,6 %**, horas descubiertas ≈ 24.121 y en exceso ≈ 8.823 (antes de aclarar puestos).
 - [ ] Los indicadores filtran la tabla al hacer clic (con hueco, con exceso, titulares ≠ hombres, vendidos sin programar).
@@ -98,7 +109,7 @@ docker compose up -d --build
 
 ## F3. Cubrimientos, bandeja de nómina y bolsas
 
-### Cubrimientos (Operación → Cubrimientos)
+### Cubrimientos (Capacidad → Operación → Cubrimientos)
 - [ ] Total **382**: **264 justificados** y **118 pendientes**.
 - [ ] Un justificado por novedad dice *"Cubre novedad de NOMBRE (VAC/LNR/IND…)"*.
 - [ ] Un justificado por descanso dice *"Relevo del descanso de NOMBRE (Z/L)"*.
@@ -110,7 +121,7 @@ docker compose up -d --build
 - [ ] **Recalcular la cobertura NO borra** las aprobaciones ni los rechazos.
 - [ ] Con el usuario **Programador**: ve los cubrimientos pero **no** tiene botones de aprobar o rechazar (y la API responde 403).
 
-### Personas en bolsa (Operación → Personas en bolsa)
+### Personas en bolsa (Capacidad → Operación → Personas en bolsa)
 - [ ] Por defecto solo bolsas **05 y 06**: **≈ 85 personas**, ≈ 3.954 horas.
 - [ ] "Incluir todas las bolsas" agrega 07 incapacitados y 08 vacaciones (≈ 105 personas).
 - [ ] Una persona que el mismo día está en bolsa y cubre un puesto **no** cuenta ese día.
@@ -119,7 +130,7 @@ docker compose up -d --build
 
 ## F4. Histórico, novedades de programación, alertas y parámetros
 
-### Histórico (Operación → Histórico y novedades)
+### Histórico (Capacidad → Operación → Histórico y novedades)
 - [ ] Cada carga aparece agrupada por mes con su cobertura.
 - [ ] Modifique algunas celdas del Excel de SIESA (por ejemplo cambie un turno por `[VAC]`) y súbalo de nuevo como otra carga del mismo mes.
 - [ ] "Comparar con #N" lista los cambios **agregados / eliminados / cambiados** con antes y después.
@@ -142,7 +153,11 @@ docker compose up -d --build
 ## F5. Seguridad, usuarios y puesta en producción
 
 ### Usuarios y roles
-- [ ] Crear los usuarios Programador y Nómina desde Administración → Usuarios.
+- [ ] Crear los usuarios Programador y Nómina desde Administración → Usuarios (la contraseña asignada es **temporal**).
+- [ ] En su primer ingreso configuran MFA y quedan obligados a **cambiar la contraseña** (no pueden ver nada más).
+- [ ] "Restablecer MFA" de un usuario cierra su sesión y le pide configurar la MFA de nuevo.
+- [ ] Seguridad de mi cuenta: cambiar contraseña (cierra otras sesiones) y generar códigos de recuperación nuevos.
+- [ ] Administración → Auditoría muestra ingresos (con método MFA), fallidos, bloqueos y cambios, con filtros.
 - [ ] Una contraseña de menos de 10 caracteres, o sin números, es rechazada.
 - [ ] Cada rol solo ve su menú. Por URL directa a una pantalla sin permiso, los datos no cargan.
 - [ ] Crear un rol nuevo ("Consulta" solo con "Ver tablero") y asignarlo: solo ve lo permitido.

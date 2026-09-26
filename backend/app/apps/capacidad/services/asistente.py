@@ -4,7 +4,7 @@ Seguridad:
 - Las herramientas son de SOLO LECTURA y reutilizan los servicios existentes; nunca SQL libre.
 - Cada herramienta verifica el permiso del usuario que pregunta: el asistente solo ve lo que
   su rol puede ver.
-- La clave de la API vive en el servidor (ANTHROPIC_API_KEY); el navegador nunca la ve.
+- La clave de la API vive en el servidor (IA_API_KEY); el navegador nunca la ve.
 """
 
 import json
@@ -13,12 +13,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
-import anthropic
-from anthropic import beta_tool
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core import ia
 from app.core.config import get_settings
+from app.core.ia import herramienta
 from app.apps.capacidad.models import (
     Analisis, AnalisisDia, AnalisisPuesto, Cubrimiento, CubrimientoDecision, MatrizPeriodo, MatrizPuesto,
     ProgramacionCarga, ProgramacionFila, Puesto, Ubicacion, Usuario,
@@ -31,7 +31,6 @@ from app.apps.capacidad.services.matriz import festivos
 
 log = logging.getLogger("app.asistente")
 
-MAX_ITERACIONES = 10
 MAX_FILAS = 40
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
@@ -141,7 +140,7 @@ def crear_herramientas(ctx: Contexto) -> list:
         except LookupError as e:
             return _json({"error": str(e)})
 
-    @beta_tool
+    @herramienta
     def resumen_cobertura(anio: int | None = None, mes: int | None = None) -> str:
         """Indicadores del análisis de cobertura de un mes: cobertura %, horas vendidas, programadas, descubiertas
         y en exceso, puestos por estado, titulares vs hombres, cubrimientos y resumen por ciudad.
@@ -161,7 +160,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                     "enlace_tablero": "/capacidad/cobertura", **a.resumen}
         return envolver("resumen_cobertura", f)
 
-    @beta_tool
+    @herramienta
     def listar_puestos(estado: str = "con_hallazgo", ciudad: str = "", orden: str = "descubiertas",
                        anio: int | None = None, mes: int | None = None) -> str:
         """Lista de puestos del análisis de cobertura con sus horas descubiertas, en exceso, hombres y titulares.
@@ -200,7 +199,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                 for ap in filas[:MAX_FILAS]]}
         return envolver("listar_puestos", f)
 
-    @beta_tool
+    @herramienta
     def buscar_puestos(texto: str) -> str:
         """Busca puestos por código, descripción o nombre de la ubicación (cliente).
 
@@ -217,7 +216,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                      "tipo": p.tipo, "excluido": p.excluido, "activo": p.activo} for p in filas]
         return envolver("buscar_puestos", f)
 
-    @beta_tool
+    @herramienta
     def detalle_puesto(codigo: str, anio: int | None = None, mes: int | None = None) -> str:
         """Detalle de un puesto: lo vendido en la matriz (franjas, festivos, hombres), el resultado de cada día con
         hallazgo (horas y tramos que faltan o sobran), las personas programadas (titular o apoyo) y sus turnos.
@@ -278,7 +277,7 @@ def crear_herramientas(ctx: Contexto) -> list:
             return res
         return envolver("detalle_puesto", f)
 
-    @beta_tool
+    @herramienta
     def cubrimientos(codigo_puesto: str = "", estado: str = "", anio: int | None = None, mes: int | None = None) -> str:
         """Cubrimientos (turnos fuera del puesto titular) con su motivo, si generan exceso o doble turno, y su
         estado final (justificado automáticamente, pendiente, aprobado o rechazado por nómina con comentario).
@@ -317,7 +316,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                     "mostrando": min(len(lista), MAX_FILAS), "cubrimientos": lista[:MAX_FILAS], "enlace": "/capacidad/cubrimientos"}
         return envolver("cubrimientos", f)
 
-    @beta_tool
+    @herramienta
     def comparar_cargas() -> str:
         """Compara la última carga de programación con la anterior del mismo mes: turnos agregados, eliminados o
         cambiados (novedades de programación) y los puestos cuya cobertura cambió."""
@@ -338,7 +337,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                     "cambios": cambios, "impacto": c["impacto"][:MAX_FILAS], "enlace": "/capacidad/historico"}
         return envolver("comparar_cargas", f)
 
-    @beta_tool
+    @herramienta
     def alertas_actuales() -> str:
         """Alertas vigentes del sistema, ordenadas por gravedad (crítica, advertencia, información)."""
         def f():
@@ -347,7 +346,7 @@ def crear_herramientas(ctx: Contexto) -> list:
                     for x in svc_alertas.evaluar(ctx.db)]
         return envolver("alertas_actuales", f)
 
-    @beta_tool
+    @herramienta
     def estado_datos() -> str:
         """Qué datos hay cargados: meses con matriz (y su estado), cargas de programación y puestos por aclarar."""
         def f():
@@ -366,58 +365,11 @@ def crear_herramientas(ctx: Contexto) -> list:
             alertas_actuales, estado_datos]
 
 
-class AsistenteNoConfigurado(Exception):
-    pass
+AsistenteNoConfigurado = ia.IANoConfigurada
+Respuesta = ia.Respuesta
 
 
-@dataclass
-class Respuesta:
-    texto: str
-    herramientas: list[str]
-    tokens_entrada: int
-    tokens_salida: int
-    modelo: str
-
-
-def cliente() -> anthropic.Anthropic:
-    s = get_settings()
-    if not s.anthropic_api_key:
-        raise AsistenteNoConfigurado()
-    return anthropic.Anthropic(api_key=s.anthropic_api_key, max_retries=2, timeout=120.0)
-
-
-def responder(db: Session, usuario: Usuario, mensajes: list[dict], client: anthropic.Anthropic | None = None) -> Respuesta:
-    """Ejecuta el ciclo del agente (Tool Runner del SDK) y devuelve el texto final."""
-    s = get_settings()
-    client = client or cliente()
-    ctx = Contexto(db, usuario, s.asistente_datos_personales)
-    extra: dict = {}
-    if s.asistente_fallbacks:
-        # Si el modelo declina por una política de seguridad, la API reintenta con un modelo de respaldo
-        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
-
-    runner = client.beta.messages.tool_runner(
-        model=s.asistente_modelo,
-        max_tokens=16000,
-        max_iterations=MAX_ITERACIONES,
-        system=INSTRUCCIONES,
-        cache_control={"type": "ephemeral"},  # instrucciones y herramientas fijas: se cachean entre preguntas
-        tools=crear_herramientas(ctx),
-        messages=mensajes,
-        **extra,
-    )
-    ultimo = None
-    entrada = salida = 0
-    for mensaje in runner:
-        ultimo = mensaje
-        entrada += mensaje.usage.input_tokens or 0
-        salida += mensaje.usage.output_tokens or 0
-    if ultimo is None:
-        raise RuntimeError("El asistente no produjo respuesta")
-    if ultimo.stop_reason == "refusal":
-        texto = "No puedo responder esa pregunta. Reformúlela en relación con la programación, la matriz o la cobertura."
-    else:
-        texto = "\n".join(b.text for b in ultimo.content if b.type == "text").strip()
-        if ultimo.stop_reason == "max_tokens":
-            texto += "\n\n_(Respuesta recortada por longitud. Haga una pregunta más específica.)_"
-    return Respuesta(texto or "No encontré información para responder.", ctx.herramientas_usadas, entrada, salida, ultimo.model)
+def responder(db: Session, usuario: Usuario, mensajes: list[dict]) -> Respuesta:
+    """Ejecuta el ciclo del agente con las herramientas de Capacidad Operativa."""
+    ctx = Contexto(db, usuario, get_settings().asistente_datos_personales)
+    return ia.conversar(INSTRUCCIONES, mensajes, crear_herramientas(ctx))

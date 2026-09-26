@@ -85,7 +85,7 @@ export default function HistoricoPage() {
               </tr>
             </thead>
             <tbody>
-              {cargas.map((c, i) => {
+              {cargas.map((c) => {
                 const previa = c.anterior_id ? { carga_id: c.anterior_id } : null;
                 return (
                   <tr key={c.carga_id} className={sel.actual === c.carga_id ? "bg-marca-50" : ""}>

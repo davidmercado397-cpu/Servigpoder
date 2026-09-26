@@ -184,6 +184,26 @@ docker compose up -d --build
 - [ ] Respaldo programado de la base (ver README → Respaldos) y una restauración de prueba exitosa.
 - [ ] Un redeploy (push a `main`) aplica migraciones nuevas sin perder datos.
 
+## Liquidador de horas (reconstrucción de Payroll Manager)
+
+La app original sigue en uso hasta terminar esta validación. Todo se compara contra ella.
+
+### Configuración (Liquidador → Turnos / Festivos)
+- [ ] Turnos muestra los mismos 129 turnos de producción con sus horas ordinarias, extras y checks.
+- [ ] Abrir un turno (p. ej. N y C5): la distribución calculada es igual a la de la app original.
+- [ ] Crear un turno de prueba: la distribución se ve en vivo mientras se escriben las horas; marcar "Es incapacidad" deja las horas en 0 y desmarca "Día remunerado".
+- [ ] La hora de inicio nocturna muestra 19:00. (No cambiarla en la prueba salvo que se quiera validar el recálculo.)
+- [ ] Festivos del año coinciden con los de la app original; agregar uno manual y restablecerlo.
+
+### Quincenas (Liquidador → Quincenas)
+- [ ] Crear la quincena 2026-09 Q2 y descargar la plantilla (encabezado `documento`, mes y días 16 a 30).
+- [ ] Subir el mismo Excel que se subió en la app original: se cuentan las horas al instante y se listan las advertencias de códigos inexistentes.
+- [ ] **Prueba de igualdad**: descargar *Calendario + Liquidación* en las dos apps y comparar persona por persona las 19 columnas originales. Deben ser iguales, salvo que los días de V, LR, LNR, SUS, AI, LM, etc. ya no suman en DIAS TRABAJADOS sino en la nueva columna final DIAS CON NOVEDAD.
+- [ ] Clic en una persona: el día a día explica sus totales (turno, tipo de día y horas por concepto).
+- [ ] Cerrar la quincena: no deja subir otro archivo ni recalcular; reabrir lo permite de nuevo.
+- [ ] Un usuario con rol solo de consulta (`liquidador.periodos.ver`) ve y descarga, pero no carga ni cierra.
+- [ ] Asistente (con `IA_API_KEY` configurada): "Explícame de dónde salen las horas de la cédula X en la última quincena".
+
 ---
 
 ## Sugerencias de revisión (casos de negocio)

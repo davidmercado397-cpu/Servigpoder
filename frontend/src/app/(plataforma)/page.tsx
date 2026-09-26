@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Boxes, KeyRound, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowRight, Boxes, Calculator, KeyRound, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BarraPlataforma } from "@/components/barra-plataforma";
@@ -10,7 +10,7 @@ import { useSesion } from "@/lib/sesion";
 type AppPortal = { codigo: string; nombre: string; descripcion: string; icono: string; color: string; ruta: string };
 
 // Íconos disponibles para las apps (el backend indica el nombre en su manifest)
-const ICONOS: Record<string, LucideIcon> = { "shield-check": ShieldCheck };
+const ICONOS: Record<string, LucideIcon> = { "shield-check": ShieldCheck, calculator: Calculator };
 
 export default function Portal() {
   const sesion = useSesion();

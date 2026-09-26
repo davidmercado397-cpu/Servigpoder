@@ -31,7 +31,7 @@ def test_admin_tiene_todos_los_permisos(admin):
 
 def test_roles_base(admin):
     nombres = {r["nombre"] for r in admin.get("/api/roles").json()["data"]}
-    assert nombres == {"Administrador", "Programador", "Nómina"}
+    assert nombres == {"Administrador", "Programador", "Nómina", "Liquidador"}
 
 
 def test_crear_usuario_y_permisos_por_rol(admin):
@@ -145,7 +145,7 @@ def test_auditoria_registra_login(admin, db):
 
 def test_portal_muestra_apps_segun_permisos(admin):
     apps = admin.get("/api/plataforma/apps").json()["data"]
-    assert [a["codigo"] for a in apps] == ["capacidad"] and apps[0]["ruta"] == "/capacidad"
+    assert [a["codigo"] for a in apps] == ["capacidad", "liquidador"] and apps[0]["ruta"] == "/capacidad"
     # Un usuario sin permisos de la app no la ve en el portal
     admin.post("/api/roles", json={"nombre": "Solo admin usuarios", "permisos": ["usuarios.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo admin usuarios")

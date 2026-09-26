@@ -11,15 +11,16 @@ type Mensaje = { rol: "usuario" | "asistente"; texto: string; error?: boolean };
 type Estado = { configurado: boolean; modelo: string; datos_personales: boolean; usadas_hoy: number; limite_diario: number };
 type Respuesta = { texto: string; herramientas: string[]; usadas_hoy: number; limite_diario: number };
 
-const CLAVE = "asistente-conversacion";
-const SUGERENCIAS = [
-  "¿De dónde sale el porcentaje de cobertura del mes?",
-  "¿Cuáles son los 5 puestos con más horas descubiertas y por qué?",
-  "¿Qué cubrimientos están pendientes para nómina?",
-  "Explícame cómo se calculan los hombres esperados de un 4x2",
-];
+export type ConfigAsistente = {
+  /** Ruta de la API del asistente de la app, p. ej. "/capacidad/asistente" */
+  base: string;
+  bienvenida: string;
+  sugerencias: string[];
+};
 
-export function Asistente() {
+export function Asistente({ base, bienvenida, sugerencias }: ConfigAsistente) {
+  // Cada app guarda su propia conversación
+  const CLAVE = `asistente-conversacion${base.replaceAll("/", "-")}`;
   const pathname = usePathname();
   const search = useSearchParams();
   const [abierto, setAbierto] = useState(false);
@@ -35,18 +36,18 @@ export function Asistente() {
       const guardada = sessionStorage.getItem(CLAVE);
       if (guardada) setMensajes(JSON.parse(guardada));
     } catch {}
-  }, []);
+  }, [CLAVE]);
 
   useEffect(() => {
     try {
       sessionStorage.setItem(CLAVE, JSON.stringify(mensajes.slice(-20)));
     } catch {}
     fin.current?.scrollIntoView({ behavior: "smooth" });
-  }, [mensajes]);
+  }, [mensajes, CLAVE]);
 
   useEffect(() => {
-    if (abierto && !estado) api<Estado>("/capacidad/asistente/estado").then(setEstado).catch(() => {});
-  }, [abierto, estado]);
+    if (abierto && !estado) api<Estado>(`${base}/estado`).then(setEstado).catch(() => {});
+  }, [abierto, estado, base]);
 
   async function enviar(pregunta: string) {
     const q = pregunta.trim();
@@ -57,7 +58,7 @@ export function Asistente() {
     setCargando(true);
     try {
       const qs = search.toString();
-      const r = await api<Respuesta>("/capacidad/asistente", {
+      const r = await api<Respuesta>(base, {
         method: "POST",
         json: { mensajes: historial.slice(-12).map(({ rol, texto }) => ({ rol, texto })), pantalla: pathname + (qs ? `?${qs}` : "") },
       });
@@ -103,13 +104,13 @@ export function Asistente() {
           <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 text-sm">
             {estado && !estado.configurado && (
               <div className="rounded-lg bg-amber-50 p-3 text-amber-900">
-                El asistente aún no está activado: el administrador debe configurar la clave <b>ANTHROPIC_API_KEY</b> en el servidor.
+                El asistente aún no está activado: el administrador debe configurar la clave <b>IA_API_KEY</b> (OpenRouter) en el servidor.
               </div>
             )}
             {mensajes.length === 0 && (
               <div className="space-y-2">
-                <p className="text-slate-600">Pregúntame sobre la cobertura, la matriz, los cubrimientos o cualquier cifra de los tableros. Consulto los datos reales antes de responder.</p>
-                {SUGERENCIAS.map((s) => (
+                <p className="text-slate-600">{bienvenida}</p>
+                {sugerencias.map((s) => (
                   <button key={s} onClick={() => enviar(s)} className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-slate-700 transition hover:border-marca-600 hover:text-marca-700">
                     {s}
                   </button>

@@ -8,9 +8,10 @@ Para agregar un desarrollo nuevo:
 """
 
 from app.apps.capacidad.manifest import APP as CAPACIDAD
+from app.apps.liquidador.manifest import APP as LIQUIDADOR
 from app.core.plataforma import App
 
-APPS: list[App] = [CAPACIDAD]
+APPS: list[App] = [CAPACIDAD, LIQUIDADOR]
 
 
 def por_codigo(codigo: str) -> App | None:

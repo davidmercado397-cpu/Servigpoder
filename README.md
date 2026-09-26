@@ -9,6 +9,7 @@ auditoría. Cada usuario ve en el portal solo las apps para las que tiene permis
 | App | Ruta | Descripción |
 |---|---|---|
 | Capacidad Operativa | `/capacidad` | Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA): huecos de cobertura, sobreprogramación, cubrimientos, bolsas y alertas |
+| Liquidador de horas | `/liquidador` | Cuenta las horas de cada turno por quincena (diurnas, nocturnas, dominicales, festivas y extras) y genera el archivo de liquidación. Reemplaza la app "Payroll Manager" de otra empresa del holding |
 
 ## Stack
 
@@ -29,6 +30,7 @@ backend/
   app/api/routes/      rutas del núcleo: /api/auth, /api/usuarios, /api/roles, /api/plataforma
   app/apps/__init__.py registro de apps (APPS)
   app/apps/capacidad/  app Capacidad Operativa: manifest.py, models/, routes/, services/, schemas/
+  app/apps/liquidador/ app Liquidador de horas: dominio/ (cálculo puro), models.py, routes/, services/, datos/
   alembic/versions/    migraciones (una sola historia para toda la plataforma)
   tests/
 frontend/src/app/
@@ -36,7 +38,9 @@ frontend/src/app/
   (plataforma)/page.tsx      portal de aplicaciones
   (plataforma)/admin/        usuarios, roles, auditoría
   (plataforma)/cuenta/       seguridad de mi cuenta
-  (plataforma)/capacidad/    app Capacidad Operativa (menú lateral propio)
+  (plataforma)/capacidad/    app Capacidad Operativa
+  (plataforma)/liquidador/   app Liquidador de horas
+components/shell-app.tsx     menú lateral, barra superior y asistente comunes a las apps
 ```
 
 ## Agregar un desarrollo nuevo
@@ -126,14 +130,32 @@ Inicio se evalúan con los umbrales de Administración → Parámetros de alerta
 
 ## Asistente de IA (F6)
 
-`backend/app/services/asistente.py`: agente con el Tool Runner del SDK de Anthropic. Claude recibe la
-metodología en sus instrucciones y consulta los datos con **herramientas de solo lectura** (resumen de
-cobertura, lista y detalle de puestos, cubrimientos, comparación de cargas, alertas, estado de datos)
-que verifican los permisos del usuario que pregunta. Requiere `ANTHROPIC_API_KEY` (cuenta de API en
-console.anthropic.com, facturación por uso). Controles: permiso `asistente.usar`, rate limit, tope diario
+`backend/app/core/ia.py` es el motor, independiente del proveedor: habla el formato de chat compatible
+con OpenAI, así que sirve con **OpenRouter** (por defecto), OpenAI, Azure o un servidor local cambiando
+`IA_BASE_URL`, `IA_API_KEY` e `IA_MODELO`. Cada app aporta sus instrucciones y sus **herramientas de solo
+lectura** (p. ej. `app/apps/capacidad/services/asistente.py`) que verifican los permisos del usuario que
+pregunta. Con OpenRouter se envía `provider.data_collection=deny` (nunca proveedores que guarden o
+entrenen con los datos) y, con `IA_ZDR=true`, solo proveedores de retención cero. Controles: permiso `<app>.asistente.usar`, rate limit, tope diario
 por usuario, auditoría de cada pregunta (pregunta recortada, herramientas y tokens) y conversación
 guardada solo en la pestaña del navegador. `ASISTENTE_DATOS_PERSONALES=false` reemplaza nombres y
 cédulas por seudónimos.
+
+## Liquidador de horas
+
+Reconstrucción de la app "Payroll Manager" (FastAPI + HTMX) dentro de la plataforma, **solo para contar
+horas** (no calcula salarios). El cálculo se copió sin cambios de lógica en `app/apps/liquidador/dominio/`
+(clasificación de 8 tipos de día, matriz de 12 conceptos generada desde horas ordinarias, extras, hora de
+inicio y hora nocturna) con sus pruebas originales. La hora fin de un turno es informativa.
+
+- **Quincenas**: se crea la quincena, se descarga la plantilla, se sube el Excel (cédula en A, nombre en B y
+  un código por día) y las horas se cuentan al instante. *Recalcular* vuelve a contar con los turnos y
+  festivos vigentes; *Cerrar* bloquea cambios hasta *Reabrir*. Clic en una persona = su día a día.
+- **Calendario + Liquidación**: el archivo que se sube a nómina. Mismas 19 columnas y orden que la app
+  original, más **DIAS CON NOVEDAD** al final: los códigos sin horas distintos de Z, L, AUS e incapacidad
+  (V, LR, LNR, SUS, AI, LM…), que antes se sumaban en DIAS TRABAJADOS.
+- **Turnos**: los 129 turnos de producción se cargan como configuración inicial (`datos/turnos_iniciales.txt`).
+  `tests/test_liq_igualdad_produccion.py` comprueba que su matriz es idéntica a la de producción.
+- **Festivos**: calendario nacional con ajustes manuales (agregar, quitar, restablecer).
 
 ## Respaldos
 
@@ -225,7 +247,8 @@ sus códigos, un administrador puede **restablecer su MFA** desde Administració
 
 Los permisos del núcleo están en `backend/app/core/permisos.py` y los de cada app en su `manifest.py`
 (con prefijo, p. ej. `capacidad.analisis.ver`). Los **roles** y los **usuarios** se administran desde
-Administración. Roles base: Administrador (todo), Programador y Nómina (Capacidad Operativa).
+Administración. Roles base: Administrador (todo), Programador y Nómina (Capacidad Operativa) y
+Liquidador (Liquidador de horas: carga, revisa, cierra y configura).
 
 ## Fases
 
@@ -235,5 +258,6 @@ Administración. Roles base: Administrador (todo), Programador y Nómina (Capaci
 - [x] F3 Cubrimientos, bandeja de nómina y bolsas
 - [x] F4 Histórico, comparación de cargas, alertas y parámetros
 - [ ] F5 Puesta en producción en Coolify (ver guía QA en `docs/QA.md`)
-- [x] F6 Asistente de IA (Claude) que explica de dónde salen los datos
+- [x] F6 Asistente de IA que explica de dónde salen los datos (OpenRouter u otro proveedor compatible)
 - [x] Plataforma multi-app (portal) y autenticación con MFA obligatoria
+- [x] Liquidador de horas (reconstrucción de Payroll Manager) y asistente sobre OpenRouter

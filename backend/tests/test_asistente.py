@@ -1,9 +1,10 @@
 from tests.conftest import entrar
 import json
-from types import SimpleNamespace
 
+import httpx
 import pytest
 
+from app.core import ia
 from app.core.config import get_settings
 from app.models import Usuario
 from app.apps.capacidad.services import asistente
@@ -13,7 +14,7 @@ from tests.test_cubrimientos import _cargar
 def _herramientas(db_session, username="admin", datos_personales=True):
     usuario = db_session.query(Usuario).filter_by(username=username).one()
     ctx = asistente.Contexto(db_session, usuario, datos_personales)
-    return {t.name: t for t in asistente.crear_herramientas(ctx)}, ctx
+    return {t.nombre: t for t in asistente.crear_herramientas(ctx)}, ctx
 
 
 def test_herramientas_con_datos_reales_del_escenario(admin, db):
@@ -55,25 +56,34 @@ def test_herramientas_respetan_permisos(admin, db):
     assert "permiso" in r["error"]
 
 
-class _ClienteFalso:
-    """Simula el SDK: el Tool Runner devuelve un mensaje final con texto."""
+class _ProveedorFalso:
+    """Simula un proveedor compatible con OpenAI (OpenRouter): pide una herramienta y luego responde."""
 
-    def __init__(self):
-        self.kwargs = None
-        self.beta = SimpleNamespace(messages=SimpleNamespace(tool_runner=self._runner))
+    def __init__(self, respuestas=None):
+        self.cuerpos: list[dict] = []
+        self.cabeceras: list = []
+        self.respuestas = respuestas
 
-    def _runner(self, **kwargs):
-        self.kwargs = kwargs
-        uso = SimpleNamespace(input_tokens=100, output_tokens=20)
-        return [SimpleNamespace(stop_reason="end_turn", model=kwargs["model"], usage=uso,
-                                content=[SimpleNamespace(type="text", text="La cobertura sale de 1 − descubiertas ÷ vendidas.")])]
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        cuerpo = json.loads(request.content)
+        self.cuerpos.append(cuerpo)
+        self.cabeceras.append(request.headers)
+        if self.respuestas:
+            return self.respuestas.pop(0)
+        uso = {"prompt_tokens": 100, "completion_tokens": 20}
+        if len(self.cuerpos) == 1:
+            llamada = {"id": "c1", "type": "function", "function": {"name": "estado_datos", "arguments": "{}"}}
+            return httpx.Response(200, json={"model": cuerpo["model"], "usage": uso, "choices": [
+                {"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [llamada]}}]})
+        return httpx.Response(200, json={"model": cuerpo["model"], "usage": uso, "choices": [
+            {"finish_reason": "stop", "message": {"role": "assistant", "content": "La cobertura sale de 1 − descubiertas ÷ vendidas."}}]})
 
 
 @pytest.fixture
 def con_clave(monkeypatch):
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "sk-prueba")
-    falso = _ClienteFalso()
-    monkeypatch.setattr(asistente, "cliente", lambda: falso)
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    falso = _ProveedorFalso()
+    monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
     return falso
 
 
@@ -82,16 +92,21 @@ def test_endpoint_responde_y_audita(admin, con_clave):
     assert r.status_code == 200, r.text
     d = r.json()["data"]
     assert "descubiertas" in d["texto"] and d["usadas_hoy"] == 1
-    # Parámetros enviados al SDK
-    k = con_clave.kwargs
-    assert k["model"] == "claude-opus-5" and k["max_iterations"] == asistente.MAX_ITERACIONES
-    assert k["messages"] == [{"role": "user", "content": "¿De dónde sale la cobertura?"}]
-    assert {t.name for t in k["tools"]} >= {"resumen_cobertura", "detalle_puesto"}
+    assert d["herramientas"] == ["estado_datos"]
+    # Lo enviado al proveedor: modelo, instrucciones, pregunta, herramientas y la política de datos de OpenRouter
+    primero, segundo = con_clave.cuerpos
+    assert primero["model"] == get_settings().ia_modelo
+    assert primero["messages"][0]["role"] == "system" and primero["messages"][1:] == [{"role": "user", "content": "¿De dónde sale la cobertura?"}]
+    assert {t["function"]["name"] for t in primero["tools"]} >= {"resumen_cobertura", "detalle_puesto"}
+    assert primero["provider"] == {"data_collection": "deny", "zdr": True}
+    assert con_clave.cabeceras[0]["authorization"] == "Bearer sk-or-prueba"
+    # El resultado de la herramienta vuelve al modelo en la segunda llamada
+    assert segundo["messages"][-1]["role"] == "tool" and "matrices" in segundo["messages"][-1]["content"]
     assert admin.get("/api/capacidad/asistente/estado").json()["data"]["usadas_hoy"] == 1
 
 
 def test_sin_clave_responde_503(admin, monkeypatch):
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "")
+    monkeypatch.setattr(get_settings(), "ia_api_key", "")
     r = admin.post("/api/capacidad/asistente", json={"mensajes": [{"rol": "usuario", "texto": "hola"}]})
     assert r.status_code == 503 and r.json()["error"]["code"] == "ASISTENTE_NO_CONFIGURADO"
     assert admin.get("/api/capacidad/asistente/estado").json()["data"]["configurado"] is False
@@ -121,6 +136,38 @@ def test_contexto_de_pantalla(admin, con_clave):
     r = admin.post("/api/capacidad/asistente", json={"mensajes": [{"rol": "usuario", "texto": "¿Por qué hay hueco?"}],
                                           "pantalla": f"/capacidad/cobertura/{puesto_id}?analisis=1"})
     assert r.status_code == 200
-    contenido = con_clave.kwargs["messages"][-1]["content"]
+    contenido = con_clave.cuerpos[0]["messages"][-1]["content"]
     assert "puesto 25" in contenido and contenido.endswith("¿Por qué hay hueco?")
     assert admin.post("/api/capacidad/asistente", json={"mensajes": [{"rol": "usuario", "texto": "x"}], "pantalla": "javascript:alert(1)"}).status_code == 422
+
+
+def test_errores_del_proveedor(admin, monkeypatch):
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    casos = [(401, 503, "ASISTENTE_NO_CONFIGURADO"), (402, 503, "ASISTENTE_NO_CONFIGURADO"), (429, 429, None), (500, 502, "ERROR_IA")]
+    for estado, esperado, codigo in casos:
+        falso = _ProveedorFalso([httpx.Response(estado, json={"error": {"code": estado, "message": "x"}})])
+        monkeypatch.setattr(ia, "cliente_http", lambda f=falso: httpx.Client(transport=httpx.MockTransport(f)))
+        r = admin.post("/api/capacidad/asistente", json={"mensajes": [{"rol": "usuario", "texto": "hola"}]})
+        assert r.status_code == esperado, (estado, r.text)
+        if codigo:
+            assert r.json()["error"]["code"] == codigo
+
+
+def test_esquema_de_herramienta_desde_la_firma():
+    @ia.herramienta
+    def ejemplo(codigo: str, anio: int | None = None) -> str:
+        """Hace algo.
+
+        Args:
+            codigo: Código del puesto,
+                en varias líneas.
+            anio: Año.
+        """
+        return codigo
+
+    assert ejemplo.nombre == "ejemplo" and ejemplo.descripcion == "Hace algo."
+    assert ejemplo.parametros["required"] == ["codigo"]
+    assert ejemplo.parametros["properties"]["anio"] == {"type": "integer", "description": "Año."}
+    assert ejemplo.parametros["properties"]["codigo"]["description"] == "Código del puesto, en varias líneas."
+    assert ia._ejecutar(ejemplo, '{"codigo": "25", "otro": 1}') == "25"
+    assert "error" in ia._ejecutar(ejemplo, "no-json")

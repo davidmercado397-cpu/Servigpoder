@@ -87,7 +87,9 @@ export default function MatrizPage() {
   async function cambiarEstado(estado: string) {
     if (!periodo) return;
     if (estado === "cerrado" && !confirm("Un mes cerrado ya no se puede modificar. ¿Cerrar?")) return;
-    await accion(() => api(`/capacidad/matriz/periodos/${periodo.id}/estado`, { method: "PUT", json: { estado } }), `Matriz en estado ${estado}`);
+    if (estado === "borrador" && !confirm(`¿Desaprobar la matriz de ${nombreMes(periodo.anio, periodo.mes)}? Vuelve a borrador para poder corregirla y luego aprobarla de nuevo.`)) return;
+    const texto = { aprobado: "Matriz aprobada", borrador: "Matriz desaprobada: quedó en borrador para corregirla", cerrado: "Mes cerrado" }[estado] ?? `Matriz en estado ${estado}`;
+    await accion(() => api(`/capacidad/matriz/periodos/${periodo.id}/estado`, { method: "PUT", json: { estado } }), texto);
   }
 
   return (
@@ -117,9 +119,10 @@ export default function MatrizPage() {
                 {periodo.puestos} puestos · {Number(periodo.hombres).toLocaleString("es-CO")} hombres · {periodo.requieren_revision} por revisar · {periodo.excluidos} excluidos
               </span>
               <div className="ml-auto flex flex-wrap gap-2">
+                <a className="btn-secundario" href={`/api/capacidad/matriz/periodos/${periodo.id}/exportar`}>Descargar Excel</a>
                 {puedeEditar && <button className="btn-primario" onClick={proyectar}>Proyectar al mes siguiente</button>}
                 {editable && periodo.estado === "borrador" && <button className="btn-secundario" onClick={() => cambiarEstado("aprobado")}>Aprobar</button>}
-                {editable && periodo.estado === "aprobado" && <button className="btn-secundario" onClick={() => cambiarEstado("borrador")}>Volver a borrador</button>}
+                {editable && periodo.estado === "aprobado" && <button className="btn-secundario" onClick={() => cambiarEstado("borrador")}>Desaprobar</button>}
                 {editable && <button className="btn-secundario" onClick={() => cambiarEstado("cerrado")}>Cerrar mes</button>}
               </div>
             </>

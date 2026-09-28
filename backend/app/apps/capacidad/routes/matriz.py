@@ -1,7 +1,11 @@
 import calendar
 from datetime import datetime, timezone
+from io import BytesIO
+
+import xlsxwriter
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select
 
 from app.api.deps import DbSession, require
@@ -163,10 +167,99 @@ def cambiar_estado(periodo_id: int, data: EstadoIn, request: Request, db: DbSess
     p = _periodo(db, periodo_id)
     if p.estado == CERRADO:
         raise ApiError(409, "Un periodo cerrado no cambia de estado")
+    if data.estado == p.estado:
+        raise ApiError(409, f"La matriz ya está en estado {p.estado}")
     anterior, p.estado = p.estado, data.estado
     auditar(db, request, "matriz_estado", actual.id, periodo=f"{p.mes:02d}/{p.anio}", de=anterior, a=data.estado)
     db.commit()
     return ok(p)
+
+
+DIAS_SEMANA = ["L", "M", "X", "J", "V", "S", "D"]
+
+
+def _dias_texto(mascara: int) -> str:
+    nombres = {127: "L-D", 31: "L-V", 63: "L-S", 96: "S-D"}
+    return nombres.get(mascara) or " ".join(d for i, d in enumerate(DIAS_SEMANA) if mascara & (1 << i))
+
+
+def _franja_texto(dias: int, inicio, fin, cantidad: int) -> str:
+    rango = "24 h" if inicio == fin else f"{inicio:%H:%M}-{fin:%H:%M}"
+    return f"{_dias_texto(dias)} {rango}" + (f" x{cantidad}" if cantidad > 1 else "")
+
+
+@router.get("/periodos/{periodo_id}/exportar", dependencies=[Depends(limitar("exportar", 10, 60))])
+def exportar(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require("capacidad.matriz.ver"))):
+    """La matriz comercial del mes en Excel: un puesto por fila, sus franjas y las excepciones."""
+    p = _periodo(db, periodo_id)
+    fest = svc.festivos(p.anio, p.mes)
+    mps = list(db.scalars(select(MatrizPuesto).join(MatrizPuesto.puesto).join(Puesto.ubicacion)
+                          .where(MatrizPuesto.periodo_id == p.id).order_by(Ubicacion.codigo, Puesto.codigo)).unique())
+
+    buf = BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True, "bg_color": "#D9EAFF", "text_wrap": True, "valign": "top"})
+    numero = libro.add_format({"num_format": "#,##0.0"})
+
+    hoja = libro.add_worksheet("Matriz")
+    enc = ["PODER", "Ubicación", "Ciudad", "Puesto", "Descripción", "Tipo", "Excluido", "Hombres", "Secuencia",
+           "Cobertura vendida", "Incluye festivos", "Horas vendidas en el mes", "Días con servicio", "Excepciones",
+           "Por revisar", "Nota", "Jornada original (matriz)"]
+    hoja.write_row(0, 0, enc, negrita)
+    for i, mp in enumerate(mps, start=1):
+        pu = mp.puesto
+        dias = svc.requerimiento(mp, p.anio, p.mes, fest)
+        horas_mes = sum(svc.horas(f.inicio, f.fin) * f.cantidad for fr in dias.values() for f in fr)
+        hoja.write_row(i, 0, [
+            pu.ubicacion.codigo, pu.ubicacion.nombre, pu.ubicacion.ciudad or "", pu.codigo, pu.descripcion, pu.tipo,
+            "Sí" if pu.excluido else "No", float(mp.hombres), mp.secuencia,
+            "; ".join(_franja_texto(f.dias, f.inicio, f.fin, f.cantidad) for f in mp.franjas),
+            "Sí" if mp.incluye_festivos else "No", horas_mes, sum(1 for fr in dias.values() if fr), len(mp.excepciones),
+            "Sí" if mp.requiere_revision else "No", mp.nota, mp.jornada,
+        ])
+        hoja.write_number(i, 7, float(mp.hombres), numero)
+        hoja.write_number(i, 11, horas_mes, numero)
+    hoja.autofilter(0, 0, max(len(mps), 1), len(enc) - 1)
+    hoja.freeze_panes(1, 4)
+    for col, ancho in enumerate([10, 34, 14, 10, 30, 10, 9, 9, 12, 36, 10, 12, 10, 11, 10, 30, 40]):
+        hoja.set_column(col, col, ancho)
+
+    hoja = libro.add_worksheet("Franjas")
+    hoja.write_row(0, 0, ["Puesto", "Ubicación", "Días", "Inicio", "Fin", "Personas", "Horas por día"], negrita)
+    fila = 1
+    for mp in mps:
+        for f in mp.franjas:
+            hoja.write_row(fila, 0, [mp.puesto.codigo, mp.puesto.ubicacion.nombre, _dias_texto(f.dias), f"{f.inicio:%H:%M}",
+                                     f"{f.fin:%H:%M}", f.cantidad, svc.horas(f.inicio, f.fin) * f.cantidad])
+            fila += 1
+    hoja.autofilter(0, 0, max(fila - 1, 1), 6)
+    hoja.freeze_panes(1, 0)
+    hoja.set_column(0, 0, 10)
+    hoja.set_column(1, 1, 34)
+
+    hoja = libro.add_worksheet("Excepciones")
+    hoja.write_row(0, 0, ["Puesto", "Ubicación", "Fecha", "Sin servicio", "Inicio", "Fin", "Personas", "Observación"], negrita)
+    fila = 1
+    for mp in mps:
+        for e in mp.excepciones:
+            hoja.write_row(fila, 0, [mp.puesto.codigo, mp.puesto.ubicacion.nombre, e.fecha.isoformat(), "Sí" if e.sin_servicio else "No",
+                                     f"{e.inicio:%H:%M}" if e.inicio else "", f"{e.fin:%H:%M}" if e.fin else "", e.cantidad, e.observacion])
+            fila += 1
+    hoja.set_column(1, 1, 34)
+    hoja.set_column(7, 7, 40)
+
+    hoja = libro.add_worksheet("Festivos del mes")
+    hoja.write_row(0, 0, ["Fecha", "Festivo"], negrita)
+    for i, (d, n) in enumerate(sorted(fest.items()), start=1):
+        hoja.write_row(i, 0, [d.isoformat(), n])
+    hoja.set_column(1, 1, 40)
+    libro.close()
+
+    auditar(db, request, "matriz_exportada", actual.id, periodo=f"{p.mes:02d}/{p.anio}")
+    db.commit()
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="matriz_comercial_{p.anio}-{p.mes:02d}_{p.estado}.xlsx"'})
 
 
 @router.get("/puestos/{mp_id}/requerimiento", response_model=ApiResponse[list[DiaRequerido]])

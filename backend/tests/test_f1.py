@@ -113,6 +113,41 @@ def test_periodo_cerrado_no_se_edita(admin):
     assert r.status_code == 409
 
 
+def test_desaprobar_matriz(admin):
+    pid = importar_matriz(admin).json()["data"]["periodo_id"]
+    url = f"/api/capacidad/matriz/periodos/{pid}/estado"
+    assert admin.put(url, json={"estado": "aprobado"}).json()["data"]["estado"] == "aprobado"
+    assert admin.put(url, json={"estado": "aprobado"}).status_code == 409
+    # Desaprobar para corregir: vuelve a borrador y se puede editar
+    assert admin.put(url, json={"estado": "borrador"}).json()["data"]["estado"] == "borrador"
+    mp = admin.get(f"/api/capacidad/matriz/periodos/{pid}/puestos").json()["data"][0]
+    assert admin.patch(f"/api/capacidad/matriz/puestos/{mp['id']}", json={"hombres": "2"}).status_code == 200
+    acciones = [a["accion"] for a in admin.get("/api/plataforma/auditoria?accion=matriz_estado").json()["data"]]
+    assert acciones.count("matriz_estado") == 2
+
+
+def test_exportar_matriz(admin):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    pid = importar_matriz(admin).json()["data"]["periodo_id"]
+    r = admin.get(f"/api/capacidad/matriz/periodos/{pid}/exportar")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == 'attachment; filename="matriz_comercial_2026-09_borrador.xlsx"'
+    libro = load_workbook(BytesIO(r.content))
+    assert libro.sheetnames == ["Matriz", "Franjas", "Excepciones", "Festivos del mes"]
+    filas = list(libro["Matriz"].iter_rows(values_only=True))
+    enc = filas[0]
+    por_puesto = {f[3]: dict(zip(enc, f)) for f in filas[1:]}
+    p25 = por_puesto["25"]
+    assert p25["Hombres"] == 3 and p25["Incluye festivos"] == "Sí"
+    # 24 h todos los días de septiembre (30 días)
+    assert p25["Horas vendidas en el mes"] == 720 and p25["Días con servicio"] == 30
+    assert "L-D 06:00-18:00" in p25["Cobertura vendida"]
+    assert len(list(libro["Franjas"].iter_rows())) > 1
+
+
 def test_catalogo_de_turnos(admin):
     r = admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
     assert r.status_code == 200 and r.json()["data"]["turnos"] == 6

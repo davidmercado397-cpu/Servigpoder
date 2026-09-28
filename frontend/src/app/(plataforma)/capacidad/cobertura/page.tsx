@@ -1,5 +1,6 @@
 "use client";
 
+import { Download } from "lucide-react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -74,6 +75,11 @@ export default function CoberturaPage() {
   }
 
   const r = analisis?.resumen;
+  // La descarga de hallazgos sigue el filtro de la tabla: solo huecos, solo excesos o ambos; y la ciudad elegida
+  const tipoHallazgo = filtro === "hueco" ? "hueco" : filtro === "exceso" ? "exceso" : "todos";
+  const urlHallazgos = analisis
+    ? `/api/capacidad/analisis/${analisis.id}/hallazgos?tipo=${tipoHallazgo}${ciudad ? `&ciudad=${encodeURIComponent(ciudad)}` : ""}`
+    : "";
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -86,7 +92,13 @@ export default function CoberturaPage() {
               </select>
             )}
             {mes && <button className="btn-primario" onClick={calcular} disabled={calculando}>{calculando ? "Calculando…" : analisis ? "Recalcular" : "Calcular cobertura"}</button>}
-            {analisis && <a className="btn-secundario" href={`/api/capacidad/analisis/${analisis.id}/exportar`}>Exportar a Excel</a>}
+            {analisis && (
+              <a className="btn-secundario inline-flex items-center gap-1.5" href={urlHallazgos}
+                title="Huecos y excesos: resumen por puesto, un tramo por fila (día y horas) y el detalle por día. Respeta el filtro de huecos/excesos y la ciudad seleccionada.">
+                <Download className="h-4 w-4" /> Descargar hallazgos
+              </a>
+            )}
+            {analisis && <a className="btn-secundario" href={`/api/capacidad/analisis/${analisis.id}/exportar`}>Exportar análisis completo</a>}
           </div>
         }
       >

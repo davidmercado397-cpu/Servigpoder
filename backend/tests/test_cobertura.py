@@ -117,3 +117,30 @@ def test_exportar_excel(admin):
     assert r.status_code == 200
     assert r.content[:4] == b"PK\x03\x04"
     assert "attachment" in r.headers["content-disposition"]
+
+
+def test_exportar_hallazgos(admin):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    # 25: el 15 hay dos turnos de día (1 persona de más) y ninguno de noche (hueco de 18:00 a 06:00)
+    analisis_id = _preparar(admin, {"25": ["06:00 - 18:00"], "25-B": ["06:00 - 18:00"]}).json()["meta"]["extra"]["analisis_id"]
+
+    r = admin.get(f"/api/capacidad/analisis/{analisis_id}/hallazgos")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == 'attachment; filename="hallazgos_huecos_y_excesos_2026-09.xlsx"'
+    libro = load_workbook(BytesIO(r.content))
+    assert libro.sheetnames == ["Puestos con hallazgos", "Tramos", "Días con hallazgos"]
+    enc, *filas = list(libro["Tramos"].iter_rows(values_only=True))
+    tramos = [dict(zip(enc, f)) for f in filas]
+    hueco = next(t for t in tramos if t["Puesto"] == "25" and t["Fecha"] == "2026-09-15" and t["Hallazgo"] == "Hueco")
+    assert (hueco["Desde"], hueco["Hasta"], hueco["Personas que faltan / sobran"], hueco["Horas"]) == ("18:00", "06:00", 1, 12)
+    assert hueco["Día"] == "martes"
+
+    # Solo huecos: sin tramos de exceso; el nombre del archivo lo indica
+    r = admin.get(f"/api/capacidad/analisis/{analisis_id}/hallazgos?tipo=hueco")
+    assert r.headers["content-disposition"] == 'attachment; filename="hallazgos_huecos_2026-09.xlsx"'
+    _, *filas = list(load_workbook(BytesIO(r.content))["Tramos"].iter_rows(values_only=True))
+    assert filas and all(f[7] == "Hueco" for f in filas)
+    assert admin.get(f"/api/capacidad/analisis/{analisis_id}/hallazgos?tipo=otro").status_code == 422

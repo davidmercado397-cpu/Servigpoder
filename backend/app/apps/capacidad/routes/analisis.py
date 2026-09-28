@@ -232,3 +232,107 @@ def exportar(analisis_id: int, request: Request, db: DbSession, actual: Usuario 
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+ESTADOS_TEXTO = {"hueco": "Hueco", "exceso": "Exceso", "mixto": "Hueco y exceso", "ok": "Cubierto"}
+
+
+def _horas_tramo(inicio: str, fin: str) -> float:
+    a = int(inicio[:2]) * 60 + int(inicio[3:])
+    b = int(fin[:2]) * 60 + int(fin[3:])
+    return ((b - a) % 1440 or 1440) / 60
+
+
+@router.get("/{analisis_id}/hallazgos", dependencies=[Depends(limitar("exportar", 10, 60))])
+def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
+                       tipo: str = Query("todos", pattern="^(todos|hueco|exceso)$"),
+                       ciudad: str = Query("", max_length=80),
+                       actual: Usuario = Depends(require("capacidad.analisis.ver"))):
+    """Hallazgos de huecos y excesos en Excel: resumen por puesto, un tramo por fila y el detalle por día."""
+    a = _analisis(db, analisis_id)
+    r = a.resumen
+    tipos = {"hueco", "exceso"} if tipo == "todos" else {tipo}
+    estados = {"hueco", "exceso", "mixto"} if tipo == "todos" else {tipo, "mixto"}
+    consulta = (select(AnalisisPuesto).join(AnalisisPuesto.puesto).join(Puesto.ubicacion)
+                .where(AnalisisPuesto.analisis_id == a.id, AnalisisPuesto.estado.in_(estados))
+                .order_by(Ubicacion.ciudad, Ubicacion.codigo, Puesto.codigo))
+    if ciudad.strip():
+        consulta = consulta.where(Ubicacion.ciudad == ciudad.strip())
+    aps = list(db.scalars(consulta).unique())
+    fest = festivos(r["anio"], r["mes"])
+
+    buf = BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True, "bg_color": "#D9EAFF", "text_wrap": True, "valign": "top"})
+    hueco = libro.add_format({"font_color": "#A32525"})
+    exceso = libro.add_format({"font_color": "#9A5B00"})
+
+    hoja = libro.add_worksheet("Puestos con hallazgos")
+    enc = ["Ciudad", "PODER", "Ubicación", "Puesto", "Descripción", "Estado", "Hombres", "Titulares", "Personas",
+           "Horas vendidas", "Horas programadas", "Horas descubiertas", "Horas en exceso", "Días con hueco", "Días con exceso"]
+    hoja.write_row(0, 0, enc, negrita)
+    for i, ap in enumerate(aps, start=1):
+        pu = ap.puesto
+        hoja.write_row(i, 0, [pu.ubicacion.ciudad or "", pu.ubicacion.codigo, pu.ubicacion.nombre, pu.codigo, pu.descripcion,
+                              ESTADOS_TEXTO.get(ap.estado, ap.estado), float(ap.hombres), ap.fijos, ap.personas,
+                              float(ap.horas_requeridas), float(ap.horas_programadas), float(ap.horas_descubiertas),
+                              float(ap.horas_exceso), ap.dias_hueco, ap.dias_exceso])
+    hoja.autofilter(0, 0, max(len(aps), 1), len(enc) - 1)
+    hoja.freeze_panes(1, 4)
+    for col, ancho in enumerate([14, 10, 34, 10, 30, 14, 9, 9, 9, 11, 11, 11, 11, 9, 9]):
+        hoja.set_column(col, col, ancho)
+
+    por_id = {ap.id: ap for ap in aps}
+    dias = list(db.scalars(select(AnalisisDia).where(AnalisisDia.analisis_puesto_id.in_(por_id),
+                                                    AnalisisDia.estado.in_(["hueco", "exceso", "mixto"]))
+                           .order_by(AnalisisDia.analisis_puesto_id, AnalisisDia.fecha))) if por_id else []
+
+    hoja = libro.add_worksheet("Tramos")
+    enc = ["Ciudad", "Ubicación", "Puesto", "Descripción", "Fecha", "Día", "Festivo", "Hallazgo", "Desde", "Hasta",
+           "Personas que faltan / sobran", "Horas"]
+    hoja.write_row(0, 0, enc, negrita)
+    fila = 1
+    for d in dias:
+        ap = por_id[d.analisis_puesto_id]
+        for t in d.detalle:
+            if t["tipo"] not in tipos:
+                continue
+            horas = _horas_tramo(t["inicio"], t["fin"]) * t["personas"]
+            hoja.write_row(fila, 0, [ap.puesto.ubicacion.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, ap.puesto.descripcion,
+                                     d.fecha.isoformat(), DIAS_SEMANA[d.fecha.weekday()], fest.get(d.fecha, ""),
+                                     "Hueco" if t["tipo"] == "hueco" else "Exceso", t["inicio"], t["fin"], t["personas"], horas],
+                           hueco if t["tipo"] == "hueco" else exceso)
+            fila += 1
+    hoja.autofilter(0, 0, max(fila - 1, 1), len(enc) - 1)
+    hoja.freeze_panes(1, 3)
+    for col, ancho in enumerate([14, 34, 10, 30, 11, 10, 18, 9, 7, 7, 12, 8]):
+        hoja.set_column(col, col, ancho)
+
+    hoja = libro.add_worksheet("Días con hallazgos")
+    enc = ["Ciudad", "Ubicación", "Puesto", "Fecha", "Día", "Estado", "Horas vendidas", "Horas programadas",
+           "Horas descubiertas", "Horas en exceso"]
+    hoja.write_row(0, 0, enc, negrita)
+    fila = 1
+    for d in dias:
+        if tipo == "hueco" and not d.horas_descubiertas or tipo == "exceso" and not d.horas_exceso:
+            continue
+        ap = por_id[d.analisis_puesto_id]
+        hoja.write_row(fila, 0, [ap.puesto.ubicacion.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, d.fecha.isoformat(),
+                                 DIAS_SEMANA[d.fecha.weekday()], ESTADOS_TEXTO.get(d.estado, d.estado), float(d.horas_requeridas),
+                                 float(d.horas_programadas), float(d.horas_descubiertas), float(d.horas_exceso)])
+        fila += 1
+    hoja.autofilter(0, 0, max(fila - 1, 1), len(enc) - 1)
+    hoja.freeze_panes(1, 3)
+    hoja.set_column(0, 0, 14)
+    hoja.set_column(1, 1, 34)
+    libro.close()
+
+    auditar(db, request, "hallazgos_exportados", actual.id, analisis_id=a.id, tipo=tipo, ciudad=ciudad or None)
+    db.commit()
+    sufijo = {"todos": "huecos_y_excesos", "hueco": "huecos", "exceso": "excesos"}[tipo]
+    lugar = f"_{ciudad.strip().replace(' ', '_')}" if ciudad.strip() else ""
+    nombre = f"hallazgos_{sufijo}{lugar}_{r['anio']}-{r['mes']:02d}.xlsx"
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})

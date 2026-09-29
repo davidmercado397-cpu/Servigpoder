@@ -14,7 +14,7 @@ from app.apps.capacidad.models.maestros import BOLSA, OPERATIVO
 from app.apps.capacidad.models.matriz import BORRADOR
 from app.apps.capacidad.services import jornada
 from app.apps.capacidad.services.codigos import canonico, limpiar
-from app.apps.capacidad.services.excel import leer_filas, texto
+from app.core.excel import leer_filas, texto
 
 # Columnas de la matriz (A..K)
 C_PODER, C_INTERNO, C_NIT, C_NOMBRE, C_HOMBRES, C_SECUENCIA, C_DESC, C_CIUDAD, C_JORNADA = range(9)

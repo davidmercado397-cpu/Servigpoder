@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.apps.capacidad.models import Novedad, ProgramacionCarga, ProgramacionDia, ProgramacionFila, Puesto, PuestoEquivalencia, Turno
 from app.apps.capacidad.models.programacion import DESCONOCIDO, NOVEDAD
 from app.apps.capacidad.services.codigos import canonico, compacto, limpiar
-from app.apps.capacidad.services.excel import a_fecha, leer_filas, texto
+from app.core.excel import a_fecha, leer_filas, texto
 
 
 class ErrorProgramacion(ValueError):

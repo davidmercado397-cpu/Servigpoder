@@ -204,6 +204,17 @@ La app original sigue en uso hasta terminar esta validación. Todo se compara co
 - [ ] Un usuario con rol solo de consulta (`liquidador.periodos.ver`) ve y descarga, pero no carga ni cierra.
 - [ ] Asistente (con `IA_API_KEY` configurada): "Explícame de dónde salen las horas de la cédula X en la última quincena".
 
+## Reporte de programación (PDF)
+
+- [ ] En el portal aparece "Reporte de programación"; un usuario sin el permiso `reporte.generar` no la ve.
+- [ ] Cargar el Excel de SIESA del 15 al 30: muestra el periodo (16 días), 203 ubicaciones, 730 puestos y 2.256 filas.
+- [ ] Descargar el PDF: Carta horizontal, índice de ubicaciones con páginas (clic lleva a la ubicación) y marcadores en el lector.
+- [ ] El puesto 1221-1 aparece dentro de la ubicación 122 (Falco) y el 2843-7G dentro de la 283 (SENA).
+- [ ] Ningún título de puesto queda solo al final de una página.
+- [ ] Domingos sombreados; si el periodo tiene festivos, sombreados en rojo y listados en la leyenda.
+- [ ] Filtrar por una ciudad (p. ej. PALMIRA) o elegir ubicaciones: el PDF trae solo esas y lo dice en la portada.
+- [ ] Repetir con un Excel del 1 al 15 y con uno del mes completo: las columnas cambian solas y todo cabe en el ancho.
+
 ---
 
 ## Sugerencias de revisión (casos de negocio)

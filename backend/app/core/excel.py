@@ -1,3 +1,5 @@
+"""Lectura de libros de Excel y conversión de celdas, común a las apps."""
+
 from datetime import date, datetime, time
 from io import BytesIO
 

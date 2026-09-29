@@ -9,6 +9,7 @@ auditoría. Cada usuario ve en el portal solo las apps para las que tiene permis
 | App | Ruta | Descripción |
 |---|---|---|
 | Capacidad Operativa | `/capacidad` | Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA): huecos de cobertura, sobreprogramación, cubrimientos, bolsas y alertas |
+| Reporte de programación | `/reporte` | Convierte el Excel de programación de SIESA en un PDF ordenado por ubicación y puesto (Carta horizontal), con índice, marcadores, domingos/festivos sombreados y leyenda |
 | Liquidador de horas | `/liquidador` | Cuenta las horas de cada turno por quincena (diurnas, nocturnas, dominicales, festivas y extras) y genera el archivo de liquidación. Reemplaza la app "Payroll Manager" de otra empresa del holding |
 
 ## Stack
@@ -31,6 +32,7 @@ backend/
   app/apps/__init__.py registro de apps (APPS)
   app/apps/capacidad/  app Capacidad Operativa: manifest.py, models/, routes/, services/, schemas/
   app/apps/liquidador/ app Liquidador de horas: dominio/ (cálculo puro), models.py, routes/, services/, datos/
+  app/apps/reporte/    app Reporte de programación: lector del Excel de SIESA y generador del PDF (sin base de datos)
   alembic/versions/    migraciones (una sola historia para toda la plataforma)
   tests/
 frontend/src/app/
@@ -40,6 +42,7 @@ frontend/src/app/
   (plataforma)/cuenta/       seguridad de mi cuenta
   (plataforma)/capacidad/    app Capacidad Operativa
   (plataforma)/liquidador/   app Liquidador de horas
+  (plataforma)/reporte/      app Reporte de programación
 components/shell-app.tsx     menú lateral, barra superior y asistente comunes a las apps
 ```
 
@@ -157,6 +160,21 @@ inicio y hora nocturna) con sus pruebas originales. La hora fin de un turno es i
   `tests/test_liq_igualdad_produccion.py` comprueba que su matriz es idéntica a la de producción.
 - **Festivos**: calendario nacional con ajustes manuales (agregar, quitar, restablecer).
 
+## Reporte de programación
+
+Lee el mismo Excel "ReporteAsignacionResumido" de SIESA que Capacidad Operativa y devuelve un PDF en hoja
+Carta horizontal. No usa la base de datos: el Excel se procesa en memoria y el PDF se entrega en la misma
+respuesta. Las columnas salen del rango Desde–Hasta del archivo, así que sirve para 1-15, 16-fin de mes o el
+mes completo (28 a 31 días).
+
+- Orden: ubicación (código con orden natural: 2 < 12 < 122) → puesto → empleado por nombre. Así un puesto
+  como `1221-1` queda dentro de su ubicación 122 y no al final del documento.
+- Portada con resumen e índice clicable de ubicaciones, marcadores del PDF por ubicación y puesto, "Página X
+  de Y". Un puesto no se parte entre páginas salvo que no quepa en una (repite el encabezado).
+- Códigos tal como vienen de SIESA; horarios en dos líneas; domingos y festivos sombreados; novedades en
+  morado; Z/L en gris; leyenda con los códigos del periodo y cuántas veces aparecen.
+- Filtros opcionales por ciudad y por ubicación. Permiso `reporte.generar` (rol base "Consulta de programación").
+
 ## Respaldos
 
 La base vive en el volumen `pgdata`. En Coolify, programe una tarea (Scheduled Task) sobre el servicio
@@ -261,3 +279,4 @@ Liquidador (Liquidador de horas: carga, revisa, cierra y configura).
 - [x] F6 Asistente de IA que explica de dónde salen los datos (OpenRouter u otro proveedor compatible)
 - [x] Plataforma multi-app (portal) y autenticación con MFA obligatoria
 - [x] Liquidador de horas (reconstrucción de Payroll Manager) y asistente sobre OpenRouter
+- [x] Reporte de programación en PDF por ubicación y puesto

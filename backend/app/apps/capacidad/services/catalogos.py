@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.apps.capacidad.models import Novedad, Turno, TurnoFranja
 from app.apps.capacidad.models.maestros import DESCANSO, TRABAJO
-from app.apps.capacidad.services.excel import a_hora, leer_filas, texto
+from app.core.excel import a_hora, leer_filas, texto
 
 # Novedades conocidas de SIESA. La inducción y el permiso sindical vienen en el
 # catálogo de horarios como turnos, pero la persona no está en el puesto.

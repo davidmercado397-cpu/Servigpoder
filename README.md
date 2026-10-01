@@ -9,6 +9,7 @@ auditoría. Cada usuario ve en el portal solo las apps para las que tiene permis
 | App | Ruta | Descripción |
 |---|---|---|
 | Capacidad Operativa | `/capacidad` | Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA): huecos de cobertura, sobreprogramación, cubrimientos, bolsas y alertas |
+| Validación de nómina | `/nomina` | Revisa la nómina de las modalidades fijas (quincenal y mensual) contra la programación, los maestros de SIESA y las cuotas; genera alertas para revisar y un informe |
 | Reporte de programación | `/reporte` | Convierte el Excel de programación de SIESA en un PDF ordenado por ubicación y puesto (Carta horizontal), con índice, marcadores, domingos/festivos sombreados y leyenda |
 | Liquidador de horas | `/liquidador` | Cuenta las horas de cada turno por quincena (diurnas, nocturnas, dominicales, festivas y extras) y genera el archivo de liquidación. Reemplaza la app "Payroll Manager" de otra empresa del holding |
 
@@ -33,6 +34,7 @@ backend/
   app/apps/capacidad/  app Capacidad Operativa: manifest.py, models/, routes/, services/, schemas/
   app/apps/liquidador/ app Liquidador de horas: dominio/ (cálculo puro), models.py, routes/, services/, datos/
   app/apps/reporte/    app Reporte de programación: lector del Excel de SIESA y generador del PDF (sin base de datos)
+  app/apps/nomina/     app Validación de nómina: lectores de los archivos de SIESA, motor de reglas (puro) y rutas
   alembic/versions/    migraciones (una sola historia para toda la plataforma)
   tests/
 frontend/src/app/
@@ -43,6 +45,7 @@ frontend/src/app/
   (plataforma)/capacidad/    app Capacidad Operativa
   (plataforma)/liquidador/   app Liquidador de horas
   (plataforma)/reporte/      app Reporte de programación
+  (plataforma)/nomina/       app Validación de nómina
 components/shell-app.tsx     menú lateral, barra superior y asistente comunes a las apps
 ```
 
@@ -175,6 +178,23 @@ mes completo (28 a 31 días).
   morado; Z/L en gris; leyenda con los códigos del periodo y cuántas veces aparecen.
 - Filtros opcionales por ciudad y por ubicación. Permiso `reporte.generar` (rol base "Consulta de programación").
 
+## Validación de nómina
+
+Cada **revisión** es de una nómina: quincenal (2.ª quincena, días 16 a 30) o mensual (días 1 a 30; el 31 no
+suma). Se exigen todos los archivos del día: maestro de modalidades, ubicaciones y puestos con modalidad,
+contratos, cuotas, programación y la nómina. Después se puede **recargar solo la nómina** cuantas veces haga
+falta: cada carga recalcula y deja una revisión con alertas corregidas, que persisten y nuevas. Las revisiones
+de alertas (revisada, justificada, error) se conservan.
+
+- Días pagables = días con código que no tiene el check **Descuenta** (turnos, Z, L, IND…); el maestro de
+  códigos se alimenta solo con los códigos nuevos de la programación.
+- Modalidad por día según el puesto donde trabajó: modalidad del puesto > de la ubicación; sin ninguna, el
+  puesto va al segmento "sin modalidad" para aprobarlo o marcarlo como error de SIESA.
+- Grupos de empleados del contrato: se validan, administrativos (solo contrato y cuotas) o excluidos ("los 7":
+  Operativos Full y Ecopetrol). Parámetros editables: tolerancia ($1.000), SMLMV, auxilio de transporte,
+  horas por día, cuotas solo de 1.ª quincena y base del embargo.
+- El motor (`services/motor.py`) es puro y está probado con un escenario sintético que cubre cada alerta.
+
 ## Respaldos
 
 La base vive en el volumen `pgdata`. En Coolify, programe una tarea (Scheduled Task) sobre el servicio
@@ -280,3 +300,4 @@ Liquidador (Liquidador de horas: carga, revisa, cierra y configura).
 - [x] Plataforma multi-app (portal) y autenticación con MFA obligatoria
 - [x] Liquidador de horas (reconstrucción de Payroll Manager) y asistente sobre OpenRouter
 - [x] Reporte de programación en PDF por ubicación y puesto
+- [x] Validación de nómina (modalidades fijas, cuotas y cruces con la programación)

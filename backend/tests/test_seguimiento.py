@@ -62,7 +62,9 @@ def test_parametros(admin):
     assert admin.put("/api/capacidad/parametros/no_existe", json={"valor": "1"}).status_code == 404
 
 
-def test_contadores_menu(admin):
+def test_contadores_menu(admin, monkeypatch):
+    # Los contadores evalúan el mes en curso: se fija una fecha dentro del mes del escenario
+    monkeypatch.setattr(alertas, "hoy", lambda: date(2026, 9, 20))
     _cargar(admin)
     c = admin.get("/api/capacidad/menu/contadores").json()["data"]
     assert c["alertas"] >= 1 and c["cubrimientos_pendientes"] == 1

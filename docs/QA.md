@@ -215,6 +215,20 @@ La app original sigue en uso hasta terminar esta validación. Todo se compara co
 - [ ] Filtrar por una ciudad (p. ej. PALMIRA) o elegir ubicaciones: el PDF trae solo esas y lo dice en la portada.
 - [ ] Repetir con un Excel del 1 al 15 y con uno del mes completo: las columnas cambian solas y todo cabe en el ancho.
 
+## Validación de nómina
+
+- [ ] Crear la revisión "Quincenal · septiembre 2026": pide los 6 archivos y no calcula hasta tenerlos todos.
+- [ ] Al cargar el último archivo calcula solo: ~1.325 personas validadas, "los 7" fuera, 63 puestos sin modalidad.
+- [ ] Resumen: alertas por grupo; clic en una abre la bandeja filtrada.
+- [ ] Bandeja: seleccionar varias y marcarlas revisadas / justificadas (pide comentario) / error.
+- [ ] Persona: el día a día (pagable, novedad, vacaciones), modalidad por día, esperado contra pagado, auxilio y cuotas.
+- [ ] Puestos sin modalidad: aprobar uno ("no lleva") y marcar otro como error con comentario.
+- [ ] Recargar solo la nómina corregida: Resumen → Revisiones muestra corregidas, persisten y nuevas; "Solo nuevas" filtra las nuevas.
+- [ ] Códigos que descuentan: aparecen los códigos nuevos por confirmar; cambiar uno y recalcular cambia las alertas.
+- [ ] Grupos y parámetros: un grupo nuevo del listado de contratos aparece marcado "nuevo".
+- [ ] Informe Excel: Resumen, Revisiones, Alertas y Puestos sin modalidad.
+- [ ] Crear también "Mensual · septiembre 2026" y validar que los quincenales no salen como "programado sin nómina".
+
 ---
 
 ## Sugerencias de revisión (casos de negocio)

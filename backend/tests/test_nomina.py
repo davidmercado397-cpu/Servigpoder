@@ -45,6 +45,8 @@ CONTRATOS = [
     ("1008", "HUGO SIN MODALIDAD", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
     ("1009", "IVAN RONDA", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
     ("2001", "JUAN MENSUAL", "MENSUAL", "OPERATIVOS CON VARIABLE"),
+    ("1010", "KAREN SALE A VACACIONES", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
+    ("1011", "LUIS REGRESA DE VACACIONES", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
 ]
 
 
@@ -82,9 +84,11 @@ def _programacion() -> bytes:
         "1008": {16 + i: trabajo[i] for i in range(15)},
         "1009": {**{16 + i: trabajo[i] for i in range(14)}, 30: "XYZ"},  # código nuevo sin corchetes: no descuenta
         "2001": {d: trabajo[(d - 1) % 6] for d in range(1, 31)},
+        "1010": {**{16 + i: trabajo[i] for i in range(8)}, **{d: "[VAC]" for d in range(24, 31)}},
+        "1011": {**{d: "[VAC]" for d in range(16, 21)}, **{21 + i: trabajo[i] for i in range(10)}},
     }
     puesto = {"1001": ("10", "10"), "1002": ("10", "10"), "1003": ("10", "10"), "1005": ("10", "10"), "1008": ("20", "20"),
-              "1009": ("10", "10-1"), "2001": ("10", "10")}
+              "1009": ("10", "10-1"), "2001": ("10", "10"), "1010": ("10", "10"), "1011": ("10", "10")}
     filas: list[list[object]] = [["Compañia", "EMPRESA"], ["Desde", "2026-09-01"], ["Hasta", "2026-09-30"], [],
                                  ["C.C. Empleado", "NOMBRE EMPLEADO", "UBICACION", "DESCRIPCION UBICACION", "PUESTO", "DESCRIPCION PUESTO",
                                   *[str(d) for d in range(1, 32)]]]
@@ -128,6 +132,8 @@ QUINCENAL = {
     "1008": {**_completo(15, v130=0, v132=0)},  # puesto sin modalidad
     "1009": {**_completo(15, v130=30000, v132=0), "DEDUCCION_605": 50000},  # modalidad del puesto; cuota inactiva descontada
 }
+QUINCENAL["1010"] = {}  # nada en la nómina: lo trabajado antes va en la liquidación de vacaciones
+QUINCENAL["1011"] = _completo(10)  # se le pagan solo los 10 días trabajados después del regreso
 MENSUAL = {"2001": _completo(30)}
 
 
@@ -154,13 +160,18 @@ def test_escenario_completo(admin):
     p = admin.get(f"{API}/periodos/{pid}").json()["data"]
     assert p["calculado_en"] and p["faltan"] == []
     assert p["nombre"] == "Quincenal · 2.ª quincena de septiembre 2026"
-    assert p["resumen"]["personas"] == {"quincenal": 7}  # Gina (los 7) queda fuera
+    assert p["resumen"]["personas"] == {"quincenal": 9}  # Gina (los 7) queda fuera
     assert p["resumen"]["excluidas"] == {"quincenal": 1}
     assert p["historial"][0]["n"] == 1 and p["historial"][0]["alertas"] == p["resumen"]["alertas"]
 
     a = _alertas(admin, pid)
     assert "1001" not in a and "2001" not in a  # Juan es de nómina mensual: no se espera en la quincenal  # todo correcto (incluye la cuota 600, que solo va en la 1.ª quincena)
-    assert {("VACACIONES_CON_PAGO", "100"), ("VACACIONES_CON_PAGO", "130"), ("AUX_DIFERENTE", "103"), ("CUOTA_MAESTRO", "605")} <= a["1002"]
+    # Beto trabajó del 16 al 25 y salió a vacaciones: esos días van en la liquidación de vacaciones, pero la nómina le pagó todo
+    assert {("VACACIONES_CON_PAGO", "100"), ("VACACIONES_CON_PAGO", "130"), ("VACACIONES_CON_PAGO", "103"),
+            ("CUOTA_MAESTRO", "605"), ("VACACIONES_VERIFICAR", "")} <= a["1002"]
+    # Karen (trabajó y salió a vacaciones, nómina en cero) y Luis (regresó y se le pagan los días después): sin alertas reales
+    assert a["1010"] == {("VACACIONES_VERIFICAR", "")} and a["1011"] == {("VACACIONES_VERIFICAR", "")}
+    assert p["resumen"]["vacaciones"] == 3
     assert ("CUOTA_DE_MENOS", "605") not in a["1002"]  # el tope (100.000) es lo esperado y fue lo descontado
     assert {("AUX_CERO", "103"), ("MODALIDAD_MAYOR", "130"), ("CUOTA_DE_MAS", "605")} <= a["1003"]
     assert {("NOMINA_SIN_PROGRAMACION", ""), ("DESCUENTO_SIN_SUELDO", ""), ("NETO_NEGATIVO", "")} <= a["1004"]
@@ -175,11 +186,14 @@ def test_escenario_completo(admin):
 def test_detalle_de_persona_y_dias(admin):
     pid = _cargar_todo(admin)
     d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1002").json()["data"]
-    assert d["conteo"] == {"pagables": 10, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0}
-    assert d["dias_salario"] == 15 and d["auxilio"]["dias_esperados"] == 10
+    assert d["conteo"] == {"pagables": 0, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0, "antes_vacaciones": 10}
+    assert d["vacaciones"] == {"desde": "2026-09-26", "hasta": "2026-09-30", "dias": 5, "antes": 10}
+    assert d["dias_salario"] == 15 and d["auxilio"]["dias_esperados"] == 0
     c130 = next(x for x in d["conceptos"] if x["concepto"] == "130")
-    assert c130 == {"concepto": "130", "descripcion": "HORAS EXTRAS Y RECARGOS", "esperado": 200000, "pagado": 300000}
-    assert d["dias"]["2026-09-26"]["clase"] == "vacaciones"
+    assert c130 == {"concepto": "130", "descripcion": "HORAS EXTRAS Y RECARGOS", "esperado": 0, "pagado": 300000}
+    assert d["dias"]["2026-09-26"]["clase"] == "vacaciones" and d["dias"]["2026-09-16"]["clase"] == "antes_vacaciones"
+    luis = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1011").json()["data"]
+    assert luis["conteo"]["pagables"] == 10 and luis["conteo"]["antes_vacaciones"] == 0
     assert {x["tipo"] for x in d["alertas_lista"]} >= {"VACACIONES_CON_PAGO"}
     iv = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1009").json()["data"]
     assert iv["modalidades"] == {"6X1 ESP": 15}
@@ -295,3 +309,15 @@ def test_recargar_la_nomina_muestra_lo_corregido(admin):
     assert "1003" not in _alertas(admin, pid)
     nuevas = admin.get(f"{API}/periodos/{pid}/alertas?solo_nuevas=true").json()["data"]
     assert [(x["cedula"], x["tipo"], x["nueva"]) for x in nuevas] == [("1001", "AUX_CERO", True)]
+
+
+def test_vacaciones_no_cuentan_como_pendientes(admin):
+    pid = _cargar_todo(admin)
+    p = admin.get(f"{API}/periodos/{pid}").json()["data"]
+    todas = admin.get(f"{API}/periodos/{pid}/alertas?tamano=150").json()["meta"]["extra"]["total"]
+    assert p["pendientes"] == todas - p["resumen"]["vacaciones"]  # la lista de vacaciones es para verificar, no son pendientes
+    sin_vac = admin.get(f"{API}/periodos/{pid}/alertas?excluir_tipo=VACACIONES_VERIFICAR&tamano=150").json()["data"]
+    assert all(x["tipo"] != "VACACIONES_VERIFICAR" for x in sin_vac)
+    vac = admin.get(f"{API}/periodos/{pid}/alertas?tipo=VACACIONES_VERIFICAR").json()["data"]
+    karen = next(x for x in vac if x["cedula"] == "1010")
+    assert "8 días trabajados antes (del 16 al 23)" in karen["mensaje"] and karen["severidad"] == "info"

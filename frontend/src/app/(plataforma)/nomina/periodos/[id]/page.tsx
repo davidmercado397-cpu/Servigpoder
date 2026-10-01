@@ -8,12 +8,12 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Insignia, Pestanas, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import {
-  ARCHIVOS, CLASE_DIA, ESTADOS, SEVERIDAD, pesos, type Alerta as AlertaT, type Periodo, type PersonaDetalle, type PersonaLista,
+  ARCHIVOS, CLASE_DIA, ESTADOS, SEVERIDAD, VACACIONES, pesos, type Alerta as AlertaT, type Periodo, type PersonaDetalle, type PersonaLista,
   type PuestoSinModalidad,
 } from "@/lib/nomina";
 import { usePermiso } from "@/lib/sesion";
 
-type Pestana = "archivos" | "resumen" | "alertas" | "personas" | "sin_modalidad";
+type Pestana = "archivos" | "resumen" | "alertas" | "vacaciones" | "personas" | "sin_modalidad";
 const ESTADO = Object.fromEntries(ESTADOS.map(([k, t, c]) => [k, [t, c]])) as Record<string, [string, string]>;
 
 export default function PeriodoNomina() {
@@ -109,6 +109,7 @@ export default function PeriodoNomina() {
           ...(calculado ? [
             ["resumen", "Resumen"],
             ["alertas", `Alertas (${p.pendientes.toLocaleString("es-CO")} pendientes)`],
+            ["vacaciones", `Vacaciones (${p.resumen?.vacaciones ?? 0})`],
             ["personas", "Personas"],
             ["sin_modalidad", `Puestos sin modalidad (${p.resumen?.puestos_sin_modalidad_pendientes ?? 0})`],
           ] as [Pestana, string][] : []),
@@ -119,7 +120,17 @@ export default function PeriodoNomina() {
       {pestana === "resumen" && p.resumen && (
         <Resumen p={p} onTipo={(t) => { setFiltroTipo(t); setPestana("alertas"); }} />
       )}
-      {pestana === "alertas" && <Alertas p={p} tipoInicial={filtroTipo} onPersona={setPersona} onCambio={leer} />}
+      {pestana === "alertas" && <Alertas key="alertas" p={p} tipoInicial={filtroTipo} onPersona={setPersona} onCambio={leer} />}
+      {pestana === "vacaciones" && (
+        <div className="space-y-3">
+          <Alerta tipo="info">
+            Personas con vacaciones en el periodo. Los días trabajados <b>antes</b> de las vacaciones se pagan en la liquidación de vacaciones, así que
+            es correcto que esta nómina no los pague; los días trabajados <b>después</b> del regreso sí van en la nómina. Verifique cada caso en la
+            liquidación de vacaciones y márquelo como revisado. Si la nómina les paga de más, aparece como alerta en la pestaña Alertas.
+          </Alerta>
+          <Alertas key="vacaciones" p={p} tipoInicial={VACACIONES} fijo onPersona={setPersona} onCambio={leer} />
+        </div>
+      )}
       {pestana === "personas" && <Personas id={id} onPersona={setPersona} />}
       {pestana === "sin_modalidad" && <SinModalidad id={id} onCambio={leer} />}
       {persona && <DetallePersona id={id} {...persona} onCerrar={() => setPersona(null)} />}
@@ -176,6 +187,7 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
   const tipos = p.tipos ?? {};
   const grupos: Record<string, [string, Record<string, number>][]> = {};
   for (const [t, por] of Object.entries(r.por_tipo)) {
+    if (t === VACACIONES) continue;
     const g = tipos[t]?.grupo ?? "Otras";
     (grupos[g] ??= []).push([t, por]);
   }
@@ -188,12 +200,13 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
   );
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {tile("Personas validadas", (r.personas.quincenal ?? 0) + (r.personas.mensual ?? 0), `${r.personas.quincenal ?? 0} quincenal · ${r.personas.mensual ?? 0} mensual`)}
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {tile("Personas validadas", (r.personas.quincenal ?? 0) + (r.personas.mensual ?? 0))}
         {tile("Fuera de la revisión (los 7)", Object.values(r.excluidas).reduce((s, n) => s + n, 0))}
         {tile("Alertas", r.alertas, `${r.personas_con_alertas.toLocaleString("es-CO")} personas`)}
         {tile("Pendientes de revisar", p.pendientes)}
         {tile("Puestos sin modalidad", r.puestos_sin_modalidad_pendientes, `de ${r.puestos_sin_modalidad} por decidir`)}
+        {tile("Con vacaciones (por verificar)", r.vacaciones ?? 0, "en la liquidación de vacaciones")}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {Object.entries(grupos).map(([g, lista]) => (
@@ -214,7 +227,7 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
           </section>
         ))}
       </div>
-      {Object.keys(r.por_tipo).length === 0 && <Alerta tipo="ok">Sin alertas en este periodo.</Alerta>}
+      {Object.keys(grupos).length === 0 && <Alerta tipo="ok">Sin alertas en este periodo.</Alerta>}
       {p.historial && p.historial.length > 0 && (
         <section className="tarjeta overflow-hidden">
           <h2 className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">Revisiones (cada carga de la nómina o recálculo)</h2>
@@ -249,9 +262,13 @@ function sumar(x: Record<string, number>) {
   return Object.values(x).reduce((s, n) => s + n, 0);
 }
 
-function Alertas({ p, tipoInicial, onPersona, onCambio }: { p: Periodo; tipoInicial: string; onPersona: (x: { nomina: string; cedula: string }) => void; onCambio: () => void }) {
+function Alertas({ p, tipoInicial, fijo = false, onPersona, onCambio }: {
+  p: Periodo; tipoInicial: string; fijo?: boolean; onPersona: (x: { nomina: string; cedula: string }) => void; onCambio: () => void;
+}) {
   const puedeRevisar = usePermiso("nomina.revisar");
-  const [f, setF] = useState({ tipo: tipoInicial, nomina: "", estado: "pendiente", severidad: "", q: "", solo_nuevas: "" });
+  // En la bandeja principal no salen las de vacaciones (tienen su pestaña); en la de vacaciones el tipo es fijo
+  const [f, setF] = useState({ tipo: tipoInicial, nomina: "", estado: "pendiente", severidad: "", q: "", solo_nuevas: "",
+    excluir_tipo: fijo ? "" : VACACIONES });
   const [lista, setLista] = useState<AlertaT[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -285,14 +302,16 @@ function Alertas({ p, tipoInicial, onPersona, onCambio }: { p: Periodo; tipoInic
     }
   }
 
-  const tipos = Object.entries(p.tipos ?? {}).filter(([t]) => p.resumen?.por_tipo[t]);
+  const tipos = Object.entries(p.tipos ?? {}).filter(([t]) => p.resumen?.por_tipo[t] && t !== VACACIONES);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <select className="input w-72" value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
-          <option value="">Todas las alertas</option>
-          {tipos.map(([t, x]) => <option key={t} value={t}>{x.grupo} · {x.titulo} ({sumar(p.resumen!.por_tipo[t])})</option>)}
-        </select>
+        {!fijo && (
+          <select className="input w-72" value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
+            <option value="">Todas las alertas</option>
+            {tipos.map(([t, x]) => <option key={t} value={t}>{x.grupo} · {x.titulo} ({sumar(p.resumen!.por_tipo[t])})</option>)}
+          </select>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" className="h-4 w-4" checked={!!f.solo_nuevas} onChange={(e) => setF({ ...f, solo_nuevas: e.target.checked ? "true" : "" })} />
           Solo nuevas en la última carga
@@ -301,9 +320,11 @@ function Alertas({ p, tipoInicial, onPersona, onCambio }: { p: Periodo; tipoInic
           <option value="">Todos los estados</option>
           {ESTADOS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
         </select>
-        <select className="input w-32" value={f.severidad} onChange={(e) => setF({ ...f, severidad: e.target.value })}>
-          <option value="">Severidad</option><option value="alta">Alta</option><option value="media">Media</option>
-        </select>
+        {!fijo && (
+          <select className="input w-32" value={f.severidad} onChange={(e) => setF({ ...f, severidad: e.target.value })}>
+            <option value="">Severidad</option><option value="alta">Alta</option><option value="media">Media</option>
+          </select>
+        )}
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input className="input w-56 pl-8" placeholder="Cédula, nombre o texto…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
@@ -533,7 +554,7 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
             )}
             <div className="grid gap-3 sm:grid-cols-4">
               {[
-                ["Días pagables", d.conteo.pagables, "turnos + descansos (Z, L, IND)"],
+                ["Días a pagar en esta nómina", d.conteo.pagables, d.conteo.antes_vacaciones ? `${d.conteo.antes_vacaciones} antes de vacaciones van en la liquidación` : "turnos + descansos (Z, L, IND)"],
                 ["Días de salario pagados", d.dias_salario, "horas del concepto 100 ÷ 7"],
                 ["Días de novedad", d.conteo.novedad, d.conteo.vacaciones ? `${d.conteo.vacaciones} de vacaciones` : "descuentan"],
                 ["Neto", pesos(d.neto), `devengado ${pesos(d.devengado)}`],

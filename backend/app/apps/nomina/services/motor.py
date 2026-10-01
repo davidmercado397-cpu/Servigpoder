@@ -9,6 +9,10 @@ suma) se calcula, con la programación del mes:
 - el valor esperado de cada concepto de la modalidad (días × valor por día) y de cada cuota;
 
 y se compara con lo pagado. Las diferencias se vuelven alertas. Funciones puras: no tocan la base.
+
+Vacaciones: los días trabajados ANTES del primer día de vacaciones del periodo se pagan en la liquidación de
+vacaciones (no se esperan en la nómina); los de después del regreso, en la nómina normal. Toda persona con
+vacaciones queda en una lista para verificar; solo es alerta si la nómina le paga más de lo que corresponde.
 """
 
 import calendar
@@ -45,7 +49,10 @@ TIPOS: dict[str, tuple[str, str, str]] = {
     "CUOTA_MAESTRO": ("Cuota mal configurada (valor mayor al tope)", "media", "Cuotas"),
     "DESCUENTO_SIN_SUELDO": ("Descuentos sin sueldo", "alta", "Cuotas"),
     "NETO_NEGATIVO": ("Neto negativo: se descuenta más de lo devengado", "alta", "Cuotas"),
+    # Informativa: no cuenta como alerta pendiente; va en su propia pestaña
+    "VACACIONES_VERIFICAR": ("Vacaciones: verificar la liquidación de vacaciones", "info", "Vacaciones"),
 }
+INFORMATIVAS = {"VACACIONES_VERIFICAR"}
 
 CUOTA_ACTIVA = {"EN PROCESO", "PENDIENTE"}
 CONCEPTO_SALARIO = "100"
@@ -88,6 +95,10 @@ class Alerta:
     @property
     def severidad(self) -> str:
         return TIPOS[self.tipo][1]
+
+    @property
+    def informativa(self) -> bool:
+        return self.tipo in INFORMATIVAS
 
 
 @dataclass
@@ -179,7 +190,7 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
                                codigos, puestos, puestos_aprobados, mods, conceptos_modalidad, desc_concepto, p, sin_modalidad)
             a = _alertas_persona(persona, pago, contrato, trat, nomina, base_dias, p)
             a += _alertas_cuotas(persona, pago, cuotas_por_persona.get(ced, []), conceptos_cuota, archivo["conceptos"], nomina, p)
-            persona["alertas"] = len(a)
+            persona["alertas"] = sum(1 for x in a if not x.informativa)
             personas.append(persona)
             alertas += a
 
@@ -210,19 +221,25 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas, codigos, puestos, puestos_aprobados,
              mods, conceptos_modalidad, desc_concepto, p, sin_modalidad) -> dict:
     dias: dict[str, dict] = {}
-    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = 0
+    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = 0
     por_modalidad: dict[str, int] = defaultdict(int)
     esperado: dict[str, float] = defaultdict(float)
     ultimo_dia_modalidad: str | None = None
+    por_dia = []
     for d in fechas:
-        iso = d.isoformat()
         candidatos = []
         for f in filas:
-            crudo = f["dias"].get(iso)
+            crudo = f["dias"].get(d.isoformat())
             if crudo:
                 cod = codigo_programacion(crudo).upper()
                 info = codigos.get(cod) or codigo_por_defecto(crudo)
                 candidatos.append((f, crudo, cod, info))
+        por_dia.append((d, candidatos))
+    # Primer día de vacaciones del periodo: lo trabajado antes se paga en la liquidación de vacaciones
+    dias_vac = [d for d, cand in por_dia if cand and all(c[3].descuenta for c in cand) and any(c[3].vacaciones for c in cand)]
+    primer_vac = dias_vac[0] if dias_vac else None
+    for d, candidatos in por_dia:
+        iso = d.isoformat()
         if not candidatos:
             vacios += 1
             dias[iso] = {"codigo": "", "clase": "vacio"}
@@ -237,6 +254,10 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             continue
         # El día se paga una vez, con la modalidad del puesto donde trabajó (si tiene turno, ese manda)
         f, crudo, cod, _ = next((c for c in pagan if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan[0])
+        if primer_vac and d < primer_vac:
+            antes_vacaciones += 1
+            dias[iso] = {"codigo": crudo, "clase": "antes_vacaciones", "puesto": f["puesto"], "ubicacion": f["ubicacion"]}
+            continue
         pagables += 1
         clave = (f["ubicacion"], f["puesto"])
         info_puesto = puestos.get(clave)
@@ -272,7 +293,9 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "tiene_programacion": any(d["clase"] != "vacio" for d in dias.values()),
         "dias": dias,
         "conteo": {"pagables": pagables, "novedad": novedad, "vacaciones": vacaciones, "vacios": vacios,
-                   "sin_modalidad": dias_sin_modalidad},
+                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones},
+        "vacaciones": {"desde": dias_vac[0].isoformat(), "hasta": dias_vac[-1].isoformat(), "dias": len(dias_vac),
+                       "antes": antes_vacaciones} if dias_vac else None,
         "modalidades": dict(por_modalidad),
         "dias_salario": round(horas.get(CONCEPTO_SALARIO, 0) / p.horas_dia, 2) if p.horas_dia else 0,
         "auxilio": {"pagado": devengos.get(CONCEPTO_AUXILIO, 0), "dias_pagados": round(devengos.get(CONCEPTO_AUXILIO, 0) / (p.auxilio_transporte / 30), 2),
@@ -308,22 +331,31 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
 
     pago_modalidad = sum(x["pagado"] for x in per["conceptos"])
     extras = sum(per["extras"].values()) + pago_modalidad
+    vac = per.get("vacaciones")
+    if vac:
+        despues = f"{pagables} días trabajados después del regreso (se pagan en esta nómina)" if pagables else "ningún día después del regreso"
+        hasta_antes = (date.fromisoformat(vac["desde"]) - timedelta(days=1)).day
+        antes = (f"{vac['antes']} días trabajados antes (del {per['desde'][8:]} al {hasta_antes:02d}) que se pagan en la liquidación de vacaciones"
+                 if vac["antes"] else "sin días trabajados antes")
+        alerta("VACACIONES_VERIFICAR", f"Vacaciones del {vac['desde'][8:]} al {vac['hasta'][8:]} ({vac['dias']} días); {antes}; {despues}. "
+                                       f"En esta nómina se le pagan {sal:g} días de salario.", esperado=pagables, pagado=sal)
+    en_vac = " (tiene vacaciones en el periodo: lo trabajado antes va en la liquidación de vacaciones)" if vac else ""
     if pagables == 0:
         if sal > 0:
-            alerta("PAGO_SIN_DIAS", f"Se le pagan {sal:g} días de salario y no tiene días trabajados en la programación "
-                                    f"({c['novedad']} días de novedad).", esperado=0, pagado=pago["devengos"].get(CONCEPTO_SALARIO, 0))
+            alerta("VACACIONES_CON_PAGO" if vac else "PAGO_SIN_DIAS",
+                   f"Se le pagan {sal:g} días de salario y no le corresponde ningún día en esta nómina{en_vac}.",
+                   referencia=CONCEPTO_SALARIO, esperado=0, pagado=sal)
         if extras > p.tolerancia:
-            alerta("EXTRAS_SIN_DIAS", f"Recibe {pesos(extras)} en extras/modalidad sin días trabajados.", esperado=0, pagado=extras)
+            alerta("VACACIONES_CON_PAGO" if vac else "EXTRAS_SIN_DIAS",
+                   f"Recibe {pesos(extras)} en extras/modalidad sin días a pagar en esta nómina{en_vac}.", referencia="130", esperado=0, pagado=extras)
     else:
         if sal > pagables + 0.5:
-            tipo = "VACACIONES_CON_PAGO" if c["vacaciones"] else "SALARIO_MAYOR_DIAS"
-            detalle = f" y {c['vacaciones']} de vacaciones" if c["vacaciones"] else ""
-            alerta(tipo, f"Se le pagan {sal:g} días de salario pero solo tiene {pagables} días trabajados{detalle}.",
+            alerta("VACACIONES_CON_PAGO" if vac else "SALARIO_MAYOR_DIAS",
+                   f"Se le pagan {sal:g} días de salario pero en esta nómina le corresponden {pagables}{en_vac}.",
                    referencia=CONCEPTO_SALARIO, esperado=pagables, pagado=sal)
         elif sal < pagables - 0.5:
-            alerta("DIAS_SIN_PAGAR", f"Tiene {pagables} días trabajados y solo se le pagan {sal:g} días de salario "
-                                     f"(revisar si van en la liquidación de vacaciones u otra).", referencia=CONCEPTO_SALARIO,
-                   esperado=pagables, pagado=sal)
+            alerta("DIAS_SIN_PAGAR", f"Tiene {pagables} días trabajados y solo se le pagan {sal:g} días de salario.",
+                   referencia=CONCEPTO_SALARIO, esperado=pagables, pagado=sal)
 
     # Auxilio de transporte: días laborados + descansos (sin novedades), si gana hasta 2 SMLMV
     aux = per["auxilio"]
@@ -332,11 +364,13 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
             alerta("AUX_CERO", f"Tiene {pagables} días con derecho a auxilio de transporte y se le pagan 0 días.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=0)
         elif abs(aux["pagado"] - aux["esperado"]) > p.tolerancia:
-            alerta("AUX_DIFERENTE", f"Auxilio de transporte por {aux['dias_pagados']:g} días ({pesos(aux['pagado'])}); "
-                                    f"le corresponden {pagables} días ({pesos(aux['esperado'])}).",
+            alerta("VACACIONES_CON_PAGO" if vac and aux["pagado"] > aux["esperado"] else "AUX_DIFERENTE",
+                   f"Auxilio de transporte por {aux['dias_pagados']:g} días ({pesos(aux['pagado'])}); "
+                   f"le corresponden {pagables} días ({pesos(aux['esperado'])}){en_vac}.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=aux["pagado"])
     elif pagables == 0 and aux["pagado"] > p.tolerancia:
-        alerta("AUX_DIFERENTE", f"Se le paga auxilio de transporte ({pesos(aux['pagado'])}) sin días trabajados.",
+        alerta("VACACIONES_CON_PAGO" if vac else "AUX_DIFERENTE",
+               f"Se le paga auxilio de transporte ({pesos(aux['pagado'])}) sin días a pagar en esta nómina{en_vac}.",
                referencia=CONCEPTO_AUXILIO, esperado=0, pagado=aux["pagado"])
 
     # Modalidad: concepto por concepto
@@ -344,9 +378,9 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
         for x in per["conceptos"]:
             dif = x["pagado"] - x["esperado"]
             if dif > p.tolerancia:
-                tipo = "VACACIONES_CON_PAGO" if c["vacaciones"] and x["esperado"] else "MODALIDAD_MAYOR"
-                alerta(tipo, f"{x['concepto']} {x['descripcion']}: pagado {pesos(x['pagado'])}, esperado {pesos(x['esperado'])} "
-                             f"({pagables} días{', ' + str(c['vacaciones']) + ' de vacaciones' if c['vacaciones'] else ''}).",
+                alerta("VACACIONES_CON_PAGO" if vac else "MODALIDAD_MAYOR",
+                       f"{x['concepto']} {x['descripcion']}: pagado {pesos(x['pagado'])}, esperado {pesos(x['esperado'])} "
+                       f"({pagables} días){en_vac}.",
                        referencia=x["concepto"], esperado=x["esperado"], pagado=x["pagado"])
             elif dif < -p.tolerancia:
                 alerta("MODALIDAD_MENOR", f"{x['concepto']} {x['descripcion']}: pagado {pesos(x['pagado'])}, esperado {pesos(x['esperado'])} "
@@ -451,6 +485,7 @@ def _resumen(personas, alertas, sin_mod, datos) -> dict:
     por_tipo: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for a in alertas:
         por_tipo[a.tipo][a.nomina] += 1
+    reales = [a for a in alertas if not a.informativa]
     por_nomina: dict[str, int] = defaultdict(int)
     validadas: dict[str, set[str]] = defaultdict(set)
     for x in personas:
@@ -458,8 +493,9 @@ def _resumen(personas, alertas, sin_mod, datos) -> dict:
         validadas[x["nomina"]].add(x["cedula"])
     return {
         "personas": dict(por_nomina),
-        "personas_con_alertas": len({(a.nomina, a.cedula) for a in alertas}),
-        "alertas": len(alertas),
+        "personas_con_alertas": len({(a.nomina, a.cedula) for a in reales}),
+        "alertas": len(reales),
+        "vacaciones": sum(1 for a in alertas if a.tipo == "VACACIONES_VERIFICAR"),
         "por_tipo": {t: dict(v) for t, v in por_tipo.items()},
         "puestos_sin_modalidad": len(sin_mod),
         "puestos_sin_modalidad_pendientes": sum(1 for x in sin_mod if not x["aprobado"]),

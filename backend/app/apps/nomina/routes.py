@@ -40,7 +40,8 @@ def _periodo_out(db: Session, p: NomPeriodo, completo: bool = False) -> dict:
                 for a in db.scalars(select(NomArchivo).where(NomArchivo.periodo_id == p.id))}
     resumen = {k: v for k, v in (p.resumen or {}).items() if k != "sin_modalidad_lista"}
     pendientes = db.scalar(select(func.count()).select_from(NomAlerta).outerjoin(NomDecision, _union_decision()).where(
-        NomAlerta.periodo_id == p.id, or_(NomDecision.id.is_(None), NomDecision.estado == PENDIENTE))) or 0
+        NomAlerta.periodo_id == p.id, NomAlerta.tipo.not_in(motor.INFORMATIVAS),
+        or_(NomDecision.id.is_(None), NomDecision.estado == PENDIENTE))) or 0
     out = {"id": p.id, "anio": p.anio, "mes": p.mes, "nomina": p.nomina, "nombre": _nombre(p), "calculado_en": p.calculado_en,
            "archivos": archivos, "alertas": resumen.get("alertas", 0), "pendientes": pendientes,
            "personas": resumen.get("personas", {}), "revisiones": len(p.historial or []),
@@ -152,7 +153,8 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
 
 # --- Alertas -----------------------------------------------------------------------------------------
 
-def _consulta_alertas(periodo_id: int, tipo: str, nomina: str, estado: str, severidad: str, q: str, solo_nuevas: bool = False):
+def _consulta_alertas(periodo_id: int, tipo: str, nomina: str, estado: str, severidad: str, q: str, solo_nuevas: bool = False,
+                      excluir_tipo: str = ""):
     consulta = (select(NomAlerta, NomDecision).outerjoin(NomDecision, _union_decision())
                 .where(NomAlerta.periodo_id == periodo_id)
                 .order_by(case((NomAlerta.severidad == "alta", 0), (NomAlerta.severidad == "media", 1), else_=2), NomAlerta.tipo, NomAlerta.nombre))
@@ -164,6 +166,8 @@ def _consulta_alertas(periodo_id: int, tipo: str, nomina: str, estado: str, seve
         consulta = consulta.where(NomAlerta.severidad == severidad)
     if solo_nuevas:
         consulta = consulta.where(NomAlerta.nueva.is_(True))
+    if excluir_tipo:
+        consulta = consulta.where(NomAlerta.tipo.not_in(excluir_tipo.split(",")))
     if estado == PENDIENTE:
         consulta = consulta.where(or_(NomDecision.id.is_(None), NomDecision.estado == PENDIENTE))
     elif estado:
@@ -185,9 +189,9 @@ def _alerta_out(a: NomAlerta, d: NomDecision | None) -> dict:
 @router.get("/periodos/{periodo_id}/alertas", response_model=ApiResponse[list[dict]])
 def alertas(periodo_id: int, db: DbSession, p: Paginacion, tipo: str = Query("", max_length=400), nomina: str = "",
             estado: str = "", severidad: str = "", q: str = Query("", max_length=100), solo_nuevas: bool = False,
-            _=Depends(require(VER))):
+            excluir_tipo: str = Query("", max_length=400), _=Depends(require(VER))):
     _periodo(db, periodo_id)
-    consulta = _consulta_alertas(periodo_id, tipo, nomina, estado, severidad, q, solo_nuevas)
+    consulta = _consulta_alertas(periodo_id, tipo, nomina, estado, severidad, q, solo_nuevas, excluir_tipo)
     total = db.scalar(select(func.count()).select_from(consulta.order_by(None).subquery())) or 0
     filas = db.execute(consulta.limit(p.tamano).offset(p.offset)).all()
     return ok([_alerta_out(a, d) for a, d in filas], **p.meta(total))

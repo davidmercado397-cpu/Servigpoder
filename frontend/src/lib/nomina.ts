@@ -2,7 +2,7 @@
 
 export type ArchivoCargado = { nombre: string; registros: number; cargado_en: string };
 
-export type TipoAlerta = { titulo: string; severidad: "alta" | "media" | "baja"; grupo: string };
+export type TipoAlerta = { titulo: string; severidad: "alta" | "media" | "baja" | "info"; grupo: string };
 
 export type Revision = {
   n: number; fecha: string; motivo: string; archivo_nomina: string; personas: number; alertas: number;
@@ -16,6 +16,7 @@ export type Periodo = {
   resumen?: {
     personas: Record<string, number>; personas_con_alertas: number; alertas: number; puestos_sin_modalidad: number;
     puestos_sin_modalidad_pendientes: number; excluidas: Record<string, number>; por_tipo: Record<string, Record<string, number>>;
+    vacaciones?: number;
   };
   faltan?: string[];
   tipos?: Record<string, TipoAlerta>;
@@ -39,7 +40,8 @@ export type PersonaDetalle = {
   cedula: string; nombre: string; nomina: string; grupo: string; tratamiento: string; cargo: string; salario: number;
   contrato: { activo: boolean; tipo_nomina: string; grupo: string; ingreso: string | null; cargo: string } | null;
   desde: string; hasta: string; dias: Record<string, Dia>;
-  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number };
+  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number; antes_vacaciones?: number };
+  vacaciones: { desde: string; hasta: string; dias: number; antes: number } | null;
   modalidades: Record<string, number>; dias_salario: number;
   auxilio: { pagado: number; dias_pagados: number; dias_esperados: number; esperado: number };
   conceptos: { concepto: string; descripcion: string; esperado: number; pagado: number }[];
@@ -74,10 +76,15 @@ export const SEVERIDAD: Record<string, string> = {
   alta: "bg-red-50 text-red-700 ring-1 ring-red-200",
   media: "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
   baja: "bg-slate-100 text-slate-600",
+  info: "bg-sky-50 text-sky-800 ring-1 ring-sky-200",
 };
+
+/** Tipo informativo: personas con vacaciones para verificar en la liquidación (no son alertas pendientes). */
+export const VACACIONES = "VACACIONES_VERIFICAR";
 
 export const CLASE_DIA: Record<string, [string, string]> = {
   pagable: ["Pagable", "bg-marca-50 text-marca-800"],
+  antes_vacaciones: ["Trabajado antes de vacaciones (va en la liquidación)", "bg-sky-50 text-sky-800"],
   novedad: ["Novedad", "bg-violet-50 text-violet-700"],
   vacaciones: ["Vacaciones", "bg-violet-100 text-violet-800"],
   vacio: ["Sin programación", "bg-slate-50 text-slate-400"],

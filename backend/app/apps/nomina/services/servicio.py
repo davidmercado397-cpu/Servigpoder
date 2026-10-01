@@ -182,12 +182,14 @@ def recalcular(db: Session, periodo: NomPeriodo, motivo: str = "Recálculo") -> 
     db.execute(delete(NomPersona).where(NomPersona.periodo_id == periodo.id))
     db.add_all(NomPersona(periodo_id=periodo.id, nomina=x["nomina"], cedula=x["cedula"], nombre=x["nombre"][:200],
                           grupo=x["grupo"][:80], alertas=x["alertas"], detalle=x) for x in r.personas)
-    actuales = {(a.cedula, a.tipo, a.referencia[:40]) for a in r.alertas}
+    # El historial compara solo alertas reales (las informativas de vacaciones no son errores)
+    anteriores = {k for k in anteriores if k[1] not in motor.INFORMATIVAS}
+    actuales = {(a.cedula, a.tipo, a.referencia[:40]) for a in r.alertas if not a.informativa}
     primera = not periodo.historial
     db.add_all(NomAlerta(periodo_id=periodo.id, nomina=a.nomina, cedula=a.cedula, nombre=a.nombre[:200], tipo=a.tipo,
                          referencia=a.referencia[:40], severidad=a.severidad, mensaje=a.mensaje, esperado=a.esperado,
                          pagado=a.pagado, datos=a.datos,
-                         nueva=not primera and (a.cedula, a.tipo, a.referencia[:40]) not in anteriores)
+                         nueva=not primera and not a.informativa and (a.cedula, a.tipo, a.referencia[:40]) not in anteriores)
                for a in r.alertas)
     # Revisión: qué se corrigió, qué persiste y qué apareció frente al cálculo anterior
     corregidas = anteriores - actuales

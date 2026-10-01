@@ -8,7 +8,7 @@ import { usePermiso } from "@/lib/sesion";
 type Grupo = { nombre: string; tratamiento: string; revisado: boolean };
 type Parametros = {
   tolerancia: number; smlmv: number; auxilio_transporte: number; horas_dia: number;
-  solo_primera_quincena: string; excluidos_base_embargo: string; embargos_sin_minimo: string;
+  solo_primera_quincena: string; excluidos_base_embargo: string; embargos_sin_minimo: string; equivalencias_cuotas: string;
 };
 
 const TRATAMIENTOS: [string, string, string][] = [
@@ -25,6 +25,7 @@ const CAMPOS: [keyof Parametros, string, string, "numero" | "texto"][] = [
   ["solo_primera_quincena", "Cuotas que solo se descuentan en la 1.ª quincena", "Conceptos separados por coma", "texto"],
   ["excluidos_base_embargo", "Conceptos fuera de la base del embargo", "Además del auxilio de transporte (103)", "texto"],
   ["embargos_sin_minimo", "Embargos sobre la base completa", "Sin restar el salario mínimo (p. ej. cooperativas)", "texto"],
+  ["equivalencias_cuotas", "Cuotas que se pagan con otro concepto", "cuota=concepto de nómina, separados por coma (p. ej. 152=129)", "texto"],
 ];
 
 export default function ConfiguracionNomina() {

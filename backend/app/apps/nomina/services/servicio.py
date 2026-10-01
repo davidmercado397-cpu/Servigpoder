@@ -58,7 +58,20 @@ def parametros_motor(p: NomParametros) -> motor.Parametros:
         tolerancia=float(p.tolerancia), smlmv=float(p.smlmv), auxilio_transporte=float(p.auxilio_transporte),
         horas_dia=float(p.horas_dia), solo_primera_quincena=_lista(p.solo_primera_quincena),
         excluidos_base_embargo=_lista(p.excluidos_base_embargo), embargos_sin_minimo=_lista(p.embargos_sin_minimo),
+        equivalencias_cuotas=equivalencias(p.equivalencias_cuotas),
     )
+
+
+def equivalencias(texto: str) -> dict[str, list[str]]:
+    """'152=129, 160=161+162' → {'152': ['129'], '160': ['161', '162']}"""
+    res: dict[str, list[str]] = {}
+    for par in (texto or "").split(","):
+        if "=" in par:
+            cuota, nomina = par.split("=", 1)
+            destinos = [x.strip() for x in nomina.split("+") if x.strip()]
+            if cuota.strip() and destinos:
+                res[cuota.strip()] = destinos
+    return res
 
 
 def sembrar(db: Session) -> None:

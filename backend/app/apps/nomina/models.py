@@ -179,4 +179,6 @@ class NomParametros(Base):
     excluidos_base_embargo: Mapped[str] = mapped_column(String(200), default="103,132,142,143")
     # Embargos que se calculan sobre la base completa, sin restar el salario mínimo
     embargos_sin_minimo: Mapped[str] = mapped_column(String(200), default="606")
+    # Cuotas que en la nómina se pagan con otro concepto: "152=129" (RODAMIENTO_ADM se paga como 129 RODAMIENTO)
+    equivalencias_cuotas: Mapped[str] = mapped_column(String(200), default="152=129")
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

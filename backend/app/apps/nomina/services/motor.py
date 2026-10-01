@@ -63,6 +63,8 @@ class Parametros:
     solo_primera_quincena: set[str] = field(default_factory=lambda: {"600", "630", "631", "632"})
     excluidos_base_embargo: set[str] = field(default_factory=lambda: {"103", "132", "142", "143"})
     embargos_sin_minimo: set[str] = field(default_factory=lambda: {"606"})
+    # Concepto de cuota → conceptos de la nómina con que se paga (además del mismo código)
+    equivalencias_cuotas: dict[str, list[str]] = field(default_factory=lambda: {"152": ["129"]})
 
 
 @dataclass
@@ -370,8 +372,6 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
         lista = activas.get(concepto, [])
         if nomina == QUINCENAL and concepto in p.solo_primera_quincena:
             continue  # en la 2.ª quincena estas cuotas no se descuentan
-        if conceptos_nomina and concepto not in conceptos_nomina:
-            continue  # el concepto no existe en este archivo de nómina: no se puede validar
         esperado = 0.0
         es_devengo = any(c["devengo"] for c in lista) or (not lista and devengos.get(concepto))
         for c in lista:
@@ -387,8 +387,13 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
             if saldo is not None:
                 valor = min(valor, max(0.0, saldo))
             esperado += valor
-        pagado = (devengos if es_devengo else deducciones).get(concepto, 0.0)
+        # Si el concepto no está en la nómina, cuenta como no pagado (salvo que se pague con un concepto equivalente)
+        fuente = devengos if es_devengo else deducciones
+        pagado = sum(fuente.get(c, 0.0) for c in [concepto, *p.equivalencias_cuotas.get(concepto, [])])
         descripcion = lista[0]["descripcion"] if lista else conceptos_nomina.get(concepto, "")
+        equivalente = p.equivalencias_cuotas.get(concepto)
+        if equivalente:
+            descripcion += f" (se paga como {', '.join(equivalente)})"
         detalle.append({"concepto": concepto, "descripcion": descripcion, "devengo": bool(es_devengo), "esperado": round(esperado),
                         "pagado": round(pagado), "cuotas": len(lista), "pendiente": any(c["estado"] == "PENDIENTE" for c in lista)})
         if abs(pagado - esperado) <= p.tolerancia:

@@ -66,6 +66,9 @@ def _cuotas() -> bytes:
         ["1003", "CARLA", "1", "605", "PRESTAMO EMPRESA", "5", 600000, 570000, 0, 100000, 0, "En Proceso"],  # saldo 30.000
         ["1006", "FABIO", "1", "605", "PRESTAMO EMPRESA", "0", 500000, 0, 0, 50000, 0, "Pendiente"],
         ["1009", "IVAN", "1", "605", "PRESTAMO EMPRESA", "3", 500000, 100000, 0, 50000, 0, "Inactivo"],
+        # Rodamiento administrativo: en la nómina se paga con el concepto 129 RODAMIENTO
+        ["1006", "FABIO", "1", "152", "RODAMIENTO_ADM", "4", 0, 0, 600000, 0, 0, "En Proceso"],
+        ["1009", "IVAN", "1", "152", "RODAMIENTO_ADM", "4", 0, 0, 300000, 0, 0, "En Proceso"],
     ])
 
 
@@ -92,8 +95,8 @@ def _programacion() -> bytes:
     return xlsx(filas)
 
 
-COLS = ["HORAS_100", "DEVENGO_100", "DEVENGO_103", "DEVENGO_130", "DEVENGO_132", "DEDUCCION_600", "DEDUCCION_605", "DEDUCCION_611"]
-TITULOS = {"HORAS_100": "100-SALARIO BASICO", "DEVENGO_103": "103-AUXILIO DE TRANSPORTE", "DEVENGO_130": "130-HORAS EXTRAS Y RECARGOS",
+COLS = ["HORAS_100", "DEVENGO_100", "DEVENGO_103", "DEVENGO_129", "DEVENGO_130", "DEVENGO_132", "DEDUCCION_600", "DEDUCCION_605", "DEDUCCION_611"]
+TITULOS = {"HORAS_100": "100-SALARIO BASICO", "DEVENGO_103": "103-AUXILIO DE TRANSPORTE", "DEVENGO_129": "129-RODAMIENTO", "DEVENGO_130": "130-HORAS EXTRAS Y RECARGOS",
            "DEVENGO_132": "132-APLICACION LEY 2101", "DEDUCCION_600": "600-SEGUROS", "DEDUCCION_605": "605-PRESTAMO",
            "DEDUCCION_611": "611-EMBARGO 5A PARTE"}
 
@@ -120,7 +123,7 @@ QUINCENAL = {
     "1002": {**_completo(15), "DEDUCCION_605": 100000},  # 5 días de vacaciones y se le paga todo
     "1003": {**_completo(15, aux=False), "DEVENGO_130": 400000, "DEDUCCION_605": 100000},
     "1004": {"DEDUCCION_605": 50000, "NETO": -50000},  # sin programación, sin sueldo y neto negativo
-    "1006": {**_completo(15)},  # administrativo sin programación: sin alerta; préstamo pendiente sin descontar
+    "1006": {**_completo(15), "DEVENGO_129": 600000},  # administrativo sin programación; rodamiento pagado como 129
     "1007": {"DEVENGO_130": 999999},  # de "los 7": no se revisa
     "1008": {**_completo(15, v130=0, v132=0)},  # puesto sin modalidad
     "1009": {**_completo(15, v130=30000, v132=0), "DEDUCCION_605": 50000},  # modalidad del puesto; cuota inactiva descontada
@@ -165,7 +168,8 @@ def test_escenario_completo(admin):
     assert a["1006"] == {("CUOTA_NO_DESCONTADA", "605")}  # administrativo: solo cuotas
     assert "1007" not in a and "1008" not in a
     # Iván: puesto con modalidad propia (6X1, 30.000/día) aunque la ubicación tenga otra; 15 días (XYZ no descuenta)
-    assert a["1009"] == {("CUOTA_DE_MAS", "605")}  # préstamo inactivo que se sigue descontando
+    # Préstamo inactivo que se sigue descontando y rodamiento (152) que no se pagó con el 129
+    assert a["1009"] == {("CUOTA_DE_MAS", "605"), ("CUOTA_DEVENGO_DIFERENTE", "152")}
 
 
 def test_detalle_de_persona_y_dias(admin):

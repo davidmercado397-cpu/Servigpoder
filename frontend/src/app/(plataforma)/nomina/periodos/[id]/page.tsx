@@ -522,6 +522,8 @@ const DIA_SEMANA = ["do", "lu", "ma", "mi", "ju", "vi", "sá"];
 
 function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: string; cedula: string; onCerrar: () => void }) {
   const [d, setD] = useState<PersonaDetalle | null>(null);
+  const nombrePuesto = (puesto: string, ubicacion?: string) =>
+    d?.puestos?.find((x) => x.puesto === puesto && (!ubicacion || x.ubicacion === ubicacion))?.puesto_nombre ?? "";
   const [error, setError] = useState("");
   useEffect(() => {
     api<PersonaDetalle>(`/nomina/periodos/${id}/personas/${nomina}/${cedula}`).then(setD).catch((e) => setError(mensajeError(e)));
@@ -574,16 +576,19 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
                   const fecha = new Date(f + "T12:00:00");
                   const [t, c] = CLASE_DIA[x.clase] ?? [x.clase, ""];
                   return (
-                    <div key={f} className={`rounded-md p-1.5 text-center text-[11px] leading-tight ${c}`} title={`${t}${x.puesto ? ` · puesto ${x.puesto}` : ""}${x.modalidad ? ` · ${x.modalidad}` : x.clase === "pagable" ? " · sin modalidad" : ""}`}>
+                    <div key={f} className={`rounded-md p-1.5 text-center text-[11px] leading-tight ${c}`}
+                      title={`${t}${x.puesto ? ` · puesto ${x.puesto} ${nombrePuesto(x.puesto, x.ubicacion)}` : ""}${x.modalidad ? ` · modalidad ${x.modalidad}` : ""}`}>
                       <span className="block text-[10px] opacity-70">{DIA_SEMANA[fecha.getDay()]} {fecha.getDate()}</span>
                       <span className="block truncate font-semibold">{x.codigo || "—"}</span>
-                      {x.puesto && <span className="block truncate opacity-70">{x.puesto}</span>}
+                      {x.puesto && <span className="block truncate text-[10px] opacity-80">{nombrePuesto(x.puesto, x.ubicacion) || x.puesto}</span>}
                     </div>
                   );
                 })}
               </div>
-              {Object.keys(d.modalidades).length > 0 && (
-                <p className="mt-2 text-xs text-slate-500">Modalidad por días: {Object.entries(d.modalidades).map(([m, n]) => `${m} × ${n} días`).join(" · ")}</p>
+              {d.puestos && d.puestos.length > 0 && (
+                <p className="mt-2 text-xs text-slate-600">
+                  Programada en: {d.puestos.map((x) => `${x.puesto} ${x.puesto_nombre} (${x.ubicacion_nombre}) × ${x.dias_periodo} días`).join(" · ")}
+                </p>
               )}
             </section>
 
@@ -592,7 +597,7 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
                 <h3 className="mb-2 font-semibold text-slate-900">Puestos donde está programada</h3>
                 <table className="tabla text-sm">
                   <thead>
-                    <tr><th>Ubicación</th><th>Puesto</th><th>Modalidad que aplica</th><th>Valor por día</th>
+                    <tr><th>Puesto</th><th>Ubicación</th><th>Modalidad que aplica</th><th>Valor por día</th>
                       <th className="text-right" title="Días que se pagan en esta nómina con la modalidad de este puesto">Días a pagar</th>
                       <th className="text-right" title="Días con algún código en el periodo de la nómina">Días en el periodo</th>
                       <th className="text-right">Días en el mes</th></tr>
@@ -600,8 +605,8 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
                   <tbody>
                     {d.puestos.map((x) => (
                       <tr key={`${x.ubicacion}-${x.puesto}`} className="align-top">
-                        <td><span className="font-mono font-semibold">{x.ubicacion}</span><span className="block text-xs text-slate-500">{x.ubicacion_nombre}</span></td>
-                        <td><span className="font-mono font-semibold">{x.puesto}</span><span className="block text-xs text-slate-500">{x.puesto_nombre}</span></td>
+                        <td><span className="font-semibold">{x.puesto_nombre || x.puesto}</span><span className="block font-mono text-xs text-slate-500">Puesto {x.puesto}</span></td>
+                        <td>{x.ubicacion_nombre}<span className="block font-mono text-xs text-slate-500">Ubicación {x.ubicacion}</span></td>
                         <td>
                           {x.modalidad ? (
                             <>

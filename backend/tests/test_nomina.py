@@ -64,6 +64,8 @@ def _cuotas() -> bytes:
         enc,
         ["1001", "ANA", "1", "600", "SEGUROS EXEQUIALES", "1", 0, 0, 0, 15900, 0, "En Proceso"],  # solo 1.ª quincena
         ["1001", "ANA", "1", "611", "EMBARGO 5A PARTE", "2", 5000000, 100000, 0, 0, 20, "En Proceso"],
+        # Ajuste por mayor valor pagado: aunque no se descuente, no es alerta
+        ["1001", "ANA", "1", "610", "DEDUCCION MAYOR VALOR PAGADO", "0", 50000, 0, 0, 50000, 0, "En Proceso"],
         ["1002", "BETO", "1", "605", "PRESTAMO EMPRESA", "1", 100000, 0, 0, 200000, 0, "En Proceso"],  # cuota > tope
         ["1003", "CARLA", "1", "605", "PRESTAMO EMPRESA", "5", 600000, 570000, 0, 100000, 0, "En Proceso"],  # saldo 30.000
         ["1006", "FABIO", "1", "605", "PRESTAMO EMPRESA", "0", 500000, 0, 0, 50000, 0, "Pendiente"],

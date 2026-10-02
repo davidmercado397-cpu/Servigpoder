@@ -58,7 +58,7 @@ def parametros_motor(p: NomParametros) -> motor.Parametros:
         tolerancia=float(p.tolerancia), smlmv=float(p.smlmv), auxilio_transporte=float(p.auxilio_transporte),
         horas_dia=float(p.horas_dia), solo_primera_quincena=_lista(p.solo_primera_quincena),
         excluidos_base_embargo=_lista(p.excluidos_base_embargo), embargos_sin_minimo=_lista(p.embargos_sin_minimo),
-        equivalencias_cuotas=equivalencias(p.equivalencias_cuotas),
+        equivalencias_cuotas=equivalencias(p.equivalencias_cuotas), conceptos_ajuste=_lista(p.conceptos_ajuste),
     )
 
 

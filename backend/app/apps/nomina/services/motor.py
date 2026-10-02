@@ -72,6 +72,8 @@ class Parametros:
     embargos_sin_minimo: set[str] = field(default_factory=lambda: {"606"})
     # Concepto de cuota → conceptos de la nómina con que se paga (además del mismo código)
     equivalencias_cuotas: dict[str, list[str]] = field(default_factory=lambda: {"152": ["129"]})
+    # Ajustes por mayor o menor valor pagado: no generan alertas de cuotas
+    conceptos_ajuste: set[str] = field(default_factory=lambda: {"610", "151"})
 
 
 @dataclass
@@ -406,6 +408,8 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
         lista = activas.get(concepto, [])
         if nomina == QUINCENAL and concepto in p.solo_primera_quincena:
             continue  # en la 2.ª quincena estas cuotas no se descuentan
+        if concepto in p.conceptos_ajuste:
+            continue  # ajustes por mayor o menor valor pagado: no se validan
         esperado = 0.0
         es_devengo = any(c["devengo"] for c in lista) or (not lista and devengos.get(concepto))
         for c in lista:
@@ -448,7 +452,7 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
                             f"{concepto} {descripcion}: descontó {pesos(pagado)}, debía {pesos(esperado)}.", concepto, round(esperado), pagado))
     per["cuotas"] = detalle
 
-    descuentos_cuotas = sum(deducciones.get(k, 0) for k in conceptos_cuota if k not in devengos)
+    descuentos_cuotas = sum(deducciones.get(k, 0) for k in conceptos_cuota if k not in devengos and k not in p.conceptos_ajuste)
     if devengos.get(CONCEPTO_SALARIO, 0) <= 0 and descuentos_cuotas > p.tolerancia:
         a.append(Alerta(nomina, ced, nombre, "DESCUENTO_SIN_SUELDO", f"No devenga salario y se le descuentan {pesos(descuentos_cuotas)} en cuotas.",
                         esperado=0, pagado=descuentos_cuotas))

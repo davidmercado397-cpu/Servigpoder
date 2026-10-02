@@ -364,6 +364,7 @@ class ParametrosIn(BaseModel):
     excluidos_base_embargo: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
     embargos_sin_minimo: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
     equivalencias_cuotas: str = Field(default="", max_length=200, pattern=r"^[\d,=+\s]*$")
+    conceptos_ajuste: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
 
 
 def _parametros_out(p) -> dict:

@@ -181,4 +181,6 @@ class NomParametros(Base):
     embargos_sin_minimo: Mapped[str] = mapped_column(String(200), default="606")
     # Cuotas que en la nómina se pagan con otro concepto: "152=129" (RODAMIENTO_ADM se paga como 129 RODAMIENTO)
     equivalencias_cuotas: Mapped[str] = mapped_column(String(200), default="152=129")
+    # Ajustes que no se validan como cuotas: 610 deducción por mayor valor pagado, 151 menores valores pagados
+    conceptos_ajuste: Mapped[str] = mapped_column(String(200), default="610,151")
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

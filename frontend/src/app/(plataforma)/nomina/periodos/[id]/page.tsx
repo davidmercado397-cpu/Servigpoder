@@ -587,6 +587,49 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
               )}
             </section>
 
+            {d.puestos && d.puestos.length > 0 && (
+              <section>
+                <h3 className="mb-2 font-semibold text-slate-900">Puestos donde está programada</h3>
+                <table className="tabla text-sm">
+                  <thead>
+                    <tr><th>Ubicación</th><th>Puesto</th><th>Modalidad que aplica</th><th>Valor por día</th>
+                      <th className="text-right" title="Días que se pagan en esta nómina con la modalidad de este puesto">Días a pagar</th>
+                      <th className="text-right" title="Días con algún código en el periodo de la nómina">Días en el periodo</th>
+                      <th className="text-right">Días en el mes</th></tr>
+                  </thead>
+                  <tbody>
+                    {d.puestos.map((x) => (
+                      <tr key={`${x.ubicacion}-${x.puesto}`} className="align-top">
+                        <td><span className="font-mono font-semibold">{x.ubicacion}</span><span className="block text-xs text-slate-500">{x.ubicacion_nombre}</span></td>
+                        <td><span className="font-mono font-semibold">{x.puesto}</span><span className="block text-xs text-slate-500">{x.puesto_nombre}</span></td>
+                        <td>
+                          {x.modalidad ? (
+                            <>
+                              <span className="font-medium">{x.modalidad}</span>
+                              <span className="block text-xs text-slate-500">
+                                {x.origen === "puesto" ? "asignada en el puesto" : "heredada de la ubicación"}{x.modalidad_texto ? ` · ${x.modalidad_texto}` : ""}
+                              </span>
+                            </>
+                          ) : (
+                            <Insignia color={x.origen === "aprobado_sin_modalidad" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}>
+                              {x.origen === "aprobado_sin_modalidad" ? "Aprobado: no lleva modalidad" : x.origen === "no_esta_en_maestro" ? "No está en el maestro de ubicaciones" : "Sin modalidad"}
+                            </Insignia>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap text-xs">
+                          {Object.entries(x.conceptos).map(([c, v]) => <span key={c} className="block">{c}: {pesos(v)}</span>)}
+                        </td>
+                        <td className="text-right tabular-nums">{x.dias_pagables}</td>
+                        <td className="text-right tabular-nums">{x.dias_periodo}</td>
+                        <td className="text-right tabular-nums text-slate-500">{x.dias_mes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {d.puestos.length > 1 && <p className="mt-1 text-xs text-slate-500">Cada día se paga con la modalidad del puesto donde trabajó ese día (ver el calendario).</p>}
+              </section>
+            )}
+
             <section>
               <h3 className="mb-2 font-semibold text-slate-900">Modalidad y auxilio: esperado contra pagado</h3>
               <table className="tabla text-sm">

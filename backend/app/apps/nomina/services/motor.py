@@ -285,9 +285,34 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             for c, v in mods[ultimo_dia_modalidad]["conceptos"].items():
                 esperado[c] += v["valor"] * faltan_mes_corto
 
+    # Puestos donde está programada: modalidad que aplica, su origen y días en cada uno
+    en_periodo = [d.isoformat() for d in fechas]
+    puestos_persona = []
+    for f in filas:
+        clave = (f["ubicacion"], f["puesto"])
+        info = puestos.get(clave)
+        modalidad = info["modalidad"] if info else None
+        if modalidad:
+            origen = info["origen"]
+        elif clave in puestos_aprobados:
+            origen = "aprobado_sin_modalidad"
+        else:
+            origen = "sin_modalidad" if info else "no_esta_en_maestro"
+        puestos_persona.append({
+            "ubicacion": f["ubicacion"], "ubicacion_nombre": f["ubicacion_nombre"], "puesto": f["puesto"],
+            "puesto_nombre": f["puesto_nombre"], "modalidad": modalidad, "origen": origen,
+            "modalidad_texto": info["modalidad_texto"] if info else "",
+            "conceptos": {c: v["valor"] for c, v in mods[modalidad]["conceptos"].items()} if modalidad else {},
+            "dias_pagables": sum(1 for x in dias.values() if x["clase"] == "pagable" and x.get("puesto") == f["puesto"]
+                                 and x.get("ubicacion") == f["ubicacion"]),
+            "dias_periodo": sum(1 for iso in en_periodo if f["dias"].get(iso)),
+            "dias_mes": len(f["dias"]),
+        })
+
     devengos, deducciones, horas = pago["devengos"], pago["deducciones"], pago["horas"]
     usados = sorted(set(esperado) | {c for c in conceptos_modalidad if devengos.get(c)})
     return {
+        "puestos": puestos_persona,
         "cedula": ced, "nombre": pago["nombre"] or (filas[0]["nombre"] if filas else ""), "nomina": nomina,
         "grupo": contrato["grupo"] if contrato else "", "tratamiento": trat, "cargo": pago["cargo"],
         "contrato": contrato, "salario": pago["salario"], "centros_costos": pago["centros_costos"],

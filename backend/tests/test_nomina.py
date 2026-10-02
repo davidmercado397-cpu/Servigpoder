@@ -47,6 +47,7 @@ CONTRATOS = [
     ("2001", "JUAN MENSUAL", "MENSUAL", "OPERATIVOS CON VARIABLE"),
     ("1010", "KAREN SALE A VACACIONES", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
     ("1011", "LUIS REGRESA DE VACACIONES", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
+    ("1012", "MARIA CAMBIA DE PUESTO", "QUINCENAL", "OPERATIVOS CON VARIABLE"),
 ]
 
 
@@ -98,6 +99,10 @@ def _programacion() -> bytes:
         ubi, pto = puesto[ced]
         nombre = next(c[1] for c in CONTRATOS if c[0] == ced)
         filas.append([ced, nombre, ubi, f"UBI {ubi}", pto, f"PUESTO {pto}", *[d.get(i) for i in range(1, 32)]])
+    # María: del 16 al 23 en el puesto 10 (4X2 1 GRP, 20.000/día) y del 24 al 30 en el 10-1 (6X1, 30.000/día)
+    maria = next(c[1] for c in CONTRATOS if c[0] == "1012")
+    filas.append(["1012", maria, "10", "UBI 10", "10", "PUESTO 10", *[trabajo[i - 16] if 16 <= i <= 23 else None for i in range(1, 32)]])
+    filas.append(["1012", maria, "10", "UBI 10", "10-1", "PUESTO 10-1", *[trabajo[i - 24] if 24 <= i <= 30 else None for i in range(1, 32)]])
     return xlsx(filas)
 
 
@@ -136,6 +141,8 @@ QUINCENAL = {
 }
 QUINCENAL["1010"] = {}  # nada en la nómina: lo trabajado antes va en la liquidación de vacaciones
 QUINCENAL["1011"] = _completo(10)  # se le pagan solo los 10 días trabajados después del regreso
+# María: 130 = 8 × 20.000 + 7 × 30.000; 132 solo en los 8 días del 4X2 (el 6X1 no lo tiene)
+QUINCENAL["1012"] = {**_completo(15), "DEVENGO_130": 8 * 20000 + 7 * 30000, "DEVENGO_132": 8 * 3000}
 MENSUAL = {"2001": _completo(30)}
 
 
@@ -162,7 +169,7 @@ def test_escenario_completo(admin):
     p = admin.get(f"{API}/periodos/{pid}").json()["data"]
     assert p["calculado_en"] and p["faltan"] == []
     assert p["nombre"] == "Quincenal · 2.ª quincena de septiembre 2026"
-    assert p["resumen"]["personas"] == {"quincenal": 9}  # Gina (los 7) queda fuera
+    assert p["resumen"]["personas"] == {"quincenal": 10}  # Gina (los 7) queda fuera
     assert p["resumen"]["excluidas"] == {"quincenal": 1}
     assert p["historial"][0]["n"] == 1 and p["historial"][0]["alertas"] == p["resumen"]["alertas"]
 
@@ -323,3 +330,17 @@ def test_vacaciones_no_cuentan_como_pendientes(admin):
     vac = admin.get(f"{API}/periodos/{pid}/alertas?tipo=VACACIONES_VERIFICAR").json()["data"]
     karen = next(x for x in vac if x["cedula"] == "1010")
     assert "8 días trabajados antes (del 16 al 23)" in karen["mensaje"] and karen["severidad"] == "info"
+
+
+def test_cambio_de_puesto_paga_la_modalidad_de_cada_puesto(admin):
+    pid = _cargar_todo(admin)
+    assert "1012" not in _alertas(admin, pid)  # pagada con la modalidad de cada puesto por sus días
+    d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1012").json()["data"]
+    assert d["modalidades"] == {"4X2 1 GRP": 8, "6X1 ESP": 7}
+    esperado = {x["concepto"]: x["esperado"] for x in d["conceptos"]}
+    assert esperado == {"130": 370000, "132": 24000}
+    puestos = {x["puesto"]: x for x in d["puestos"]}
+    assert puestos["10"]["dias_pagables"] == 8 and puestos["10"]["origen"] == "ubicacion"
+    assert puestos["10-1"]["dias_pagables"] == 7 and puestos["10-1"]["origen"] == "puesto"
+    assert puestos["10-1"]["conceptos"] == {"130": 30000}
+    assert d["dias"]["2026-09-23"]["modalidad"] == "4X2 1 GRP" and d["dias"]["2026-09-24"]["modalidad"] == "6X1 ESP"

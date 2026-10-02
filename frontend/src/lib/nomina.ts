@@ -36,7 +36,14 @@ export type PersonaLista = {
 
 export type Dia = { codigo: string; clase: string; puesto?: string; ubicacion?: string; modalidad?: string | null };
 
+export type PuestoPersona = {
+  ubicacion: string; ubicacion_nombre: string; puesto: string; puesto_nombre: string; modalidad: string | null;
+  origen: "puesto" | "ubicacion" | "aprobado_sin_modalidad" | "sin_modalidad" | "no_esta_en_maestro"; modalidad_texto: string;
+  conceptos: Record<string, number>; dias_pagables: number; dias_periodo: number; dias_mes: number;
+};
+
 export type PersonaDetalle = {
+  puestos?: PuestoPersona[];
   cedula: string; nombre: string; nomina: string; grupo: string; tratamiento: string; cargo: string; salario: number;
   contrato: { activo: boolean; tipo_nomina: string; grupo: string; ingreso: string | null; cargo: string } | null;
   desde: string; hasta: string; dias: Record<string, Dia>;

@@ -121,8 +121,8 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
     if any(f < periodo.desde or f > periodo.hasta for _, f in columnas_fecha):
         fechas = [f for _, f in columnas_fecha]
         raise ErrorImportacion(
-            f"El archivo cargado contiene fechas del {_rango(min(fechas), max(fechas))}, pero la quincena seleccionada es "
-            f"{_rango(periodo.desde, periodo.hasta)}. Verifica que estás trabajando sobre la quincena correcta, o ajusta "
+            f"El archivo cargado contiene fechas del {_rango(min(fechas), max(fechas))}, pero el periodo seleccionado es "
+            f"{_rango(periodo.desde, periodo.hasta)}. Verifica que estás trabajando sobre el periodo correcto, o ajusta "
             f"los encabezados del Excel para que coincidan.")
 
     turnos = por_codigo(db)

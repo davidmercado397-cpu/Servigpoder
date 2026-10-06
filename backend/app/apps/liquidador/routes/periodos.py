@@ -39,7 +39,7 @@ def _periodo(db: DbSession, periodo_id: int) -> LiqPeriodo:
 
 def _abierto(p: LiqPeriodo) -> None:
     if p.estado == CERRADA:
-        raise ApiError(409, "La quincena está cerrada. Reábrala para hacer cambios.", "PERIODO_CERRADO")
+        raise ApiError(409, "El periodo está cerrado. Reábralo para hacer cambios.", "PERIODO_CERRADO")
 
 
 def _resultado_out(r: LiqResultado) -> ResultadoOut:
@@ -56,14 +56,14 @@ def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
 
 @router.post("/periodos", response_model=ApiResponse[PeriodoOut], status_code=201)
 def crear(data: PeriodoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
-    if db.scalar(select(LiqPeriodo).where(LiqPeriodo.anio == data.anio, LiqPeriodo.mes == data.mes,
-                                          LiqPeriodo.quincena == data.quincena)):
-        raise ApiError(409, f"La quincena {data.anio}-{data.mes:02d} Q{data.quincena} ya existe")
     desde, hasta = calculo.rango_quincena(data.anio, data.mes, data.quincena)
     p = LiqPeriodo(anio=data.anio, mes=data.mes, quincena=data.quincena, desde=desde, hasta=hasta, advertencias=[])
+    if db.scalar(select(LiqPeriodo).where(LiqPeriodo.anio == data.anio, LiqPeriodo.mes == data.mes,
+                                          LiqPeriodo.quincena == data.quincena)):
+        raise ApiError(409, f"El periodo {p.etiqueta} ya existe")
     db.add(p)
     db.flush()
-    auditar(db, request, "liq_periodo_creado", actual.id, periodo=f"{data.anio}-{data.mes:02d}-Q{data.quincena}")
+    auditar(db, request, "liq_periodo_creado", actual.id, periodo=p.etiqueta)
     db.commit()
     return ok(_periodo_out(db, p))
 
@@ -77,7 +77,7 @@ def ver(periodo_id: int, db: DbSession, _=Depends(require(VER))):
 def eliminar(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     p = _periodo(db, periodo_id)
     _abierto(p)
-    auditar(db, request, "liq_periodo_eliminado", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}")
+    auditar(db, request, "liq_periodo_eliminado", actual.id, periodo=p.etiqueta)
     db.delete(p)
     db.commit()
     return ok({"eliminado": periodo_id})
@@ -101,7 +101,7 @@ async def cargar(periodo_id: int, request: Request, db: DbSession, archivo: Uplo
     p.advertencias = res.advertencias[:500]
     p.cargado_en = datetime.now(timezone.utc)
     calculo.calcular(db, p)
-    auditar(db, request, "liq_excel_cargado", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}", archivo=nombre,
+    auditar(db, request, "liq_excel_cargado", actual.id, periodo=p.etiqueta, archivo=nombre,
             empleados=res.empleados, dias=res.dias, advertencias=len(res.advertencias))
     db.commit()
     return ok(CargaOut(periodo=_periodo_out(db, p), empleados=res.empleados, dias=res.dias, fechas=res.fechas,
@@ -115,9 +115,9 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
     p = _periodo(db, periodo_id)
     _abierto(p)
     if p.cargado_en is None:
-        raise ApiError(409, "La quincena aún no tiene un Excel cargado")
+        raise ApiError(409, "El periodo aún no tiene un Excel cargado")
     empleados = calculo.calcular(db, p)
-    auditar(db, request, "liq_periodo_recalculado", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}", empleados=empleados)
+    auditar(db, request, "liq_periodo_recalculado", actual.id, periodo=p.etiqueta, empleados=empleados)
     db.commit()
     return ok(_periodo_out(db, p))
 
@@ -126,9 +126,9 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
 def cerrar(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     p = _periodo(db, periodo_id)
     if p.estado != CALCULADA:
-        raise ApiError(409, "Solo se puede cerrar una quincena con el Excel cargado y las horas contadas")
+        raise ApiError(409, "Solo se puede cerrar un periodo con el Excel cargado y las horas contadas")
     p.estado, p.cerrado_en, p.cerrado_por = CERRADA, datetime.now(timezone.utc), actual.id
-    auditar(db, request, "liq_periodo_cerrado", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}")
+    auditar(db, request, "liq_periodo_cerrado", actual.id, periodo=p.etiqueta)
     db.commit()
     return ok(_periodo_out(db, p))
 
@@ -137,9 +137,9 @@ def cerrar(periodo_id: int, request: Request, db: DbSession, actual: Usuario = D
 def reabrir(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     p = _periodo(db, periodo_id)
     if p.estado != CERRADA:
-        raise ApiError(409, "La quincena no está cerrada")
+        raise ApiError(409, "El periodo no está cerrado")
     p.estado, p.cerrado_en, p.cerrado_por = CALCULADA, None, None
-    auditar(db, request, "liq_periodo_reabierto", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}")
+    auditar(db, request, "liq_periodo_reabierto", actual.id, periodo=p.etiqueta)
     db.commit()
     return ok(_periodo_out(db, p))
 
@@ -170,7 +170,7 @@ def detalle_empleado(periodo_id: int, empleado_id: int, db: DbSession, _=Depends
     """Día a día de una persona: turno, tipo de día y horas por concepto (de dónde sale cada total)."""
     r = db.scalar(select(LiqResultado).where(LiqResultado.periodo_id == periodo_id, LiqResultado.empleado_id == empleado_id))
     if r is None:
-        raise ApiError(404, "La persona no tiene turnos en esta quincena")
+        raise ApiError(404, "La persona no tiene turnos en este periodo")
     dias = db.scalars(select(LiqDia).where(LiqDia.periodo_id == periodo_id, LiqDia.empleado_id == empleado_id).order_by(LiqDia.fecha))
     return ok(DetalleEmpleado(empleado=_resultado_out(r), dias=[
         DiaOut(fecha=d.fecha, codigo=d.codigo, turno=d.turno.nombre, tipo_dia=d.tipo_dia, clase=d.clase, horas=d.horas) for d in dias]))
@@ -180,7 +180,7 @@ def detalle_empleado(periodo_id: int, empleado_id: int, db: DbSession, _=Depends
 def descargar_liquidacion(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     p = _periodo(db, periodo_id)
     contenido, tipo, nombre = exportar.liquidacion(db, p)
-    auditar(db, request, "liq_liquidacion_descargada", actual.id, periodo=f"{p.anio}-{p.mes:02d}-Q{p.quincena}")
+    auditar(db, request, "liq_liquidacion_descargada", actual.id, periodo=p.etiqueta)
     db.commit()
     return _archivo(contenido, tipo, nombre)
 
@@ -204,13 +204,14 @@ def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), 
     ids = [e.id for e in lista]
     conteo = dict(db.execute(select(LiqResultado.empleado_id, func.count()).where(LiqResultado.empleado_id.in_(ids))
                              .group_by(LiqResultado.empleado_id)).all()) if ids else {}
-    ultimas: dict[int, str] = {}
+    ultimas: dict[int, tuple[tuple[int, int, int], str]] = {}
     if ids:
         filas = db.execute(select(LiqResultado.empleado_id, LiqPeriodo.anio, LiqPeriodo.mes, LiqPeriodo.quincena)
                            .join(LiqPeriodo, LiqPeriodo.id == LiqResultado.periodo_id).where(LiqResultado.empleado_id.in_(ids)))
         for eid, anio, mes, qn in filas:
-            etiqueta = f"{anio}-{mes:02d} Q{qn}"
-            if etiqueta > ultimas.get(eid, ""):
-                ultimas[eid] = etiqueta
+            # La clave ordena por fecha (el mensual cuenta como el periodo más completo del mes)
+            clave = (anio, mes, 3 if qn == 0 else qn)
+            if eid not in ultimas or clave > ultimas[eid][0]:
+                ultimas[eid] = (clave, f"{anio}-{mes:02d} {'Mensual' if qn == 0 else f'Q{qn}'}")
     return ok([EmpleadoOut(id=e.id, documento=e.documento, nombre=e.nombre, cargo=e.cargo,
-                           quincenas=conteo.get(e.id, 0), ultima=ultimas.get(e.id)) for e in lista], **meta)
+                           quincenas=conteo.get(e.id, 0), ultima=ultimas[e.id][1] if e.id in ultimas else None) for e in lista], **meta)

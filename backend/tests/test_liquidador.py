@@ -37,7 +37,7 @@ def _resultados(cliente, pid: int) -> dict[str, dict]:
 
 def test_configuracion_inicial_trae_los_turnos_de_produccion(admin):
     r = admin.get(f"{API}/turnos?tamano=150").json()
-    assert r["meta"]["extra"]["total"] == 129
+    assert r["meta"]["extra"]["total"] == 131  # 129 de producción + AA y CC
     por_codigo = {t["codigo"]: t for t in r["data"]}
     assert por_codigo["D"]["horas_ordinarias"] == 8.4 and por_codigo["D"]["horas_extras"] == 2.8
     assert por_codigo["INC"]["incapacidad"] and por_codigo["INC"]["clase"] == "incapacidad"
@@ -161,7 +161,7 @@ def test_turnos_crear_editar_y_hora_nocturna(admin):
 
     # La hora nocturna regenera todas las matrices
     r = admin.put(f"{API}/parametros", json={"hora_inicio_nocturna": 21})
-    assert r.json()["meta"]["extra"]["turnos_regenerados"] == 130
+    assert r.json()["meta"]["extra"]["turnos_regenerados"] == 132
     assert admin.get(f"{API}/turnos/{t['id']}").json()["data"]["matriz"]["ordinary_night"]["weekday"] == 1
 
     previa = admin.post(f"{API}/turnos/vista-previa", json={"hora_inicio": "18:00", "horas_ordinarias": 8.4, "horas_extras": 2.8}).json()["data"]
@@ -213,3 +213,44 @@ def test_herramientas_del_asistente(admin, db):
         assert "error" in json.loads(h["detalle_persona"].call({"documento": "999"}))
         sin_datos = asistente.crear_herramientas(asistente.Contexto(s, usuario, False))
         assert "1001" not in next(t for t in sin_datos if t.nombre == "resumen_quincena").call()
+
+
+def test_periodo_mensual_cubre_el_mes_completo(admin):
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "quincena": 0})
+    assert r.status_code == 201, r.text
+    m = r.json()["data"]
+    assert (m["desde"], m["hasta"], m["tipo"], m["etiqueta"]) == ("2026-09-01", "2026-09-30", "Mensual", "2026-09 Mensual")
+    # Convive con las quincenas del mismo mes, pero no se repite
+    assert _quincena(admin, quincena=2)
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "quincena": 0})
+    assert r.status_code == 409 and "2026-09 Mensual" in r.json()["error"]["message"]
+
+    filas = [["documento", "SEPTIEMBRE 2026", *range(1, 31)], [1001, "1001", *(["A"] * 30)]]
+    d = _cargar(admin, m["id"], xlsx(filas)).json()["data"]
+    assert d["dias"] == 30 and d["advertencias"] == []
+    a = _resultados(admin, m["id"])["1001"]
+    assert a["dias"]["trabajado"] == 30
+    assert admin.get(f"{API}/periodos/{m['id']}/plantilla").headers["content-disposition"].endswith('plantilla_2026_09_Mensual.xlsx"')
+    r = admin.get(f"{API}/periodos/{m['id']}/liquidacion")
+    assert r.headers["content-disposition"] == 'attachment; filename="liquidacion_2026_09_Mensual.xlsx"'
+    assert load_workbook(BytesIO(r.content)).active.title == "2026-09-Mensual"
+    e = admin.get(f"{API}/empleados?q=1001").json()["data"][0]
+    assert e["ultima"] == "2026-09 Mensual"
+
+
+def test_turnos_aa_y_cc_igual_que_la_macro(admin):
+    """Junio 2026 (8 y 15 son festivos): los totales de dos personas reales de la MACRO 1Q del desarrollo anterior."""
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 6, "quincena": 1})
+    pid = r.json()["data"]["id"]
+    dias = list(range(1, 16))
+    aa = {7: "AA", 14: "AA"}  # dos domingos
+    cc = {3: "CC", 4: "CC", 7: "CC", 8: "CC", 11: "CC", 12: "CC", 15: "CC"}
+    filas = [["documento", "JUNIO 2026", *dias], [36, "36", *[aa.get(x) for x in dias]], [332, "332", *[cc.get(x) for x in dias]]]
+    d = _cargar(admin, pid, xlsx(filas)).json()["data"]
+    assert d["advertencias"] == []
+    res = _resultados(admin, pid)
+    horas = lambda doc: {k: v for k, v in res[doc]["horas"].items() if v}  # noqa: E731
+    assert horas("36") == {"ordinary_day": 24, "sunday_surcharge": 24}
+    assert horas("332") == {"ordinary_day": 84, "ordinary_night": 56, "holiday_day_surcharge": 2, "holiday_night_surcharge": 16,
+                            "sunday_surcharge": 1, "sunday_night_surcharge": 5}
+    assert res["332"]["dias"]["trabajado"] == 7

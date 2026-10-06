@@ -1,4 +1,4 @@
-"""Conteo de horas de una quincena.
+"""Conteo de horas de un periodo (quincena o mes completo).
 
 Por cada día cargado: se clasifica la fecha (ordinario, sábado, domingo, festivo, víspera…), se lee
 esa columna de la matriz del turno y se acumulan las horas de los 12 conceptos. Es el mismo cálculo
@@ -37,11 +37,14 @@ CONCEPTOS_TRABAJADOS = (
 
 
 def rango_quincena(anio: int, mes: int, quincena: int) -> tuple[date, date]:
+    """1: días 1 al 15; 2: del 16 al fin de mes; 0 (mensual): el mes completo."""
+    if quincena == 0:
+        return date(anio, mes, 1), date(anio, mes, calendar.monthrange(anio, mes)[1])
     if quincena == 1:
         return date(anio, mes, 1), date(anio, mes, 15)
     if quincena == 2:
         return date(anio, mes, 16), date(anio, mes, calendar.monthrange(anio, mes)[1])
-    raise ValueError("La quincena debe ser 1 o 2")
+    raise ValueError("La quincena debe ser 1, 2 o 0 (mensual)")
 
 
 def clase_de(turno: LiqTurno) -> str:

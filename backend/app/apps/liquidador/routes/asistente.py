@@ -19,7 +19,7 @@ def _contexto_pantalla(db: Session, pantalla: str | None) -> str | None:
     if m:
         p = db.get(LiqPeriodo, int(m.group(1)))
         if p:
-            return f"El usuario está viendo la quincena {p.anio}-{p.mes:02d} Q{p.quincena} (estado {p.estado})"
+            return f"El usuario está viendo el periodo {p.etiqueta} (estado {p.estado})"
     nombre = PANTALLAS.get(pantalla.split("?")[0])
     return f"El usuario está en {nombre}" if nombre else None
 

@@ -8,7 +8,7 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { MESES } from "@/lib/formato";
-import { ESTADO_PERIODO, type Periodo } from "@/lib/liquidador";
+import { ESTADO_PERIODO, nombrePeriodo, type Periodo } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
 function fecha(iso: string | null) {
@@ -48,8 +48,8 @@ export default function Quincenas() {
 
   return (
     <div className="space-y-5">
-      <Titulo>Quincenas</Titulo>
-      <p className="-mt-4 text-sm text-slate-500">Quincena 1: días 1 al 15 · Quincena 2: del 16 al fin de mes. Cada quincena cuenta las horas del Excel de turnos cargado.</p>
+      <Titulo>Periodos</Titulo>
+      <p className="-mt-4 text-sm text-slate-500">Quincena 1: días 1 al 15 · Quincena 2: del 16 al fin de mes · Mensual: el mes completo. Cada periodo cuenta las horas del Excel de turnos cargado.</p>
 
       {gestionar && (
         <form onSubmit={crear} className="tarjeta flex flex-wrap items-end gap-3 p-4">
@@ -64,13 +64,14 @@ export default function Quincenas() {
             </select>
           </div>
           <div>
-            <label className="label">Quincena</label>
-            <select className="input w-44" value={nueva.quincena} onChange={(e) => setNueva({ ...nueva, quincena: Number(e.target.value) })}>
-              <option value={1}>1 (días 1 al 15)</option>
-              <option value={2}>2 (16 a fin de mes)</option>
+            <label className="label">Tipo de periodo</label>
+            <select className="input w-56" value={nueva.quincena} onChange={(e) => setNueva({ ...nueva, quincena: Number(e.target.value) })}>
+              <option value={1}>Quincena 1 (días 1 al 15)</option>
+              <option value={2}>Quincena 2 (16 a fin de mes)</option>
+              <option value={0}>Mensual (mes completo)</option>
             </select>
           </div>
-          <button className="btn-primario inline-flex items-center gap-1.5"><Plus className="h-4 w-4" /> Nueva quincena</button>
+          <button className="btn-primario inline-flex items-center gap-1.5"><Plus className="h-4 w-4" /> Crear periodo</button>
         </form>
       )}
       {error && <Alerta>{error}</Alerta>}
@@ -78,14 +79,17 @@ export default function Quincenas() {
       <div className="tarjeta overflow-auto">
         <table className="tabla">
           <thead>
-            <tr><th>Quincena</th><th>Rango</th><th>Estado</th><th>Archivo cargado</th><th className="text-right">Personas</th><th>Creada</th><th /></tr>
+            <tr><th>Periodo</th><th>Rango</th><th>Estado</th><th>Archivo cargado</th><th className="text-right">Personas</th><th>Creada</th><th /></tr>
           </thead>
           <tbody>
             {lista?.map((p) => {
               const [texto, color] = ESTADO_PERIODO[p.estado] ?? [p.estado, ""];
               return (
                 <tr key={p.id}>
-                  <td className="font-semibold">{MESES[p.mes - 1]} {p.anio} · Q{p.quincena}</td>
+                  <td className="font-semibold">
+                    {MESES[p.mes - 1]} {p.anio} · {nombrePeriodo(p)}
+                    {p.quincena === 0 && <Insignia color="ml-2 bg-indigo-100 text-indigo-800">Mes completo</Insignia>}
+                  </td>
                   <td className="whitespace-nowrap text-sm text-slate-600">{fecha(p.desde + "T12:00:00")} → {fecha(p.hasta + "T12:00:00")}</td>
                   <td><Insignia color={color}>{texto}</Insignia></td>
                   <td className="max-w-xs truncate text-sm text-slate-600" title={p.archivo ?? ""}>{p.archivo ?? "—"}</td>
@@ -101,7 +105,7 @@ export default function Quincenas() {
             })}
           </tbody>
         </table>
-        {lista?.length === 0 && <p className="p-6 text-center text-sm text-slate-500">Aún no hay quincenas. Cree la primera arriba.</p>}
+        {lista?.length === 0 && <p className="p-6 text-center text-sm text-slate-500">Aún no hay periodos. Cree el primero arriba.</p>}
         <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>

@@ -1,10 +1,14 @@
 /** Tipos y etiquetas del Liquidador de horas. */
 
 export type Periodo = {
-  id: number; anio: number; mes: number; quincena: number; desde: string; hasta: string;
+  /** quincena: 1 (días 1-15), 2 (16 a fin de mes) o 0 (mensual: el mes completo) */
+  id: number; anio: number; mes: number; quincena: number; tipo: string; etiqueta: string; desde: string; hasta: string;
   estado: "borrador" | "calculada" | "cerrada"; archivo: string | null; advertencias: string[];
   cargado_en: string | null; calculado_en: string | null; cerrado_en: string | null; creado_en: string | null; empleados: number;
 };
+
+/** "Quincena 1", "Quincena 2" o "Mensual" */
+export const nombrePeriodo = (p: Pick<Periodo, "quincena">) => (p.quincena === 0 ? "Mensual" : `Quincena ${p.quincena}`);
 
 export type Resultado = {
   empleado_id: number; documento: string; nombre: string; cargo: string;

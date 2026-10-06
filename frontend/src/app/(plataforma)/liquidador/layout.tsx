@@ -7,7 +7,7 @@ const MENU: GrupoMenu[] = [
   {
     grupo: "Liquidación",
     items: [
-      { href: "/liquidador", texto: "Quincenas", icono: CalendarRange, permiso: "liquidador.periodos.ver" },
+      { href: "/liquidador", texto: "Periodos", icono: CalendarRange, permiso: "liquidador.periodos.ver" },
       { href: "/liquidador/empleados", texto: "Empleados", icono: Users, permiso: "liquidador.periodos.ver" },
     ],
   },
@@ -34,7 +34,7 @@ const ASISTENTE = {
 
 export default function LiquidadorLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ShellApp nombre="Liquidador de horas" subtitulo="Quincenas" icono={Calculator} inicio="/liquidador" menu={MENU} asistente={ASISTENTE}>
+    <ShellApp nombre="Liquidador de horas" subtitulo="Quincenas y meses" icono={Calculator} inicio="/liquidador" menu={MENU} asistente={ASISTENTE}>
       {children}
     </ShellApp>
   );

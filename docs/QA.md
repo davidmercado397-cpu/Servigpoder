@@ -189,17 +189,19 @@ docker compose up -d --build
 La app original sigue en uso hasta terminar esta validación. Todo se compara contra ella.
 
 ### Configuración (Liquidador → Turnos / Festivos)
-- [ ] Turnos muestra los mismos 129 turnos de producción con sus horas ordinarias, extras y checks.
+- [ ] Turnos muestra los 129 turnos de producción con sus horas ordinarias, extras y checks, más AA (06 a 18, 12 h) y CC (18 a 06, 12 h).
 - [ ] Abrir un turno (p. ej. N y C5): la distribución calculada es igual a la de la app original.
 - [ ] Crear un turno de prueba: la distribución se ve en vivo mientras se escriben las horas; marcar "Es incapacidad" deja las horas en 0 y desmarca "Día remunerado".
 - [ ] La hora de inicio nocturna muestra 19:00. (No cambiarla en la prueba salvo que se quiera validar el recálculo.)
 - [ ] Festivos del año coinciden con los de la app original; agregar uno manual y restablecerlo.
 
-### Quincenas (Liquidador → Quincenas)
+### Periodos (Liquidador → Periodos)
 - [ ] Crear la quincena 2026-09 Q2 y descargar la plantilla (encabezado `documento`, mes y días 16 a 30).
 - [ ] Subir el mismo Excel que se subió en la app original: se cuentan las horas al instante y se listan las advertencias de códigos inexistentes.
 - [ ] **Prueba de igualdad**: descargar *Calendario + Liquidación* en las dos apps y comparar persona por persona las 19 columnas originales. Deben ser iguales, salvo que los días de V, LR, LNR, SUS, AI, LM, etc. ya no suman en DIAS TRABAJADOS sino en la nueva columna final DIAS CON NOVEDAD.
 - [ ] Clic en una persona: el día a día explica sus totales (turno, tipo de día y horas por concepto).
+- [ ] Crear un periodo **Mensual** (2026-09): el rango va del 1 al 30, la plantilla trae los días 1 a 30 y los archivos se llaman `..._Mensual.xlsx`. Puede convivir con las quincenas del mismo mes, pero no se crea dos veces.
+- [ ] **Prueba con la MACRO**: cargar `plantilla_2026_06_Q1` en la quincena 2026-06 Q1 y comparar con `MACRO 1Q`: deben coincidir las 368 personas (ya verificado el 6-oct-2026).
 - [ ] Cerrar la quincena: no deja subir otro archivo ni recalcular; reabrir lo permite de nuevo.
 - [ ] Un usuario con rol solo de consulta (`liquidador.periodos.ver`) ve y descarga, pero no carga ni cierra.
 - [ ] Asistente (con `IA_API_KEY` configurada): "Explícame de dónde salen las horas de la cédula X en la última quincena".

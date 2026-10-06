@@ -8,7 +8,7 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { MESES } from "@/lib/formato";
-import { CLASES, CONCEPTOS, ESTADO_PERIODO, TIPOS_DIA, horas, type Dia, type Periodo, type Resultado } from "@/lib/liquidador";
+import { CLASES, CONCEPTOS, ESTADO_PERIODO, TIPOS_DIA, nombrePeriodo, horas, type Dia, type Periodo, type Resultado } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
 type Carga = { periodo: Periodo; empleados: number; dias: number; fechas: number; advertencias: string[] };
@@ -82,7 +82,7 @@ export default function DetalleQuincena() {
   }
 
   async function eliminar() {
-    if (!window.confirm("¿Eliminar esta quincena y todo lo cargado? No se puede deshacer.")) return;
+    if (!window.confirm("¿Eliminar este periodo y todo lo cargado? No se puede deshacer.")) return;
     try {
       await api(`/liquidador/periodos/${id}`, { method: "DELETE" });
       router.push("/liquidador");
@@ -109,13 +109,13 @@ export default function DetalleQuincena() {
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/liquidador" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Volver"><ArrowLeft className="h-5 w-5" /></Link>
         <div>
-          <h1 className="text-2xl font-bold text-marca-900">{MESES[p.mes - 1]} {p.anio} — Quincena {p.quincena}</h1>
+          <h1 className="text-2xl font-bold text-marca-900">{MESES[p.mes - 1]} {p.anio} — {nombrePeriodo(p)}</h1>
           <p className="text-sm text-slate-500">Del {p.desde} al {p.hasta}{p.archivo ? ` · Archivo: ${p.archivo}` : ""}</p>
         </div>
         <Insignia color={estadoColor}>{estadoTexto}</Insignia>
         {gestionar && !cerrada && (
           <button onClick={eliminar} className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-red-50 hover:text-red-700">
-            <Trash2 className="h-4 w-4" /> Eliminar quincena
+            <Trash2 className="h-4 w-4" /> Eliminar periodo
           </button>
         )}
       </div>
@@ -135,7 +135,7 @@ export default function DetalleQuincena() {
             {gestionar && <SubirArchivo texto="Subir y calcular" onArchivo={subir} deshabilitado={cerrada} />}
           </div>
         </div>
-        {cerrada && <Alerta tipo="info">La quincena está cerrada: para cargar otro archivo o recalcular, primero reábrala.</Alerta>}
+        {cerrada && <Alerta tipo="info">El periodo está cerrado: para cargar otro archivo o recalcular, primero reábralo.</Alerta>}
         <details className="text-sm text-slate-600">
           <summary className="cursor-pointer font-medium text-marca-700">Ver formato esperado del Excel</summary>
           <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -175,13 +175,13 @@ export default function DetalleQuincena() {
               )}
               {gestionar && !cerrada && (
                 <button className="btn-secundario inline-flex items-center gap-1.5" disabled={ocupado}
-                  onClick={() => accion("cerrar", "Quincena cerrada.", "¿Cerrar la quincena? No se podrá cargar otro archivo ni recalcular hasta reabrirla.")}>
-                  <Lock className="h-4 w-4" /> Cerrar quincena
+                  onClick={() => accion("cerrar", "Periodo cerrado.", "¿Cerrar el periodo? No se podrá cargar otro archivo ni recalcular hasta reabrirlo.")}>
+                  <Lock className="h-4 w-4" /> Cerrar periodo
                 </button>
               )}
               {gestionar && cerrada && (
                 <button className="btn-secundario inline-flex items-center gap-1.5" disabled={ocupado}
-                  onClick={() => accion("reabrir", "Quincena reabierta.", "¿Reabrir la quincena para hacer cambios?")}>
+                  onClick={() => accion("reabrir", "Periodo reabierto.", "¿Reabrir el periodo para hacer cambios?")}>
                   <LockOpen className="h-4 w-4" /> Reabrir
                 </button>
               )}

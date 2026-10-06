@@ -15,6 +15,7 @@ HORAS = Numeric(5, 2)
 BORRADOR = "borrador"  # creada, sin Excel cargado
 CALCULADA = "calculada"  # con Excel cargado y horas contadas
 CERRADA = "cerrada"  # aprobada: no se puede volver a cargar ni recalcular
+MENSUAL = 0  # valor de `quincena` para un periodo de mes completo
 
 
 class LiqParametros(Base):
@@ -79,7 +80,7 @@ class LiqPeriodo(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     anio: Mapped[int] = mapped_column(Integer, index=True)
     mes: Mapped[int] = mapped_column(Integer)
-    quincena: Mapped[int] = mapped_column(Integer)  # 1: días 1-15, 2: 16 a fin de mes
+    quincena: Mapped[int] = mapped_column(Integer)  # 1: días 1-15, 2: 16 a fin de mes, 0: mes completo
     desde: Mapped[date] = mapped_column(Date)
     hasta: Mapped[date] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(20), default=BORRADOR)
@@ -93,6 +94,15 @@ class LiqPeriodo(Base):
 
     dias: Mapped[list["LiqDia"]] = relationship(back_populates="periodo", cascade="all, delete-orphan", passive_deletes=True)
     resultados: Mapped[list["LiqResultado"]] = relationship(back_populates="periodo", cascade="all, delete-orphan", passive_deletes=True)
+
+    @property
+    def tipo(self) -> str:
+        return "Mensual" if self.quincena == MENSUAL else f"Q{self.quincena}"
+
+    @property
+    def etiqueta(self) -> str:
+        """2026-06 Q1 · 2026-06 Mensual"""
+        return f"{self.anio}-{self.mes:02d} {self.tipo}"
 
 
 class LiqDia(Base):

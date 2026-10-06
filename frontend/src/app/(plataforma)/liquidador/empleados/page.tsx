@@ -28,7 +28,7 @@ export default function Empleados() {
   return (
     <div className="space-y-5">
       <Titulo>Empleados</Titulo>
-      <p className="-mt-4 text-sm text-slate-500">Consulta histórica: se crean y actualizan solos al cargar el Excel de cada quincena.</p>
+      <p className="-mt-4 text-sm text-slate-500">Consulta histórica: se crean y actualizan solos al cargar el Excel de cada periodo.</p>
       {error && <Alerta>{error}</Alerta>}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">
@@ -39,7 +39,7 @@ export default function Empleados() {
         </div>
         <div className="overflow-auto">
           <table className="tabla">
-            <thead><tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Última quincena</th><th className="text-right">Quincenas</th></tr></thead>
+            <thead><tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Último periodo</th><th className="text-right">Periodos</th></tr></thead>
             <tbody>
               {lista.map((e) => (
                 <tr key={e.id}>

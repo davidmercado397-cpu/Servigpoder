@@ -84,7 +84,7 @@ class FestivoOut(BaseModel):
 class PeriodoIn(BaseModel):
     anio: int = Field(ge=2020, le=2100)
     mes: int = Field(ge=1, le=12)
-    quincena: int = Field(ge=1, le=2)
+    quincena: int = Field(ge=0, le=2, description="1: días 1-15 · 2: del 16 al fin de mes · 0: mensual (mes completo)")
 
 
 class PeriodoOut(Orm):
@@ -92,6 +92,8 @@ class PeriodoOut(Orm):
     anio: int
     mes: int
     quincena: int
+    tipo: str  # Q1, Q2 o Mensual
+    etiqueta: str
     desde: date
     hasta: date
     estado: str

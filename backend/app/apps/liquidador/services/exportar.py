@@ -46,7 +46,7 @@ _MESES = ("", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "A
 
 
 def _titulo(p: LiqPeriodo) -> str:
-    return f"{p.anio}-{p.mes:02d}-Q{p.quincena}"
+    return f"{p.anio}-{p.mes:02d}-{p.tipo}"
 
 
 def fila_liquidacion(r: LiqResultado) -> list:
@@ -76,7 +76,7 @@ def liquidacion(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     _autoajustar(hoja, minimo=10, maximo=22)
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 32
-    return _guardar(libro), XLSX, f"liquidacion_{periodo.anio}_{periodo.mes:02d}_Q{periodo.quincena}.xlsx"
+    return _guardar(libro), XLSX, f"liquidacion_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"
 
 
 def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
@@ -99,7 +99,7 @@ def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
         hoja.column_dimensions[get_column_letter(3 + i)].width = 5
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 26
-    return _guardar(libro), XLSX, f"plantilla_{periodo.anio}_{periodo.mes:02d}_Q{periodo.quincena}.xlsx"
+    return _guardar(libro), XLSX, f"plantilla_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"
 
 
 def _autoajustar(hoja, *, minimo: int, maximo: int, margen: int = 2) -> None:

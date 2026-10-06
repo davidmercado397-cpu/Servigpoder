@@ -2,7 +2,8 @@
 
 Las huellas se tomaron de la pantalla de cada turno en producción (matriz de 12 conceptos × 8 tipos de
 día, con un decimal, hora nocturna 19:00). La versión nueva debe generar exactamente la misma matriz
-para los 129 turnos que se cargan como configuración inicial.
+para los 129 turnos que se cargan como configuración inicial. AA y CC se agregaron después (octubre 2026,
+deducidos de la MACRO del desarrollo anterior) y se prueban en test_liquidador.py.
 """
 
 from datetime import time
@@ -35,6 +36,6 @@ def test_matrices_de_los_129_turnos_iguales_a_produccion():
         codigo, _, inicio, _, ordinarias, extras, _, incapacidad = linea.split("|")
         o, e = (Decimal(0), Decimal(0)) if incapacidad == "1" else (Decimal(ordinarias), Decimal(extras))
         calculadas[codigo] = _huella(build_shift_matrix(o, e, time.fromisoformat(inicio), 19))
-    assert len(esperadas) == len(calculadas) == 129
-    distintas = {c: (calculadas[c], esperadas.get(c)) for c in calculadas if calculadas[c] != esperadas.get(c)}
+    assert len(esperadas) == 129 and set(calculadas) - set(esperadas) == {"AA", "CC"}
+    distintas = {c: (calculadas[c], esperadas[c]) for c in esperadas if calculadas.get(c) != esperadas[c]}
     assert distintas == {}

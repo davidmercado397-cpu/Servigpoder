@@ -36,7 +36,7 @@ muestra de qué días y turnos sale (p. ej. "13 turnos A × 7 h = 91 h diurnas o
 la persona, usa la quincena más reciente o pregunta.
 
 Cómo funciona el cálculo:
-1. Quincena 1 = días 1 al 15; quincena 2 = del 16 al fin de mes. Se carga un Excel con la cédula (columna A), el \
+1. Quincena 1 = días 1 al 15; quincena 2 = del 16 al fin de mes; un periodo mensual (quincena 0) cubre el mes completo. Se carga un Excel con la cédula (columna A), el \
 nombre (columna B) y un código de turno por día. Cargar de nuevo reemplaza lo anterior; una quincena cerrada no se \
 puede cambiar hasta reabrirla.
 2. Cada turno se configura con hora de inicio, horas ordinarias y horas extras (la hora fin es informativa). Las \
@@ -92,7 +92,7 @@ def _periodo(ctx: Contexto, anio: int | None, mes: int | None, quincena: int | N
         q = q.where(LiqPeriodo.anio == anio)
     if mes:
         q = q.where(LiqPeriodo.mes == mes)
-    if quincena:
+    if quincena is not None:
         q = q.where(LiqPeriodo.quincena == quincena)
     p = ctx.db.scalar(q.limit(1))
     if p is None:
@@ -101,7 +101,7 @@ def _periodo(ctx: Contexto, anio: int | None, mes: int | None, quincena: int | N
 
 
 def _etiqueta(p: LiqPeriodo) -> dict:
-    return {"quincena": f"{p.anio}-{p.mes:02d} Q{p.quincena}", "desde": p.desde, "hasta": p.hasta, "estado": p.estado,
+    return {"quincena": p.etiqueta, "desde": p.desde, "hasta": p.hasta, "estado": p.estado,
             "enlace": f"/liquidador/quincenas/{p.id}"}
 
 
@@ -136,7 +136,7 @@ def crear_herramientas(ctx: Contexto) -> list[ia.Herramienta]:
         Args:
             anio: Año (p. ej. 2026). Omitir para la quincena más reciente.
             mes: Mes 1-12.
-            quincena: 1 (días 1-15) o 2 (16 a fin de mes).
+            quincena: 1 (días 1-15), 2 (16 a fin de mes) o 0 (periodo mensual).
         """
         def f():
             ctx.exigir("liquidador.periodos.ver")
@@ -167,7 +167,7 @@ def crear_herramientas(ctx: Contexto) -> list[ia.Herramienta]:
             documento: Cédula de la persona.
             anio: Año. Omitir para la quincena más reciente.
             mes: Mes 1-12.
-            quincena: 1 o 2.
+            quincena: 1, 2 o 0 (periodo mensual).
         """
         def f():
             ctx.exigir("liquidador.periodos.ver")
@@ -175,7 +175,7 @@ def crear_herramientas(ctx: Contexto) -> list[ia.Herramienta]:
             emp = ctx.db.scalar(select(LiqEmpleado).where(LiqEmpleado.documento == documento.strip()))
             r = emp and ctx.db.scalar(select(LiqResultado).where(LiqResultado.periodo_id == p.id, LiqResultado.empleado_id == emp.id))
             if not r:
-                raise LookupError(f"La cédula {documento} no tiene turnos en la quincena {p.anio}-{p.mes:02d} Q{p.quincena}.")
+                raise LookupError(f"La cédula {documento} no tiene turnos en el periodo {p.etiqueta}.")
             fest = svc_festivos.conjunto(ctx.db, p.desde, p.hasta)
             dias = ctx.db.scalars(select(LiqDia).where(LiqDia.periodo_id == p.id, LiqDia.empleado_id == emp.id).order_by(LiqDia.fecha))
             return {**_etiqueta(p), **ctx.persona(emp.documento, emp.nombre), "totales_horas": _etiquetar(r.horas),

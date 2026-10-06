@@ -27,3 +27,8 @@ export const ESTADO_COLOR: Record<string, string> = {
   aprobado: "bg-green-100 text-green-800",
   cerrado: "bg-slate-200 text-slate-700",
 };
+
+export function pesos(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  return "$" + Math.round(v).toLocaleString("es-CO");
+}

@@ -13,6 +13,32 @@ export const nombrePeriodo = (p: Pick<Periodo, "quincena">) => (p.quincena === 0
 export type Resultado = {
   empleado_id: number; documento: string; nombre: string; cargo: string;
   horas: Record<string, number>; dias: Record<string, number>; total_horas: number;
+  /** Solo con el permiso liquidador.nomina.ver */
+  devengado?: number | null; neto?: number | null; nomina?: Nomina | null;
+};
+
+export type DescuentoAplicado = { id: number; tipo: "prestamo" | "embargo"; descripcion: string; valor: number; calculo: string; observacion: string };
+
+/** Nómina de una persona en el periodo (services/nomina.py). */
+export type Nomina = {
+  salario: number; salario_minimo: boolean; valor_dia: number; valor_hora: number; horas_mes: number;
+  dias_salario: number; dias_incapacidad: number; incapacidad_empresa: number; incapacidad_eps: number; dias_auxilio: number; dias_sin_pago: number;
+  basico: number; incapacidad: number; auxilio: number; horas: Record<string, number>; valores: Record<string, number>;
+  recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
+  descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; deducciones: number; neto: number; tarifas: string[];
+};
+
+export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "deducciones" | "neto", number>;
+
+export type Tarifa = {
+  id: number; vigente_desde: string; smlmv: number; auxilio_transporte: number; horas_mes: number; salud_pct: number; pension_pct: number;
+  porcentajes: Record<string, number>; nota: string; actualizado_en: string | null;
+};
+
+export type Descuento = {
+  id: number; empleado_id: number; documento: string; nombre: string; tipo: "prestamo" | "embargo"; descripcion: string;
+  valor_mensual: number | null; porcentaje: number | null; monto_total: number | null; desde: string; hasta: string | null;
+  activo: boolean; descontado: number; saldo: number | null;
 };
 
 export type Dia = { fecha: string; codigo: string; turno: string; tipo_dia: string; clase: string; horas: Record<string, number> };
@@ -26,7 +52,7 @@ export type Matriz = Record<string, Record<string, number>>;
 
 export type Festivo = { fecha: string; descripcion: string; origen: "nacional" | "quitado" | "manual"; ajuste_id: number | null; vigente: boolean };
 
-export type Empleado = { id: number; documento: string; nombre: string; cargo: string; quincenas: number; ultima: string | null };
+export type Empleado = { id: number; documento: string; nombre: string; cargo: string; quincenas: number; ultima: string | null; salario?: number | null };
 
 /** Los 12 conceptos, en el orden de las columnas del archivo de liquidación. */
 export const CONCEPTOS: [string, string, string][] = [
@@ -70,3 +96,9 @@ export function horas(v: number | undefined): string {
   if (!v) return "–";
   return v.toLocaleString("es-CO", { maximumFractionDigits: 2 });
 }
+
+/** Conceptos que se pagan aparte del salario (las diurnas ordinarias ya están en el salario). */
+export const CONCEPTOS_PAGO = CONCEPTOS.filter(([k]) => k !== "ordinary_day");
+
+/** Recargos (se paga solo el adicional) y extras (la hora completa). */
+export const RECARGOS = ["ordinary_night", "holiday_day_surcharge", "holiday_night_surcharge", "sunday_surcharge", "sunday_night_surcharge"];

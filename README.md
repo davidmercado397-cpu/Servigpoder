@@ -11,7 +11,7 @@ auditoría. Cada usuario ve en el portal solo las apps para las que tiene permis
 | Capacidad Operativa | `/capacidad` | Compara lo **vendido** (matriz comercial) contra lo **programado** (Excel de SIESA): huecos de cobertura, sobreprogramación, cubrimientos, bolsas y alertas |
 | Validación de nómina | `/nomina` | Revisa la nómina de las modalidades fijas (quincenal y mensual) contra la programación, los maestros de SIESA y las cuotas; genera alertas para revisar y un informe |
 | Reporte de programación | `/reporte` | Convierte el Excel de programación de SIESA en un PDF ordenado por ubicación y puesto (Carta horizontal), con índice, marcadores, domingos/festivos sombreados y leyenda |
-| Liquidador de horas | `/liquidador` | Cuenta las horas de cada turno por quincena o por mes completo (diurnas, nocturnas, dominicales, festivas y extras) y genera el archivo de liquidación. Reemplaza la app "Payroll Manager" de otra empresa del holding |
+| Liquidador de horas | `/liquidador` | Cuenta las horas de cada turno por quincena o por mes completo (diurnas, nocturnas, dominicales, festivas y extras), genera el archivo de liquidación y liquida la nómina (devengado, salud, pensión, préstamos, embargos y neto) con recargos configurables por vigencia. Reemplaza la app "Payroll Manager" de otra empresa del holding |
 
 ## Stack
 

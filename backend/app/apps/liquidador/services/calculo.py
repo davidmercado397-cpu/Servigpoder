@@ -1,5 +1,7 @@
 """Conteo de horas de un periodo (quincena o mes completo).
 
+Con las horas se liquida la nómina de cada empleado (services/nomina.py).
+
 Por cada día cargado: se clasifica la fecha (ordinario, sábado, domingo, festivo, víspera…), se lee
 esa columna de la matriz del turno y se acumulan las horas de los 12 conceptos. Es el mismo cálculo
 de la app original; lo nuevo es el conteo de "días con novedad" (vacaciones, licencias, etc.).
@@ -17,7 +19,7 @@ from app.apps.liquidador.dominio.clasificador import classify
 from app.apps.liquidador.dominio.expansor import expand_workday_to_concepts
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import CALCULADA, LiqDia, LiqPeriodo, LiqResultado, LiqTurno
-from app.apps.liquidador.services import festivos
+from app.apps.liquidador.services import festivos, nomina
 
 # Clases de día (columnas de conteo del archivo de liquidación)
 TRABAJADO = "trabajado"
@@ -82,13 +84,16 @@ def calcular(db: Session, periodo: LiqPeriodo) -> int:
         conteo_por_empleado[d.empleado_id][d.clase] += 1
 
     db.execute(delete(LiqResultado).where(LiqResultado.periodo_id == periodo.id))
+    resultados: dict[int, LiqResultado] = {}
     for empleado_id, conteo in conteo_por_empleado.items():
         horas = horas_por_empleado[empleado_id]
-        db.add(LiqResultado(
+        resultados[empleado_id] = LiqResultado(
             periodo_id=periodo.id, empleado_id=empleado_id, dias=conteo,
             horas={c.value: float(horas.get(c, Decimal("0"))) for c in HourConcept},
             total_horas=sum((horas.get(c, Decimal("0")) for c in CONCEPTOS_TRABAJADOS), Decimal("0")),
-        ))
+        )
+    nomina.liquidar(db, periodo, dias, resultados)
+    db.add_all(resultados.values())
     periodo.estado = CALCULADA
     periodo.calculado_en = datetime.now(timezone.utc)
     db.flush()

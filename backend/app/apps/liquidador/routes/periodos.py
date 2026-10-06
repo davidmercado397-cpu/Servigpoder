@@ -23,6 +23,7 @@ from app.apps.liquidador.services import calculo, exportar, importador
 router = APIRouter(tags=["liquidador: quincenas"])
 VER = "liquidador.periodos.ver"
 GESTIONAR = "liquidador.periodos.gestionar"
+VER_NOMINA = "liquidador.nomina.ver"
 
 
 def _periodo_out(db: DbSession, p: LiqPeriodo) -> PeriodoOut:
@@ -42,9 +43,14 @@ def _abierto(p: LiqPeriodo) -> None:
         raise ApiError(409, "El periodo está cerrado. Reábralo para hacer cambios.", "PERIODO_CERRADO")
 
 
-def _resultado_out(r: LiqResultado) -> ResultadoOut:
-    return ResultadoOut(empleado_id=r.empleado_id, documento=r.empleado.documento, nombre=r.empleado.nombre,
-                        cargo=r.empleado.cargo, horas=r.horas, dias=r.dias, total_horas=float(r.total_horas))
+def _resultado_out(r: LiqResultado, nomina: bool = False, detalle: bool = False) -> ResultadoOut:
+    """Los valores de la nómina solo van a quien tiene el permiso liquidador.nomina.ver."""
+    out = ResultadoOut(empleado_id=r.empleado_id, documento=r.empleado.documento, nombre=r.empleado.nombre,
+                       cargo=r.empleado.cargo, horas=r.horas, dias=r.dias, total_horas=float(r.total_horas))
+    if nomina and r.nomina:  # vacía si el periodo se calculó antes de existir la nómina
+        out.devengado, out.neto = float(r.devengado), float(r.neto)
+        out.nomina = r.nomina if detalle else None
+    return out
 
 
 @router.get("/periodos", response_model=ApiResponse[list[PeriodoOut]])
@@ -146,14 +152,19 @@ def reabrir(periodo_id: int, request: Request, db: DbSession, actual: Usuario = 
 
 @router.get("/periodos/{periodo_id}/resultados", response_model=ApiResponse[list[ResultadoOut]])
 def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
-               orden: str = Query("documento", pattern="^(documento|nombre|horas|novedad)$"), _=Depends(require(VER))):
+               orden: str = Query("documento", pattern="^(documento|nombre|horas|novedad|devengado|neto)$"),
+               actual: Usuario = Depends(require(VER))):
     periodo = _periodo(db, periodo_id)
     lista = list(db.scalars(select(LiqResultado).where(LiqResultado.periodo_id == periodo.id)))
     if q.strip():
         t = q.strip().lower()
         lista = [r for r in lista if t in r.empleado.documento.lower() or t in r.empleado.nombre.lower()]
     claves = {"documento": lambda r: r.empleado.documento, "nombre": lambda r: r.empleado.nombre.lower(),
-              "horas": lambda r: -float(r.total_horas), "novedad": lambda r: -int(r.dias.get("novedad", 0))}
+              "horas": lambda r: -float(r.total_horas), "novedad": lambda r: -int(r.dias.get("novedad", 0)),
+              "devengado": lambda r: -float(r.devengado), "neto": lambda r: -float(r.neto)}
+    ve_nomina = VER_NOMINA in actual.permisos
+    if orden in ("devengado", "neto") and not ve_nomina:
+        orden = "documento"
     lista.sort(key=claves[orden])
     pagina, meta = paginar_lista(lista, p)
     totales: dict = {"horas": {}, "dias": {}}
@@ -162,17 +173,22 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
             totales["horas"][k] = round(totales["horas"].get(k, 0) + v, 2)
         for k, v in r.dias.items():
             totales["dias"][k] = totales["dias"].get(k, 0) + v
-    return ok([_resultado_out(r) for r in pagina], **meta, totales=totales)
+    pendiente = any(not r.nomina for r in lista)
+    if ve_nomina and not pendiente:
+        claves_nomina = ("basico", "incapacidad", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
+                         "embargos", "prestamos", "deducciones", "neto")
+        totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}
+    return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente)
 
 
 @router.get("/periodos/{periodo_id}/empleados/{empleado_id}", response_model=ApiResponse[DetalleEmpleado])
-def detalle_empleado(periodo_id: int, empleado_id: int, db: DbSession, _=Depends(require(VER))):
+def detalle_empleado(periodo_id: int, empleado_id: int, db: DbSession, actual: Usuario = Depends(require(VER))):
     """Día a día de una persona: turno, tipo de día y horas por concepto (de dónde sale cada total)."""
     r = db.scalar(select(LiqResultado).where(LiqResultado.periodo_id == periodo_id, LiqResultado.empleado_id == empleado_id))
     if r is None:
         raise ApiError(404, "La persona no tiene turnos en este periodo")
     dias = db.scalars(select(LiqDia).where(LiqDia.periodo_id == periodo_id, LiqDia.empleado_id == empleado_id).order_by(LiqDia.fecha))
-    return ok(DetalleEmpleado(empleado=_resultado_out(r), dias=[
+    return ok(DetalleEmpleado(empleado=_resultado_out(r, VER_NOMINA in actual.permisos, detalle=True), dias=[
         DiaOut(fecha=d.fecha, codigo=d.codigo, turno=d.turno.nombre, tipo_dia=d.tipo_dia, clase=d.clase, horas=d.horas) for d in dias]))
 
 
@@ -195,7 +211,7 @@ def _archivo(contenido: bytes, tipo: str, nombre: str) -> StreamingResponse:
 
 
 @router.get("/empleados", response_model=ApiResponse[list[EmpleadoOut]])
-def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), _=Depends(require(VER))):
+def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), actual: Usuario = Depends(require(VER))):
     consulta = select(LiqEmpleado).order_by(LiqEmpleado.documento)
     if q.strip():
         patron = f"%{q.strip()}%"
@@ -214,4 +230,6 @@ def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), 
             if eid not in ultimas or clave > ultimas[eid][0]:
                 ultimas[eid] = (clave, f"{anio}-{mes:02d} {'Mensual' if qn == 0 else f'Q{qn}'}")
     return ok([EmpleadoOut(id=e.id, documento=e.documento, nombre=e.nombre, cargo=e.cargo,
-                           quincenas=conteo.get(e.id, 0), ultima=ultimas[e.id][1] if e.id in ultimas else None) for e in lista], **meta)
+                           quincenas=conteo.get(e.id, 0), ultima=ultimas[e.id][1] if e.id in ultimas else None,
+                           salario=float(e.salario) if e.salario is not None and VER_NOMINA in actual.permisos else None)
+               for e in lista], **meta)

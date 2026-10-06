@@ -206,6 +206,16 @@ La app original sigue en uso hasta terminar esta validación. Todo se compara co
 - [ ] Un usuario con rol solo de consulta (`liquidador.periodos.ver`) ve y descarga, pero no carga ni cierra.
 - [ ] Asistente (con `IA_API_KEY` configurada): "Explícame de dónde salen las horas de la cédula X en la última quincena".
 
+### Nómina (Liquidador → Recargos y salario / Préstamos y embargos)
+- [ ] Recargos y salario muestra dos vigencias: desde 1-ene-2026 (dominical 80 %) y desde 1-jul-2026 (dominical 90 %, vigente hoy); mínimo $1.750.905, auxilio $249.095, 210 horas, salud y pensión 4 %.
+- [ ] Recalcular una quincena: aparecen las columnas Devengado y Neto y los totales del periodo. Un periodo calculado antes pide recalcular.
+- [ ] Persona con turno A todos los días de la Q2 de septiembre (13 A + 2 Z): básico $875.453, extras $135.487, auxilio $124.548, devengado $1.135.488, salud y pensión $40.438 c/u, neto $1.054.612.
+- [ ] Ausencias, vacaciones y licencias no pagan; L sí; incapacidad al 100 % con la división 2 días empresa / resto EPS.
+- [ ] Empleados → editar el salario de una persona y recalcular: cambia su básico; con más de 2 mínimos pierde el auxilio. Dejarlo vacío vuelve al mínimo.
+- [ ] Préstamos y embargos: crear un préstamo con cuota mensual y monto total; la quincena descuenta la mitad y deja de descontar al completar el total. Un embargo por % se descuenta antes que los préstamos.
+- [ ] Botón **Nómina** del periodo descarga `nomina_AAAA_MM_Q#.xlsx` con valor por concepto, total devengado, deducciones y neto, más las hojas de descuentos y tarifas usadas. El archivo de liquidación (horas) no cambia.
+- [ ] Un usuario sin `liquidador.nomina.ver` ve las horas pero no los valores.
+
 ## Reporte de programación (PDF)
 
 - [ ] En el portal aparece "Reporte de programación"; un usuario sin el permiso `reporte.generar` no la ve.

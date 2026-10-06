@@ -60,8 +60,11 @@ def por_codigo(db: Session) -> dict[str, LiqTurno]:
 
 
 def sembrar(db: Session) -> None:
-    """Parámetros y, solo si no hay ningún turno, la configuración de turnos de la app original."""
+    """Parámetros, tarifas de nómina y, solo si no hay ningún turno, la configuración de turnos de la app original."""
+    from app.apps.liquidador.services.nomina import sembrar_tarifas
+
     parametros(db)
+    sembrar_tarifas(db)
     if db.scalar(select(LiqTurno.id).limit(1)) is not None:
         return
     lineas = DATOS_INICIALES.read_text(encoding="utf-8").splitlines()[1:]

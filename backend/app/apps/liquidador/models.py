@@ -71,6 +71,8 @@ class LiqEmpleado(Base):
     documento: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     nombre: Mapped[str] = mapped_column(String(200))
     cargo: Mapped[str] = mapped_column(String(80), default="Vigilante")
+    # Salario mensual propio; vacío = el salario mínimo vigente en cada fecha (así se crean todos)
+    salario: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
 
 
 class LiqPeriodo(Base):
@@ -138,6 +140,55 @@ class LiqResultado(Base):
     horas: Mapped[dict] = mapped_column(JSON, default=dict)  # 12 conceptos
     dias: Mapped[dict] = mapped_column(JSON, default=dict)  # trabajado, descanso_pago, libre, ausencia, incapacidad, novedad
     total_horas: Mapped[Decimal] = mapped_column(Numeric(7, 2), default=Decimal("0"))
+    # Nómina del periodo: valor por concepto, aportes, descuentos y la explicación del cálculo
+    nomina: Mapped[dict] = mapped_column(JSON, default=dict)
+    devengado: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"))
+    neto: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"))
 
     periodo: Mapped[LiqPeriodo] = relationship(back_populates="resultados")
+    empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
+
+
+class LiqTarifa(Base):
+    """Valores de ley vigentes desde una fecha: salario mínimo, auxilio de transporte, horas del mes,
+    aportes del empleado y % de cada recargo y hora extra. Cada día se paga con la tarifa vigente ese día."""
+
+    __tablename__ = "liq_tarifa"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vigente_desde: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    smlmv: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    auxilio_transporte: Mapped[Decimal] = mapped_column(Numeric(14, 2))  # mensual
+    horas_mes: Mapped[int] = mapped_column(Integer, default=210)  # divisor del valor de la hora
+    salud_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("4"))
+    pension_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("4"))
+    # % sobre el valor de la hora por concepto. Recargos: solo el adicional; extras: la hora completa
+    porcentajes: Mapped[dict] = mapped_column(JSON, default=dict)
+    nota: Mapped[str] = mapped_column(String(300), default="")
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# Tipos de descuento
+PRESTAMO = "prestamo"
+EMBARGO = "embargo"
+
+
+class LiqDescuento(Base):
+    """Préstamo o embargo de un empleado: un valor mensual fijo (la quincena descuenta la mitad) o un % del
+    devengado sin auxilio de transporte; con monto total, deja de descontar cuando se completa."""
+
+    __tablename__ = "liq_descuento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
+    tipo: Mapped[str] = mapped_column(String(20))
+    descripcion: Mapped[str] = mapped_column(String(200))
+    valor_mensual: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    porcentaje: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    monto_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    desde: Mapped[date] = mapped_column(Date)
+    hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
     empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")

@@ -97,7 +97,4 @@ export const CLASE_DIA: Record<string, [string, string]> = {
   vacio: ["Sin programación", "bg-slate-50 text-slate-400"],
 };
 
-export function pesos(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "—";
-  return "$" + Math.round(v).toLocaleString("es-CO");
-}
+export { pesos } from "@/lib/formato";

@@ -112,3 +112,87 @@ def _guardar(libro: Workbook) -> bytes:
     buf = io.BytesIO()
     libro.save(buf)
     return buf.getvalue()
+
+
+# --- Nómina ---
+
+_CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
+ENCABEZADOS_NOMINA: tuple[str, ...] = (
+    "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
+    "SUELDO BASICO", "INCAPACIDAD", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIO DE TRANSPORTE",
+    "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
+)
+_PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
+
+
+def fila_nomina(r: LiqResultado) -> list:
+    n = r.nomina or {}
+    v = n.get("valores", {})
+    return [r.empleado.documento, r.empleado.nombre, n.get("salario", 0), n.get("dias_salario", 0), n.get("dias_incapacidad", 0),
+            n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0), *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
+            n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
+            n.get("prestamos", 0), n.get("deducciones", 0), n.get("neto", 0)]
+
+
+def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
+    """Valor por concepto, total devengado, deducciones y neto por persona, con el detalle de descuentos y
+    las tarifas usadas. Archivo aparte: el de liquidación (horas) no cambia."""
+    from openpyxl.styles import Border, Side
+
+    from app.apps.liquidador.models import LiqTarifa
+
+    resultados = sorted(db.scalars(select(LiqResultado).where(LiqResultado.periodo_id == periodo.id)),
+                        key=lambda r: r.empleado.documento)
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = f"Nomina {_titulo(periodo)}"
+    hoja.append(list(ENCABEZADOS_NOMINA))
+    for r in resultados:
+        hoja.append(fila_nomina(r))
+    ultima = hoja.max_row
+    if resultados:
+        total = ["TOTAL", f"{len(resultados)} empleados", None]
+        for col in range(4, len(ENCABEZADOS_NOMINA) + 1):
+            letra = get_column_letter(col)
+            total.append(f"=SUM({letra}2:{letra}{ultima})")
+        hoja.append(total)
+        linea = Side(style="thin", color="1E3A5F")
+        for celda in hoja[hoja.max_row]:
+            celda.font, celda.border = Font(bold=True), Border(top=linea)
+    for celda in hoja[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for col in range(3, len(ENCABEZADOS_NOMINA) + 1):
+        formato = "$ #,##0" if col == 3 or col >= _PRIMERA_MONEDA else "#,##0"
+        for (celda,) in hoja.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda.number_format, celda.alignment = formato, _DERECHA
+    _autoajustar(hoja, minimo=11, maximo=24)
+    hoja.freeze_panes = "C2"
+    hoja.row_dimensions[1].height = 42
+
+    desc = libro.create_sheet("Prestamos y embargos")
+    desc.append(["DOCUMENTO", "EMPLEADO", "TIPO", "DESCRIPCION", "CALCULO", "VALOR DESCONTADO", "OBSERVACION"])
+    for r in resultados:
+        for x in (r.nomina or {}).get("descuentos", []):
+            desc.append([r.empleado.documento, r.empleado.nombre, "Embargo" if x["tipo"] == "embargo" else "Préstamo",
+                         x["descripcion"], x["calculo"], x["valor"], x.get("observacion", "")])
+    for celda in desc[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for (celda,) in desc.iter_rows(min_row=2, min_col=6, max_col=6):
+        celda.number_format = "$ #,##0"
+    _autoajustar(desc, minimo=10, maximo=50)
+
+    usadas = sorted({f for r in resultados for f in (r.nomina or {}).get("tarifas", [])})
+    tar = libro.create_sheet("Tarifas usadas")
+    tar.append(["VIGENTE DESDE", "SALARIO MINIMO", "AUXILIO TRANSPORTE", "HORAS MES", "SALUD %", "PENSION %",
+                *(f"% {t}" for _, t in _CONCEPTOS_NOMINA), "NOTA"])
+    for t in db.scalars(select(LiqTarifa).order_by(LiqTarifa.vigente_desde)):
+        if t.vigente_desde.isoformat() in usadas:
+            tar.append([t.vigente_desde, float(t.smlmv), float(t.auxilio_transporte), t.horas_mes, float(t.salud_pct),
+                        float(t.pension_pct), *(t.porcentajes.get(c, 0) for c, _ in _CONCEPTOS_NOMINA), t.nota])
+    for celda in tar[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for (celda,) in tar.iter_rows(min_row=2, min_col=1, max_col=1):
+        celda.number_format = "dd/mm/yyyy"
+    _autoajustar(tar, minimo=10, maximo=40)
+    tar.row_dimensions[1].height = 42
+    return _guardar(libro), XLSX, f"nomina_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"

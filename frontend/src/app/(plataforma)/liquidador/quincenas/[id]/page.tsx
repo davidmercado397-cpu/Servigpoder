@@ -1,18 +1,21 @@
 "use client";
 
-import { ArrowLeft, Download, FileDown, Lock, LockOpen, RefreshCw, Search, Trash2, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, Banknote, Download, FileDown, Lock, LockOpen, RefreshCw, Search, Trash2, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
-import { MESES } from "@/lib/formato";
-import { CLASES, CONCEPTOS, ESTADO_PERIODO, TIPOS_DIA, nombrePeriodo, horas, type Dia, type Periodo, type Resultado } from "@/lib/liquidador";
+import { MESES, pesos } from "@/lib/formato";
+import {
+  CLASES, CONCEPTOS, CONCEPTOS_PAGO, ESTADO_PERIODO, TIPOS_DIA, nombrePeriodo, horas,
+  type Dia, type Nomina, type Periodo, type Resultado, type TotalesNomina,
+} from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
 type Carga = { periodo: Periodo; empleados: number; dias: number; fechas: number; advertencias: string[] };
-type Totales = { horas: Record<string, number>; dias: Record<string, number> };
+type Totales = { horas: Record<string, number>; dias: Record<string, number>; nomina?: TotalesNomina };
 const TIPO_DIA = Object.fromEntries(TIPOS_DIA);
 const DIA_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 
@@ -20,10 +23,12 @@ export default function DetalleQuincena() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const gestionar = usePermiso("liquidador.periodos.gestionar");
+  const verNomina = usePermiso("liquidador.nomina.ver");
   const [p, setP] = useState<Periodo | null>(null);
   const [filas, setFilas] = useState<Resultado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [totales, setTotales] = useState<Totales | null>(null);
+  const [nominaPendiente, setNominaPendiente] = useState(false);
   const [q, setQ] = useState("");
   const [orden, setOrden] = useState("documento");
   const [carga, setCarga] = useState<Carga | null>(null);
@@ -40,6 +45,7 @@ export default function DetalleQuincena() {
     setFilas(r.data ?? []);
     setMeta(metaDe(r));
     setTotales((r.meta.extra?.totales as Totales) ?? null);
+    setNominaPendiente(!!r.meta.extra?.nomina_pendiente);
   }, [id, q, orden, pag.query]);
 
   useEffect(() => {
@@ -188,8 +194,31 @@ export default function DetalleQuincena() {
               <a className="btn-primario inline-flex items-center gap-1.5" href={`/api/liquidador/periodos/${id}/liquidacion`}>
                 <Download className="h-4 w-4" /> Calendario + Liquidación
               </a>
+              {verNomina && (
+                <a className="btn-primario inline-flex items-center gap-1.5" href={`/api/liquidador/periodos/${id}/nomina`}
+                  title="Valor por concepto, devengado, deducciones y neto por persona">
+                  <Banknote className="h-4 w-4" /> Nómina
+                </a>
+              )}
             </div>
           </div>
+
+          {nominaPendiente && (
+            <div className="border-b border-slate-200 p-4">
+              <Alerta tipo="info">Este periodo se calculó antes de existir la nómina. {cerrada ? "Reábralo y recalcúlelo" : "Recalcúlelo"} para ver el devengado y el neto.</Alerta>
+            </div>
+          )}
+          {totales?.nomina && (
+            <div className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-3 lg:grid-cols-6">
+              <Cifra titulo="Sueldo básico + incapacidades" valor={totales.nomina.basico + totales.nomina.incapacidad} />
+              <Cifra titulo="Recargos" valor={totales.nomina.recargos} />
+              <Cifra titulo="Horas extras" valor={totales.nomina.extras} />
+              <Cifra titulo="Auxilio de transporte" valor={totales.nomina.auxilio} />
+              <Cifra titulo="Total devengado" valor={totales.nomina.devengado} fuerte
+                detalle={`Deducciones ${pesos(totales.nomina.deducciones)}: salud ${pesos(totales.nomina.salud)}, pensión ${pesos(totales.nomina.pension)}, embargos ${pesos(totales.nomina.embargos)}, préstamos ${pesos(totales.nomina.prestamos)}`} />
+              <Cifra titulo="Neto a pagar" valor={totales.nomina.neto} fuerte />
+            </div>
+          )}
 
           {totales && (
             <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -211,6 +240,8 @@ export default function DetalleQuincena() {
                 <option value="nombre">Nombre</option>
                 <option value="horas">Más horas trabajadas</option>
                 <option value="novedad">Más días con novedad</option>
+                {verNomina && <option value="devengado">Mayor devengado</option>}
+                {verNomina && <option value="neto">Mayor neto</option>}
               </select>
             </label>
             <span className="text-xs text-slate-500">Clic en una fila para ver el día a día.</span>
@@ -224,6 +255,8 @@ export default function DetalleQuincena() {
                   <th>Empleado</th>
                   {CONCEPTOS.map(([k, largo, corto]) => <th key={k} className="text-right" title={largo}>{corto}</th>)}
                   {CLASES.map(([k, texto, , corto]) => <th key={k} className="text-right" title={texto}>{corto}</th>)}
+                  {verNomina && <th className="text-right">Devengado</th>}
+                  {verNomina && <th className="text-right">Neto</th>}
                 </tr>
               </thead>
               <tbody>
@@ -233,6 +266,8 @@ export default function DetalleQuincena() {
                     <td className="max-w-[180px] truncate" title={r.nombre}>{r.nombre}</td>
                     {CONCEPTOS.map(([k]) => <td key={k} className="text-right tabular-nums">{horas(r.horas[k])}</td>)}
                     {CLASES.map(([k]) => <td key={k} className="text-right tabular-nums">{r.dias[k] || "–"}</td>)}
+                    {verNomina && <td className="whitespace-nowrap text-right tabular-nums">{pesos(r.devengado)}</td>}
+                    {verNomina && <td className="whitespace-nowrap text-right font-semibold tabular-nums">{pesos(r.neto)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -242,6 +277,8 @@ export default function DetalleQuincena() {
                     <td className="sticky left-0 bg-slate-100" colSpan={2}>Totales ({meta?.total.toLocaleString("es-CO")} empleados)</td>
                     {CONCEPTOS.map(([k]) => <td key={k} className="text-right tabular-nums">{horas(totales.horas[k])}</td>)}
                     {CLASES.map(([k]) => <td key={k} className="text-right tabular-nums">{totales.dias[k] || "–"}</td>)}
+                    {verNomina && <td className="whitespace-nowrap text-right tabular-nums">{pesos(totales.nomina?.devengado)}</td>}
+                    {verNomina && <td className="whitespace-nowrap text-right tabular-nums">{pesos(totales.nomina?.neto)}</td>}
                   </tr>
                 </tfoot>
               )}
@@ -275,6 +312,7 @@ function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado;
               <span key={k} className={`rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{texto}: <b>{e.dias[k]}</b></span>
             ))}
           </div>
+          {e.nomina && <NominaPersona n={e.nomina} />}
           <p className="text-xs text-slate-500">
             &quot;Diurnas ordinarias&quot; cuenta todas las horas ordinarias del turno; los recargos marcan cuáles de esas horas llevan recargo y no se suman aparte.
           </p>
@@ -312,5 +350,64 @@ function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado;
         </div>
       </aside>
     </div>
+  );
+}
+
+function Cifra({ titulo, valor, fuerte, detalle }: { titulo: string; valor: number; fuerte?: boolean; detalle?: string }) {
+  return (
+    <div title={detalle}>
+      <p className="text-xs text-slate-500">{titulo}</p>
+      <p className={`tabular-nums ${fuerte ? "text-lg font-bold text-marca-900" : "font-semibold text-slate-800"}`}>{pesos(valor)}</p>
+    </div>
+  );
+}
+
+function NominaPersona({ n }: { n: Nomina }) {
+  const fila = (concepto: React.ReactNode, detalle: React.ReactNode, valor: number, clase = "") => (
+    <tr className={clase}><td>{concepto}</td><td className="text-xs text-slate-500">{detalle}</td><td className="whitespace-nowrap text-right tabular-nums">{pesos(valor)}</td></tr>
+  );
+  const usados = CONCEPTOS_PAGO.filter(([k]) => n.valores[k]);
+  return (
+    <section className="rounded-lg border border-slate-200">
+      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <h3 className="font-semibold text-slate-900">Nómina del periodo</h3>
+        <span className="text-xs text-slate-500">
+          Salario {pesos(n.salario)}{n.salario_minimo ? " (mínimo)" : ""} · día {pesos(n.valor_dia)} · hora {pesos(n.valor_hora)} ({n.horas_mes} h/mes)
+        </span>
+        <span className="ml-auto text-sm">Devengado <b className="tabular-nums">{pesos(n.devengado)}</b> · Neto <b className="tabular-nums text-marca-800">{pesos(n.neto)}</b></span>
+      </header>
+      <div className="grid md:grid-cols-2 md:divide-x md:divide-slate-200">
+        <table className="tabla text-xs">
+          <thead><tr><th>Devengado</th><th /><th className="text-right">Valor</th></tr></thead>
+          <tbody>
+            {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
+            {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
+            {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
+            {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
+            {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
+          </tbody>
+        </table>
+        <table className="tabla text-xs">
+          <thead><tr><th>Deducciones</th><th /><th className="text-right">Valor</th></tr></thead>
+          <tbody>
+            {fila("Salud", `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
+            {fila("Pensión", `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
+            {n.descuentos.map((x) => (
+              <Fragment key={x.id}>
+                {fila(`${x.tipo === "embargo" ? "Embargo" : "Préstamo"}: ${x.descripcion}`,
+                  <>{x.calculo}{x.observacion && <span className="block text-amber-700">{x.observacion}</span>}</>, x.valor)}
+              </Fragment>
+            ))}
+            {fila(<b>Total deducciones</b>, "", n.deducciones, "bg-slate-50")}
+            {fila(<b>Neto a pagar</b>, "", n.neto, "bg-marca-50 font-bold text-marca-900")}
+          </tbody>
+        </table>
+      </div>
+      {n.dias_sin_pago > 0 && (
+        <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (vacaciones, licencias…, que se pagan en otro proceso).
+        </p>
+      )}
+    </section>
   );
 }

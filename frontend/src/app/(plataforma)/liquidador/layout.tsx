@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, CalendarRange, Calculator, Clock3, Users } from "lucide-react";
+import { BadgePercent, CalendarDays, CalendarRange, Calculator, Clock3, HandCoins, Users } from "lucide-react";
 import { ShellApp, type GrupoMenu } from "@/components/shell-app";
 
 const MENU: GrupoMenu[] = [
@@ -9,6 +9,13 @@ const MENU: GrupoMenu[] = [
     items: [
       { href: "/liquidador", texto: "Periodos", icono: CalendarRange, permiso: "liquidador.periodos.ver" },
       { href: "/liquidador/empleados", texto: "Empleados", icono: Users, permiso: "liquidador.periodos.ver" },
+    ],
+  },
+  {
+    grupo: "Nómina",
+    items: [
+      { href: "/liquidador/recargos", texto: "Recargos y salario", icono: BadgePercent, permiso: "liquidador.nomina.ver" },
+      { href: "/liquidador/descuentos", texto: "Préstamos y embargos", icono: HandCoins, permiso: "liquidador.nomina.ver" },
     ],
   },
   {
@@ -23,7 +30,7 @@ const MENU: GrupoMenu[] = [
 const ASISTENTE = {
   permiso: "liquidador.asistente.usar",
   base: "/liquidador/asistente",
-  bienvenida: "Pregúntame por las horas contadas de una quincena o de una persona, o cómo reparte las horas un turno. Consulto los datos reales antes de responder.",
+  bienvenida: "Pregúntame por las horas contadas de un periodo o de una persona, o cómo reparte las horas un turno. Consulto los datos reales antes de responder.",
   sugerencias: [
     "Resume las horas de la última quincena",
     "¿Quiénes tienen días con novedad en la última quincena?",

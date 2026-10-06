@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.apps import APPS
 from app.core.permisos import roles_base, todos_los_permisos
 from app.core.security import hash_password
-from app.models import Permiso, Rol, Usuario
+from app.core.empresas import EMPRESAS_INICIALES, esquema_de, preparar_esquema
+from app.models import Empresa, EmpresaApp, Permiso, Rol, Usuario, UsuarioEmpresaApp
 
 
 def seed(db: Session) -> None:
@@ -34,23 +34,31 @@ def seed(db: Session) -> None:
             rol.permisos = list(permisos.values())
     db.flush()
 
-    # Carga inicial de cada app (catálogos, parámetros…)
-    for app in APPS:
-        if app.seed:
-            app.seed(db)
+    # Empresas iniciales (en una base existente las crea la migración 0014 con sus datos)
+    if db.scalar(select(Empresa.id).limit(1)) is None:
+        for codigo, nombre, apps in EMPRESAS_INICIALES:
+            db.add(Empresa(codigo=codigo, nombre=nombre, esquema=esquema_de(codigo), apps=[EmpresaApp(app=a) for a in apps]))
+        db.flush()
 
     if db.scalar(select(Usuario).limit(1)) is None:
         s = get_settings()
         admin_rol = db.scalar(select(Rol).where(Rol.nombre == "Administrador"))
+        # El administrador inicial entra a todos los desarrollos habilitados de todas las empresas
+        accesos = [UsuarioEmpresaApp(empresa_id=e.id, app=a.app) for e in db.scalars(select(Empresa)) for a in e.apps]
         db.add(
             Usuario(
                 username=s.admin_username.strip().lower(),
                 nombre=s.admin_nombre,
                 password_hash=hash_password(s.admin_password),
                 roles=[admin_rol],
+                accesos=accesos,
             )
         )
     db.commit()
+
+    # Esquema, tablas y carga inicial de cada desarrollo (catálogos, parámetros…) en cada empresa
+    for empresa in db.scalars(select(Empresa).order_by(Empresa.id)).all():
+        preparar_esquema(db, empresa)
 
 
 if __name__ == "__main__":

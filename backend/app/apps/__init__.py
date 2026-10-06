@@ -3,7 +3,9 @@
 Para agregar un desarrollo nuevo:
 1. Crear `app/apps/<codigo>/` con `manifest.py` (APP = App(...)), models, routes y services.
 2. Agregarlo a la lista `APPS` de abajo.
-3. Crear su migración de Alembic (`alembic revision --autogenerate`).
+3. Sus modelos heredan de `BaseEmpresa` (app.core.db): sus tablas existen en el esquema de cada empresa
+   y las crea el arranque. Para cambiar tablas ya existentes, la migración de Alembic se aplica en cada
+   esquema (`for esquema in esquemas(op.get_bind()): op.add_column(..., schema=esquema)`).
 4. Crear sus pantallas en `frontend/src/app/(plataforma)/<codigo>/` y registrarla en el portal.
 """
 

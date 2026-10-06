@@ -1,4 +1,4 @@
-from tests.conftest import entrar
+from tests.conftest import ACCESOS, entrar
 from app.models import Auditoria
 
 
@@ -36,7 +36,7 @@ def test_roles_base(admin):
 
 def test_crear_usuario_y_permisos_por_rol(admin):
     roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
-    r = admin.post("/api/usuarios", json={"username": "Nomina1", "nombre": "Especialista Nómina",
+    r = admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "Nomina1", "nombre": "Especialista Nómina",
                                           "password": "clave-segura-1", "roles": [roles["Nómina"]]})
     assert r.status_code == 201
     assert r.json()["data"]["username"] == "nomina1"
@@ -50,7 +50,7 @@ def test_crear_usuario_y_permisos_por_rol(admin):
 
 
 def test_politica_de_contrasena(admin):
-    r = admin.post("/api/usuarios", json={"username": "debil", "nombre": "Débil", "password": "solo-letras"})
+    r = admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "debil", "nombre": "Débil", "password": "solo-letras"})
     assert r.status_code == 422
     body = r.json()
     assert body["error"]["code"] == "DATOS_INVALIDOS"
@@ -68,7 +68,7 @@ def test_rol_dinamico(admin):
 
 
 def test_usuario_desactivado_pierde_sesion(admin, client):
-    admin.post("/api/usuarios", json={"username": "temp", "nombre": "Temporal", "password": "clave-segura-1"})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "temp", "nombre": "Temporal", "password": "clave-segura-1"})
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "temp")
     admin.patch(f"/api/usuarios/{uid}", json={"activo": False})
     admin.post("/api/auth/logout")
@@ -79,9 +79,9 @@ def test_cambio_de_contrasena_invalida_sesiones(admin, db):
     from fastapi.testclient import TestClient
 
     from app.main import app
-    from tests.conftest import entrar, CSRF
+    from tests.conftest import ACCESOS, entrar, CSRF
 
-    admin.post("/api/usuarios", json={"username": "prog", "nombre": "Programador", "password": "clave-segura-1"})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "prog", "nombre": "Programador", "password": "clave-segura-1"})
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "prog")
     with TestClient(app, headers=CSRF) as otro:
         assert entrar(otro, "prog", "clave-segura-1").status_code == 200
@@ -144,12 +144,19 @@ def test_auditoria_registra_login(admin, db):
 
 
 def test_portal_muestra_apps_segun_permisos(admin):
+    # El portal muestra los desarrollos de la empresa elegida (por defecto la primera: SERA)
+    me = admin.get("/api/auth/me").json()["data"]
+    assert [(e["codigo"], e["apps"]) for e in me["empresas"]] == [("sera", ["liquidador"]), ("servigpoder", ["capacidad", "nomina", "reporte"])]
+    assert me["empresa_actual"] == "sera"
+    assert [a["codigo"] for a in admin.get("/api/plataforma/apps").json()["data"]] == ["liquidador"]
+    assert admin.post("/api/plataforma/empresa", json={"codigo": "servigpoder"}).status_code == 200
     apps = admin.get("/api/plataforma/apps").json()["data"]
-    assert [a["codigo"] for a in apps] == ["capacidad", "liquidador", "reporte", "nomina"] and apps[0]["ruta"] == "/capacidad"
+    assert [a["codigo"] for a in apps] == ["capacidad", "reporte", "nomina"] and apps[0]["ruta"] == "/capacidad"
+    assert admin.post("/api/plataforma/empresa", json={"codigo": "noexiste"}).status_code == 403
     # Un usuario sin permisos de la app no la ve en el portal
     admin.post("/api/roles", json={"nombre": "Solo admin usuarios", "permisos": ["usuarios.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo admin usuarios")
-    admin.post("/api/usuarios", json={"username": "otro", "nombre": "Otro", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "otro", "nombre": "Otro", "password": "clave-segura-1", "roles": [rid]})
     admin.post("/api/auth/logout")
     entrar(admin, "otro", "clave-segura-1")
     assert admin.get("/api/plataforma/apps").json()["data"] == []

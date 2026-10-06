@@ -54,13 +54,16 @@ components/shell-app.tsx     menú lateral, barra superior y asistente comunes a
 1. **Backend**: crear `backend/app/apps/<codigo>/` con `manifest.py`:
    `APP = App(codigo="<codigo>", nombre=..., descripcion=..., icono=..., color=..., permisos={"<codigo>.x.ver": (...)}, roles_base=..., router=..., seed=...)`.
    Los permisos **deben** empezar por `<codigo>.`; las rutas quedan bajo `/api/<codigo>`.
-   Nombrar las tablas con el prefijo de la app para evitar choques.
-2. Registrar la app en `backend/app/apps/__init__.py` (`APPS`) e importar sus modelos en `alembic/env.py`.
-3. `alembic revision --autogenerate -m "<codigo>: tablas iniciales"` y revisar la migración.
+   Nombrar las tablas con el prefijo de la app para evitar choques. Los modelos heredan de **`BaseEmpresa`**
+   (`app.core.db`): sus tablas existen en el esquema de cada empresa.
+2. Registrar la app en `backend/app/apps/__init__.py` (`APPS`).
+3. Las tablas nuevas las crea el arranque en el esquema de cada empresa (no necesitan migración). Para
+   cambiar una tabla existente, la migración se aplica en cada esquema:
+   `for esquema in esquemas(op.get_bind()): op.add_column("tabla", ..., schema=esquema)`.
 4. **Frontend**: crear `frontend/src/app/(plataforma)/<codigo>/` con su `layout.tsx` y páginas; agregar su ícono
    en `ICONOS` del portal (`(plataforma)/page.tsx`).
-5. Asignar sus permisos a roles desde Administración → Roles y permisos: la app aparece en el portal
-   de quienes tengan al menos un permiso de ella.
+5. Habilitarla en las empresas que la usan (Administración → Empresas), asignar sus permisos a roles y, en
+   cada usuario, marcar a qué empresas entra con ella: aparece en el portal de quien tenga las tres cosas.
 
 El navegador solo habla con el frontend; Next.js reenvía `/api/*` al backend, por lo que la cookie
 de sesión funciona sin configurar CORS. El backend no se publica hacia afuera.
@@ -280,6 +283,23 @@ secreto TOTP cifrado en la base (Fernet), códigos de recuperación guardados co
 tras **30 min de inactividad** y a las **12 h** en cualquier caso, cierre de las demás sesiones al cambiar
 la contraseña, y auditoría de cada ingreso (con el método de MFA usado). Si alguien pierde el celular y
 sus códigos, un administrador puede **restablecer su MFA** desde Administración → Usuarios.
+
+## Empresas
+
+Los desarrollos son por empresa (Servigpoder, SERA…) y **no comparten datos**: cada empresa tiene su propio
+esquema de PostgreSQL (`emp_servigpoder`, `emp_sera`) con todas las tablas de los desarrollos. Los usuarios,
+roles, empresas y la auditoría están en `public` y son compartidos.
+
+- **Administración → Empresas**: crear una empresa crea su esquema con las tablas vacías y la configuración
+  inicial de cada desarrollo (turnos, tarifas, catálogos); se eligen los desarrollos habilitados.
+- **Administración → Usuarios**: en cada usuario se marca a qué desarrollos entra en cada empresa. Los roles
+  son los mismos en todas las empresas. Entra a un desarrollo de una empresa si: la empresa está activa y lo
+  tiene habilitado, está marcado en su usuario y su rol le da algún permiso en él.
+- La empresa con la que se trabaja se elige arriba a la derecha (portal y cada desarrollo); viaja en una
+  cookie y se valida en cada petición. Sin empresa válida, el backend no consulta ninguna tabla de datos.
+- Datos al migrar (0014): el liquidador de horas quedó en SERA; capacidad y validación de nómina en Servigpoder.
+- La auditoría registra en qué empresa se hizo cada acción. Los respaldos (`pg_dump`) incluyen todos los
+  esquemas; para una sola empresa: `pg_dump -n emp_sera …`.
 
 ## Permisos
 

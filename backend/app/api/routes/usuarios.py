@@ -7,7 +7,7 @@ from app.core.rate_limit import limitar
 from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.core.security import hash_password
-from app.models import Rol, Usuario
+from app.models import Empresa, Rol, Usuario, UsuarioEmpresaApp
 from app.schemas.seguridad import UsuarioCrear, UsuarioEditar, UsuarioOut
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
@@ -20,6 +20,28 @@ def _roles(db: DbSession, ids: list[int]) -> list[Rol]:
     if len(roles) != len(set(ids)):
         raise ApiError(400, "Algún rol no existe")
     return roles
+
+
+def _accesos(db: DbSession, datos: dict[str, list[str]]) -> list[UsuarioEmpresaApp]:
+    """{"sera": ["liquidador"], …} → filas de acceso; solo empresas existentes y desarrollos habilitados en ellas."""
+    empresas = {e.codigo: e for e in db.scalars(select(Empresa).where(Empresa.codigo.in_(list(datos))))} if datos else {}
+    filas = []
+    for codigo, apps in datos.items():
+        e = empresas.get(codigo)
+        if e is None:
+            raise ApiError(400, f"La empresa {codigo} no existe")
+        no_habilitadas = sorted(set(apps) - set(e.codigos_apps))
+        if no_habilitadas:
+            raise ApiError(400, f"{e.nombre} no tiene habilitado: {', '.join(no_habilitadas)}")
+        filas += [UsuarioEmpresaApp(empresa_id=e.id, app=a, empresa=e) for a in sorted(set(apps))]
+    return filas
+
+
+def _resumen_accesos(user: Usuario) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for x in user.accesos:
+        out.setdefault(x.empresa.codigo, []).append(x.app)
+    return {k: sorted(v) for k, v in sorted(out.items())}
 
 
 @router.get("", response_model=ApiResponse[list[UsuarioOut]])
@@ -43,11 +65,13 @@ def crear(data: UsuarioCrear, request: Request, db: DbSession, actual: Usuario =
         email=data.email,
         password_hash=hash_password(data.password),
         roles=_roles(db, data.roles),
+        accesos=_accesos(db, data.accesos),
         debe_cambiar_password=True,  # contraseña temporal: la cambia en su primer ingreso
     )
     db.add(user)
     db.flush()
-    auditar(db, request, "usuario_creado", actual.id, usuario=username, roles=[r.nombre for r in user.roles])
+    auditar(db, request, "usuario_creado", actual.id, usuario=username, roles=[r.nombre for r in user.roles],
+            accesos=_resumen_accesos(user))
     db.commit()
     return ok(user)
 
@@ -78,10 +102,20 @@ def editar(usuario_id: int, data: UsuarioEditar, request: Request, db: DbSession
     if data.roles is not None:
         user.roles = _roles(db, data.roles)
         cambios.append("roles")
+    detalle: dict = {}
+    if data.accesos is not None:
+        antes = _resumen_accesos(user)
+        nuevos = _accesos(db, data.accesos)
+        clave = {(x.empresa_id, x.app) for x in nuevos}
+        user.accesos = [x for x in user.accesos if (x.empresa_id, x.app) in clave] +             [x for x in nuevos if (x.empresa_id, x.app) not in {(y.empresa_id, y.app) for y in user.accesos}]
+        db.flush()
+        if _resumen_accesos(user) != antes:
+            cambios.append("accesos")
+            detalle = {"accesos_antes": antes, "accesos_despues": _resumen_accesos(user)}
     # Contraseña, estado o roles cambiados: se cierran las sesiones abiertas del usuario
     if {"password", "activo", "roles"} & set(cambios) and user.id != actual.id:
         user.sesion_version += 1
-    auditar(db, request, "usuario_editado", actual.id, usuario=user.username, campos=cambios)
+    auditar(db, request, "usuario_editado", actual.id, usuario=user.username, campos=cambios, **detalle)
     db.commit()
     return ok(user)
 

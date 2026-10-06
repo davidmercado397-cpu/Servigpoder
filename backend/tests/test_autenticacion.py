@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.security import crear_token_sesion
 from app.main import app
 from app.models import Usuario
-from tests.conftest import CSRF, RECUPERACION, SECRETOS, entrar
+from tests.conftest import ACCESOS, CSRF, RECUPERACION, SECRETOS, entrar
 
 
 def _login(client, user="admin", pwd="admin-clave-123"):
@@ -74,7 +74,7 @@ def test_bloqueo_por_codigos_incorrectos(client):
 
 
 def test_contrasena_temporal_obliga_a_cambiarla(admin):
-    admin.post("/api/usuarios", json={"username": "nuevo", "nombre": "Nuevo", "password": "temporal-123"})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "nuevo", "nombre": "Nuevo", "password": "temporal-123"})
     with TestClient(app, headers=CSRF) as c:
         _login(c, "nuevo", "temporal-123")
         conf = c.post("/api/auth/mfa/configurar").json()["data"]
@@ -91,7 +91,7 @@ def test_contrasena_temporal_obliga_a_cambiarla(admin):
 
 
 def test_restablecer_mfa(admin):
-    admin.post("/api/usuarios", json={"username": "perdio", "nombre": "Perdió el teléfono", "password": "clave-segura-1"})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "perdio", "nombre": "Perdió el teléfono", "password": "clave-segura-1"})
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "perdio")
     with TestClient(app, headers=CSRF) as c:
         entrar(c, "perdio", "clave-segura-1")

@@ -3,7 +3,8 @@ from datetime import date, datetime
 from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import BaseEmpresa as Base
+from app.models import Usuario
 from app.apps.capacidad.models.maestros import Puesto
 
 # Clase de cada celda día
@@ -23,7 +24,7 @@ class ProgramacionCarga(Base):
     hasta: Mapped[date] = mapped_column(Date)
     anio: Mapped[int] = mapped_column(Integer, index=True)
     mes: Mapped[int] = mapped_column(Integer, index=True)
-    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuario.id"), nullable=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id), nullable=True)
     cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resumen: Mapped[dict] = mapped_column(JSON, default=dict)
 

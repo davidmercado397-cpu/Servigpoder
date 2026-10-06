@@ -17,7 +17,8 @@ from app.core.security import (
 )
 from app.core.sesion import COOKIE_PREAUTH, borrar_preauth, borrar_sesion, emitir_preauth, emitir_sesion
 from app.models import Usuario
-from app.schemas.seguridad import LoginIn, SesionOut
+from app.core.empresas import COOKIE_EMPRESA, empresa_elegida, empresas_del_usuario, fijar_cookie
+from app.schemas.seguridad import EmpresaSesion, LoginIn, SesionOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -223,5 +224,12 @@ def logout(response: Response):
 
 
 @router.get("/me", response_model=ApiResponse[SesionOut])
-def me(user: CurrentUser):
-    return ok(sesion_out(user))
+def me(request: Request, response: Response, db: DbSession, user: CurrentUser):
+    lista = empresas_del_usuario(db, user)
+    actual = empresa_elegida(request, db, user)
+    if actual and request.cookies.get(COOKIE_EMPRESA) != actual.codigo:
+        fijar_cookie(response, actual.codigo)  # la empresa por defecto queda elegida para los desarrollos
+    return ok(sesion_out(user).model_copy(update={
+        "empresas": [EmpresaSesion(codigo=e.codigo, nombre=e.nombre, apps=apps) for e, apps in lista],
+        "empresa_actual": actual.codigo if actual else None,
+    }))

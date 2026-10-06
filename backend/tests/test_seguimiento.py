@@ -34,9 +34,9 @@ def test_historico(admin):
     assert len(h) == 1 and h[0]["analisis_id"] and h[0]["cubrimientos"] == 3
 
 
-def test_alertas(admin, db):
+def test_alertas(admin, en_empresa):
     _cargar(admin)
-    with db() as s:
+    with en_empresa("servigpoder") as s:
         lista = alertas.evaluar(s, date(2026, 9, 18))
     titulos = [a["titulo"] for a in lista]
     assert any("cubrimientos pendientes" in t for t in titulos)
@@ -47,9 +47,9 @@ def test_alertas(admin, db):
     assert admin.get("/api/capacidad/alertas").json()["success"] is True
 
 
-def test_alerta_falta_proyectar(admin, db):
+def test_alerta_falta_proyectar(admin, en_empresa):
     _cargar(admin)
-    with db() as s:
+    with en_empresa("servigpoder") as s:
         titulos = [a["titulo"] for a in alertas.evaluar(s, date(2026, 9, 28))]
     assert "Falta proyectar la matriz del mes siguiente" in titulos
 

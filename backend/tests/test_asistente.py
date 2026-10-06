@@ -1,4 +1,4 @@
-from tests.conftest import entrar
+from tests.conftest import ACCESOS, entrar
 import json
 
 import httpx
@@ -17,9 +17,9 @@ def _herramientas(db_session, username="admin", datos_personales=True):
     return {t.nombre: t for t in asistente.crear_herramientas(ctx)}, ctx
 
 
-def test_herramientas_con_datos_reales_del_escenario(admin, db):
+def test_herramientas_con_datos_reales_del_escenario(admin, en_empresa):
     _cargar(admin)
-    with db() as s:
+    with en_empresa("servigpoder") as s:
         h, ctx = _herramientas(s)
         r = json.loads(h["resumen_cobertura"].call({}))
         assert r["cubrimientos"] == 3 and "cobertura_pct" in r and r["enlace_tablero"] == "/capacidad/cobertura"
@@ -36,21 +36,21 @@ def test_herramientas_con_datos_reales_del_escenario(admin, db):
         assert ctx.herramientas_usadas == ["resumen_cobertura", "detalle_puesto", "cubrimientos", "buscar_puestos", "detalle_puesto"]
 
 
-def test_sin_datos_personales_seudonimiza(admin, db):
+def test_sin_datos_personales_seudonimiza(admin, en_empresa):
     _cargar(admin)
-    with db() as s:
+    with en_empresa("servigpoder") as s:
         h, _ = _herramientas(s, datos_personales=False)
         texto = h["cubrimientos"].call({})
     assert "EXTRA Y" not in texto and "Persona-" in texto
     assert '"cedula"' not in texto
 
 
-def test_herramientas_respetan_permisos(admin, db):
+def test_herramientas_respetan_permisos(admin, en_empresa):
     admin.post("/api/roles", json={"nombre": "Solo usuarios", "permisos": ["usuarios.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo usuarios")
-    admin.post("/api/usuarios", json={"username": "limitado", "nombre": "Limitado", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "limitado", "nombre": "Limitado", "password": "clave-segura-1", "roles": [rid]})
     _cargar(admin)
-    with db() as s:
+    with en_empresa("servigpoder") as s:
         h, _ = _herramientas(s, "limitado")
         r = json.loads(h["resumen_cobertura"].call({}))
     assert "permiso" in r["error"]
@@ -124,7 +124,7 @@ def test_validaciones_y_limite_diario(admin, con_clave, monkeypatch):
 def test_sin_permiso_de_asistente(admin, con_clave):
     admin.post("/api/roles", json={"nombre": "Sin IA", "permisos": ["capacidad.analisis.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Sin IA")
-    admin.post("/api/usuarios", json={"username": "sinia", "nombre": "Sin IA", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "sinia", "nombre": "Sin IA", "password": "clave-segura-1", "roles": [rid]})
     admin.post("/api/auth/logout")
     entrar(admin, "sinia", "clave-segura-1")
     assert admin.post("/api/capacidad/asistente", json={"mensajes": [{"rol": "usuario", "texto": "hola"}]}).status_code == 403

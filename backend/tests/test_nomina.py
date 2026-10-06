@@ -4,7 +4,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from tests.conftest import archivo, entrar, xlsx
+from tests.conftest import ACCESOS, archivo, entrar, xlsx
 
 API = "/api/nomina"
 DIA_AUX = 249095 / 30  # auxilio de transporte por día
@@ -284,7 +284,7 @@ def test_informe_excel(admin):
 def test_permisos(admin):
     admin.post("/api/roles", json={"nombre": "Solo ver nomina", "permisos": ["nomina.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo ver nomina")
-    admin.post("/api/usuarios", json={"username": "vernom", "nombre": "Ver", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "vernom", "nombre": "Ver", "password": "clave-segura-1", "roles": [rid]})
     pid = _cargar_todo(admin)
     admin.post("/api/auth/logout")
     entrar(admin, "vernom", "clave-segura-1")

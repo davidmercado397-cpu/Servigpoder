@@ -3,7 +3,7 @@ from datetime import time
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import BaseEmpresa as Base
 
 # Tipos de puesto
 OPERATIVO = "operativo"

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Asistente, type ConfigAsistente } from "@/components/asistente";
 import { api } from "@/lib/api";
+import { SelectorEmpresa } from "@/components/selector-empresa";
 import { useSesion } from "@/lib/sesion";
 
 /** Menú lateral, barra superior y asistente comunes a todas las apps de la plataforma. */
@@ -203,6 +204,7 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
             <p className="truncate text-sm font-semibold text-slate-800">{actual?.texto ?? ""}</p>
           </div>
           <div className="ml-auto flex items-center gap-4">
+            <SelectorEmpresa app={inicio.replace(/^\//, "").split("/")[0]} />
             <span className="hidden text-xs capitalize text-slate-500 md:inline">{fecha}</span>
             {campana && puedeContadores && (
               <Link href={inicio} className="relative rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-marca-700" title="Alertas" aria-label="Alertas">

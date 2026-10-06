@@ -5,7 +5,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from tests.conftest import entrar, xlsx
+from tests.conftest import ACCESOS, entrar, xlsx
 from tests.test_liquidador import API, _cargar, _excel_sep_q2, _quincena, _resultados
 
 HORA = 1750905 / 210
@@ -157,7 +157,7 @@ def test_permisos_de_nomina(admin):
     _cargar(admin, pid, _excel_sep_q2())
     admin.post("/api/roles", json={"nombre": "Solo horas", "permisos": ["liquidador.periodos.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo horas")
-    admin.post("/api/usuarios", json={"username": "horas", "nombre": "Horas", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "horas", "nombre": "Horas", "password": "clave-segura-1", "roles": [rid]})
     admin.post("/api/auth/logout")
     entrar(admin, "horas", "clave-segura-1")
     fila = admin.get(f"{API}/periodos/{pid}/resultados").json()

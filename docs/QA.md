@@ -35,6 +35,15 @@ docker compose up -d --build
 - [ ] Un usuario sin permisos de Capacidad no ve la tarjeta y la API le responde 403.
 - [ ] 30 minutos sin actividad: la siguiente acción lleva a `/login` con el aviso "Su sesión se cerró por inactividad".
 
+### Empresas (Administración → Empresas / Usuarios)
+- [ ] Empresas muestra Servigpoder (Capacidad, Validación de nómina, Reporte) y SERA (Liquidador de horas).
+- [ ] Arriba a la derecha se elige la empresa: en SERA el portal muestra solo el Liquidador; en Servigpoder, los demás.
+- [ ] Los datos de antes siguen ahí: análisis y validación de nómina en Servigpoder; los periodos del liquidador en SERA.
+- [ ] Crear una empresa de prueba con el Liquidador: entra vacía (sin periodos ni empleados) pero con los 131 turnos y las tarifas.
+- [ ] Usuarios → editar: la tabla "Acceso por empresa" marca los desarrollos por empresa; quitar una marca le corta el acceso aunque conserve el rol.
+- [ ] Un usuario con acceso solo a SERA no puede elegir Servigpoder ni ver sus datos (403).
+- [ ] Auditoría: las acciones dentro de un desarrollo muestran la empresa.
+
 ---
 
 ## F1. Maestros, matriz comercial y carga de programación

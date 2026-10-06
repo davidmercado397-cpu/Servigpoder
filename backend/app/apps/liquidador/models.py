@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import BaseEmpresa as Base
 from app.models import Usuario  # noqa: F401  (tabla referenciada por cerrado_por)
 
 HORAS = Numeric(5, 2)
@@ -91,7 +91,7 @@ class LiqPeriodo(Base):
     cargado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     calculado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cerrado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    cerrado_por: Mapped[int | None] = mapped_column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    cerrado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     dias: Mapped[list["LiqDia"]] = relationship(back_populates="periodo", cascade="all, delete-orphan", passive_deletes=True)

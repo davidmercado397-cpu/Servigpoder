@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from app.apps.reporte.services import lector, pdf
-from tests.conftest import archivo, entrar, xlsx
+from tests.conftest import ACCESOS, archivo, entrar, xlsx
 
 API = "/api/reporte"
 
@@ -108,7 +108,7 @@ def test_api_rechaza_archivo_que_no_es_de_siesa(admin):
 def test_permiso_del_reporte(admin):
     admin.post("/api/roles", json={"nombre": "Sin reporte", "permisos": ["capacidad.analisis.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Sin reporte")
-    admin.post("/api/usuarios", json={"username": "sinrep", "nombre": "Sin reporte", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "sinrep", "nombre": "Sin reporte", "password": "clave-segura-1", "roles": [rid]})
     admin.post("/api/auth/logout")
     entrar(admin, "sinrep", "clave-segura-1")
     contenido = _siesa(date(2026, 10, 1), date(2026, 10, 15), FILAS)

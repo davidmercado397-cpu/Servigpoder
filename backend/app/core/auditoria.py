@@ -17,5 +17,6 @@ def auditar(db: Session, request: Request, accion: str, usuario_id: int | None =
     Se agrega a la sesión actual: queda guardado con el commit de la operación.
     """
     ip = ip_cliente(request)
-    db.add(Auditoria(usuario_id=usuario_id, accion=accion, detalle=detalle, ip=ip, request_id=request_id_ctx.get()))
-    log.info("auditoria accion=%s usuario=%s ip=%s detalle=%s", accion, usuario_id, ip, detalle)
+    empresa = getattr(request.state, "empresa", None)
+    db.add(Auditoria(usuario_id=usuario_id, accion=accion, detalle=detalle, ip=ip, request_id=request_id_ctx.get(), empresa=empresa))
+    log.info("auditoria accion=%s usuario=%s empresa=%s ip=%s detalle=%s", accion, usuario_id, empresa, ip, detalle)

@@ -1,6 +1,6 @@
 from datetime import date
 
-from tests.conftest import entrar, archivo, xlsx
+from tests.conftest import ACCESOS, entrar, archivo, xlsx
 
 MATRIZ = [
     [None, "BASE DE DATOS DE PUESTOS ACTIVOS SERVIGPODER"],
@@ -197,7 +197,7 @@ def test_archivo_no_excel_rechazado(admin):
 
 def test_nomina_no_puede_editar_matriz(admin):
     roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
-    admin.post("/api/usuarios", json={"username": "nom", "nombre": "Nómina", "password": "clave-segura-1",
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "nom", "nombre": "Nómina", "password": "clave-segura-1",
                                       "roles": [roles["Nómina"]]})
     pid = importar_matriz(admin).json()["data"]["periodo_id"]
     admin.post("/api/auth/logout")

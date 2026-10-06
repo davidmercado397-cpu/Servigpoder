@@ -4,6 +4,7 @@ import { ChevronDown, KeyRound, LayoutGrid, LogOut, ShieldCheck } from "lucide-r
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { SelectorEmpresa } from "@/components/selector-empresa";
 import { useSesion } from "@/lib/sesion";
 
 export function iniciales(nombre: string) {
@@ -41,7 +42,8 @@ export function BarraPlataforma({ children }: { children?: React.ReactNode }) {
         </Link>
         <nav className="ml-4 hidden items-center gap-1 text-sm md:flex">{children}</nav>
 
-        <div className="relative ml-auto" ref={ref}>
+        <div className="ml-auto"><SelectorEmpresa oscuro /></div>
+        <div className="relative" ref={ref}>
           <button onClick={() => setMenu(!menu)} className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 transition hover:bg-white/10" aria-haspopup="menu" aria-expanded={menu}>
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 text-xs font-bold ring-2 ring-white/15">
               {iniciales(sesion.nombre)}

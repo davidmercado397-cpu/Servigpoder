@@ -59,6 +59,8 @@ class Usuario(Base):
     mfa_recuperacion: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")  # hashes de códigos de un solo uso
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     roles: Mapped[list[Rol]] = relationship(secondary=usuario_rol, lazy="selectin")
+    # Desarrollos a los que entra en cada empresa (models/empresas.py)
+    accesos: Mapped[list["UsuarioEmpresaApp"]] = relationship(cascade="all, delete-orphan", lazy="selectin")  # noqa: F821
 
     @property
     def permisos(self) -> set[str]:
@@ -77,3 +79,4 @@ class Auditoria(Base):
     detalle: Mapped[dict] = mapped_column(JSON, default=dict)
     ip: Mapped[str] = mapped_column(String(64), default="")
     request_id: Mapped[str] = mapped_column(String(64), default="")
+    empresa: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)  # empresa en la que se trabajaba

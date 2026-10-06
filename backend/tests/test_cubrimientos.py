@@ -1,4 +1,4 @@
-from tests.conftest import entrar, archivo, xlsx
+from tests.conftest import ACCESOS, entrar, archivo, xlsx
 from tests.test_f1 import HORARIOS, importar_matriz
 
 D, N = "06:00 - 18:00", "18:00 - 06:00"
@@ -96,7 +96,7 @@ def test_nomina_aprueba_rechaza_y_se_conserva_al_recalcular(admin):
 def test_programador_no_puede_aprobar(admin):
     analisis_id = _cargar(admin)
     roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
-    admin.post("/api/usuarios", json={"username": "prog", "nombre": "Programador", "password": "clave-segura-1",
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "prog", "nombre": "Programador", "password": "clave-segura-1",
                                       "roles": [roles["Programador"]]})
     cid = admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()["data"][0]["id"]
     admin.post("/api/auth/logout")

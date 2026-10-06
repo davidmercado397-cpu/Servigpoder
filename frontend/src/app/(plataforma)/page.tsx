@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BadgeCheck, Boxes, Calculator, FileText, KeyRound, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowRight, BadgeCheck, Boxes, Building2, Calculator, FileText, KeyRound, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BarraPlataforma } from "@/components/barra-plataforma";
@@ -23,9 +23,11 @@ export default function Portal() {
   const admin = [
     { href: "/admin/usuarios", texto: "Usuarios", desc: "Crear cuentas, restablecer acceso", icono: UserCog, permiso: "usuarios.ver" },
     { href: "/admin/roles", texto: "Roles y permisos", desc: "Qué puede hacer cada rol en cada app", icono: KeyRound, permiso: "roles.ver" },
+    { href: "/admin/empresas", texto: "Empresas", desc: "Empresas del holding y sus desarrollos", icono: Building2, permiso: "usuarios.ver" },
     { href: "/admin/auditoria", texto: "Auditoría", desc: "Bitácora de accesos y cambios", icono: ScrollText, permiso: "auditoria.ver" },
   ].filter((a) => sesion.permisos.includes(a.permiso));
 
+  const empresa = sesion.empresas.find((e) => e.codigo === sesion.empresa_actual);
   const hora = new Date().getHours();
   const saludo = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
 
@@ -35,7 +37,10 @@ export default function Portal() {
       <main className="mx-auto max-w-7xl space-y-10 px-4 py-10 lg:px-8">
         <div>
           <h1 className="text-3xl font-bold text-marca-900">{saludo}, {sesion.nombre.split(" ")[0]}</h1>
-          <p className="mt-1 text-slate-500">Estas son las aplicaciones a las que tiene acceso.</p>
+          <p className="mt-1 text-slate-500">
+            Estas son las aplicaciones a las que tiene acceso{empresa ? <> en <b className="text-slate-700">{empresa.nombre}</b></> : ""}.
+            {sesion.empresas.length > 1 && " Para trabajar con otra empresa, cámbiela arriba a la derecha."}
+          </p>
         </div>
 
         <section>

@@ -11,6 +11,7 @@ PERMISOS_NUCLEO: dict[str, tuple[str, str]] = {
     "roles.ver": ("Administración", "Ver roles y permisos"),
     "roles.gestionar": ("Administración", "Crear y editar roles y sus permisos"),
     "auditoria.ver": ("Administración", "Consultar la bitácora de auditoría"),
+    "empresas.gestionar": ("Administración", "Crear empresas y habilitar sus desarrollos"),
 }
 
 

@@ -5,7 +5,7 @@ from openpyxl import load_workbook
 
 from app.models import Usuario
 from app.apps.liquidador.services import asistente
-from tests.conftest import archivo, entrar, xlsx
+from tests.conftest import ACCESOS, archivo, entrar, xlsx
 
 API = "/api/liquidador"
 
@@ -183,7 +183,7 @@ def test_empleados_y_busqueda(admin):
 def test_permisos_del_liquidador(admin):
     admin.post("/api/roles", json={"nombre": "Consulta liq", "permisos": ["liquidador.periodos.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Consulta liq")
-    admin.post("/api/usuarios", json={"username": "consulta", "nombre": "Consulta", "password": "clave-segura-1", "roles": [rid]})
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "consulta", "nombre": "Consulta", "password": "clave-segura-1", "roles": [rid]})
     pid = _quincena(admin)
     admin.post("/api/auth/logout")
     entrar(admin, "consulta", "clave-segura-1")
@@ -196,10 +196,10 @@ def test_permisos_del_liquidador(admin):
     assert apps == ["liquidador"]
 
 
-def test_herramientas_del_asistente(admin, db):
+def test_herramientas_del_asistente(admin, en_empresa):
     pid = _quincena(admin)
     _cargar(admin, pid)
-    with db() as s:
+    with en_empresa("sera") as s:
         usuario = s.query(Usuario).filter_by(username="admin").one()
         h = {t.nombre: t for t in asistente.crear_herramientas(asistente.Contexto(s, usuario, True))}
         estado = json.loads(h["estado_datos"].call())

@@ -2,9 +2,10 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.routes import auth, plataforma, roles, usuarios
+from app.api.routes import auth, empresas, plataforma, roles, usuarios
 from app.apps import APPS
 from app.core.config import API_VERSION, get_settings
+from app.core.empresas import dependencias_app
 from app.core.middleware import registrar_middlewares
 from app.core.respuestas import ApiResponse, ok, registrar_manejadores
 
@@ -25,12 +26,12 @@ registrar_manejadores(app)
 registrar_middlewares(app)
 
 api = APIRouter(prefix="/api")
-for modulo in (auth, usuarios, roles, plataforma):
+for modulo in (auth, usuarios, roles, plataforma, empresas):
     api.include_router(modulo.router)
-# Cada desarrollo publica sus rutas bajo /api/<codigo>
+# Cada desarrollo publica sus rutas bajo /api/<codigo>, siempre dentro de la empresa elegida
 for aplicacion in APPS:
     if aplicacion.router:
-        api.include_router(aplicacion.router())
+        api.include_router(aplicacion.router(), dependencies=dependencias_app(aplicacion.codigo))
 
 
 @api.get("/health", response_model=ApiResponse[dict], tags=["sistema"])

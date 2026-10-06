@@ -80,8 +80,12 @@ export type RolResumen = { id: number; nombre: string };
 export type Usuario = {
   id: number; username: string; nombre: string; email: string | null; activo: boolean; roles: RolResumen[];
   mfa_activo: boolean; debe_cambiar_password: boolean;
+  /** Desarrollos marcados en cada empresa: { sera: ["liquidador"], … } */
+  accesos: Record<string, string[]>;
 };
-export type Sesion = Usuario & { permisos: string[] };
+export type EmpresaSesion = { codigo: string; nombre: string; apps: string[] };
+export type Sesion = Usuario & { permisos: string[]; empresas: EmpresaSesion[]; empresa_actual: string | null };
+export type Empresa = { id: number; codigo: string; nombre: string; esquema: string; activa: boolean; apps: string[]; usuarios: number };
 export type Rol = RolResumen & { descripcion: string; permisos: string[] };
 export type Permiso = { codigo: string; modulo: string; descripcion: string };
 

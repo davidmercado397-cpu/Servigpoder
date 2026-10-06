@@ -2,16 +2,22 @@
 
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { useCallback, useEffect, useState } from "react";
-import { api, apiEnvelope, mensajeError, type Rol, type Usuario } from "@/lib/api";
+import { api, apiEnvelope, mensajeError, type Empresa, type Rol, type Usuario } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
-type Form = { id?: number; username: string; nombre: string; email: string; password: string; roles: number[]; activo: boolean };
-const VACIO: Form = { username: "", nombre: "", email: "", password: "", roles: [], activo: true };
+type Form = {
+  id?: number; username: string; nombre: string; email: string; password: string; roles: number[]; activo: boolean;
+  accesos: Record<string, string[]>;
+};
+type AppInfo = { codigo: string; nombre: string };
+const VACIO: Form = { username: "", nombre: "", email: "", password: "", roles: [], activo: true, accesos: {} };
 
 export default function UsuariosPage() {
   const puedeGestionar = usePermiso("usuarios.gestionar");
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [roles, setRoles] = useState<Rol[]>([]);
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [apps, setApps] = useState<AppInfo[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
@@ -23,6 +29,9 @@ export default function UsuariosPage() {
     setUsuarios(r.data ?? []);
     setMeta(metaDe(r));
     setRoles(await api<Rol[]>("/roles").catch(() => []));
+    const e = await apiEnvelope<Empresa[]>("/empresas").catch(() => null);
+    setEmpresas(e?.data ?? []);
+    setApps((e?.meta.extra?.apps as AppInfo[]) ?? []);
   }, [q, pag.query]);
 
   useEffect(() => {
@@ -31,7 +40,10 @@ export default function UsuariosPage() {
 
   function editar(u: Usuario) {
     setError("");
-    setForm({ id: u.id, username: u.username, nombre: u.nombre, email: u.email ?? "", password: "", roles: u.roles.map((r) => r.id), activo: u.activo });
+    setForm({
+      id: u.id, username: u.username, nombre: u.nombre, email: u.email ?? "", password: "", roles: u.roles.map((r) => r.id), activo: u.activo,
+      accesos: Object.fromEntries(Object.entries(u.accesos ?? {}).map(([k, v]) => [k, [...v]])),
+    });
   }
 
   async function guardar(e: React.FormEvent) {
@@ -42,12 +54,15 @@ export default function UsuariosPage() {
       if (form.id) {
         await api(`/usuarios/${form.id}`, {
           method: "PATCH",
-          json: { nombre: form.nombre, email: form.email, roles: form.roles, activo: form.activo, ...(form.password ? { password: form.password } : {}) },
+          json: {
+            nombre: form.nombre, email: form.email, roles: form.roles, activo: form.activo, accesos: limpiar(form.accesos),
+            ...(form.password ? { password: form.password } : {}),
+          },
         });
       } else {
         await api("/usuarios", {
           method: "POST",
-          json: { username: form.username, nombre: form.nombre, email: form.email || null, password: form.password, roles: form.roles },
+          json: { username: form.username, nombre: form.nombre, email: form.email || null, password: form.password, roles: form.roles, accesos: limpiar(form.accesos) },
         });
       }
       setForm(null);
@@ -65,6 +80,17 @@ export default function UsuariosPage() {
     } catch (err) {
       alert(mensajeError(err));
     }
+  }
+
+  const limpiar = (a: Record<string, string[]>) => Object.fromEntries(Object.entries(a).filter(([, v]) => v.length));
+  const nombreApp = (c: string) => apps.find((a) => a.codigo === c)?.nombre ?? c;
+  const nombreEmpresa = (c: string) => empresas.find((e) => e.codigo === c)?.nombre ?? c;
+
+  function toggleAcceso(empresa: string, app: string) {
+    if (!form) return;
+    const actuales = form.accesos[empresa] ?? [];
+    const nuevos = actuales.includes(app) ? actuales.filter((x) => x !== app) : [...actuales, app];
+    setForm({ ...form, accesos: { ...form.accesos, [empresa]: nuevos } });
   }
 
   function toggleRol(id: number) {
@@ -113,6 +139,33 @@ export default function UsuariosPage() {
               ))}
             </div>
           </div>
+          <div className="md:col-span-2">
+            <p className="label">Acceso por empresa</p>
+            <p className="mb-2 text-xs text-slate-500">
+              Marque a qué desarrollos entra en cada empresa. Lo que puede hacer dentro lo definen sus roles (los mismos en todas las empresas).
+            </p>
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              <table className="tabla text-sm">
+                <tbody>
+                  {empresas.filter((e) => e.activa).map((e) => (
+                    <tr key={e.codigo}>
+                      <td className="w-48 font-medium">{e.nombre}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-4">
+                          {e.apps.length ? e.apps.map((a) => (
+                            <label key={a} className="flex items-center gap-2">
+                              <input type="checkbox" checked={(form.accesos[e.codigo] ?? []).includes(a)} onChange={() => toggleAcceso(e.codigo, a)} />
+                              {nombreApp(a)}
+                            </label>
+                          )) : <span className="text-xs text-slate-400">Sin desarrollos habilitados</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
           {form.id && (
             <label className="flex items-center gap-2 text-sm md:col-span-2">
               <input type="checkbox" checked={form.activo} onChange={(e) => setForm({ ...form, activo: e.target.checked })} />
@@ -138,6 +191,7 @@ export default function UsuariosPage() {
               <th>Usuario</th>
               <th>Nombre</th>
               <th>Roles</th>
+              <th>Empresas</th>
               <th>Estado</th>
               <th>Verificación en dos pasos</th>
               {puedeGestionar && <th />}
@@ -149,6 +203,13 @@ export default function UsuariosPage() {
                 <td className="font-mono">{u.username}</td>
                 <td>{u.nombre}</td>
                 <td>{u.roles.map((r) => r.nombre).join(", ") || <span className="text-slate-400">Sin rol</span>}</td>
+                <td className="text-sm">
+                  {Object.keys(u.accesos ?? {}).length
+                    ? Object.entries(u.accesos).map(([emp, aps]) => (
+                      <span key={emp} className="block" title={aps.map(nombreApp).join(", ")}>{nombreEmpresa(emp)} <span className="text-xs text-slate-500">({aps.length})</span></span>
+                    ))
+                    : <span className="text-slate-400">Sin acceso</span>}
+                </td>
                 <td>
                   <span className={`rounded-full px-2 py-0.5 text-xs ${u.activo ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-600"}`}>
                     {u.activo ? "Activo" : "Inactivo"}

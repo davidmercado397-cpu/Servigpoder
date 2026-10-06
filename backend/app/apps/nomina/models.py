@@ -10,7 +10,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import BaseEmpresa as Base
 from app.models import Usuario  # noqa: F401  (tabla referenciada por las decisiones)
 
 # Archivos de un periodo
@@ -68,7 +68,7 @@ class NomArchivo(Base):
     registros: Mapped[int] = mapped_column(Integer, default=0)
     datos: Mapped[dict | list] = mapped_column(JSON)
     cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    cargado_por: Mapped[int | None] = mapped_column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    cargado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
 
     periodo: Mapped[NomPeriodo] = relationship(back_populates="archivos")
 
@@ -121,7 +121,7 @@ class NomDecision(Base):
     referencia: Mapped[str] = mapped_column(String(40), default="")
     estado: Mapped[str] = mapped_column(String(20))
     comentario: Mapped[str] = mapped_column(Text, default="")
-    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
     decidido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -159,7 +159,7 @@ class NomPuestoDecision(Base):
     puesto: Mapped[str] = mapped_column(String(40))
     estado: Mapped[str] = mapped_column(String(20))  # aprobado | error
     comentario: Mapped[str] = mapped_column(Text, default="")
-    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
     decidido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

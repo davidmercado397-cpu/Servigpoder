@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import BaseEmpresa as Base
 from app.apps.capacidad.models.maestros import Puesto
 
 BORRADOR = "borrador"

@@ -16,12 +16,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.db import Base, get_db
+from app.core.db import Base, get_db, traduccion
 from app.core.rate_limit import limitador
 from app.main import app
 from app.seed import seed
 
 CSRF = {"X-Requested-With": "fetch"}
+# Acceso a todos los desarrollos de las empresas iniciales (lo que puede hacer cada uno lo definen sus roles)
+ACCESOS = {"servigpoder": ["capacidad", "nomina", "reporte"], "sera": ["liquidador"]}
 
 
 # Estado de MFA y contraseñas de los usuarios de prueba (se reinicia en cada prueba)
@@ -82,6 +84,17 @@ def db():
     limitador.reiniciar()
     yield Session
     engine.dispose()
+
+
+@pytest.fixture
+def en_empresa(db):
+    """Sesión directa a la base apuntando a los datos de una empresa (como hace cada petición a un desarrollo)."""
+    def crear(codigo: str):
+        s = db()
+        s.bind = s.get_bind().execution_options(**traduccion(f"emp_{codigo}"))
+        return s
+
+    return crear
 
 
 @pytest.fixture

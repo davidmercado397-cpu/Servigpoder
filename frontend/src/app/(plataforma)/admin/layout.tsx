@@ -8,6 +8,7 @@ import { useSesion } from "@/lib/sesion";
 const SECCIONES = [
   { href: "/admin/usuarios", texto: "Usuarios", permiso: "usuarios.ver" },
   { href: "/admin/roles", texto: "Roles y permisos", permiso: "roles.ver" },
+  { href: "/admin/empresas", texto: "Empresas", permiso: "usuarios.ver" },
   { href: "/admin/auditoria", texto: "Auditoría", permiso: "auditoria.ver" },
 ];
 

@@ -1,12 +1,16 @@
 "use client";
 
-import { FileText, Loader2, Search, Trash2, TriangleAlert, Upload } from "lucide-react";
+import { Check, FileText, Loader2, Pencil, Search, Trash2, TriangleAlert, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alerta, Titulo } from "@/components/ui";
-import { api, mensajeError } from "@/lib/api";
+import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
-type Documento = { id: number; nombre: string; titulo: string; paginas: number; paginas_sin_texto: number; fragmentos: number; cargado_en: string };
+type Documento = {
+  id: number; nombre: string; titulo: string; modulo: string; fecha: string | null; secciones: number;
+  paginas: number; paginas_sin_texto: number; fragmentos: number; cargado_en: string;
+};
+type Edicion = { id: number; titulo: string; modulo: string; fecha: string };
 type ResultadoCarga = { archivo: string; ok: boolean; duplicado?: boolean; advertencias?: string[]; error?: string; documento?: Documento };
 
 const LOTE = 5; // PDF por petición, para no esperar demasiado en cada una
@@ -19,9 +23,16 @@ export default function BaseConocimiento() {
   const [progreso, setProgreso] = useState<{ hechos: number; total: number } | null>(null);
   const [error, setError] = useState("");
   const [arrastrando, setArrastrando] = useState(false);
+  const [modulo, setModulo] = useState("");
+  const [modulos, setModulos] = useState<string[]>([]);
+  const [filtroModulo, setFiltroModulo] = useState("");
+  const [edicion, setEdicion] = useState<Edicion | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const cargar = useCallback(() => api<Documento[]>("/siesa/documentos").then(setDocs).catch((e) => setError(mensajeError(e))), []);
+  const cargar = useCallback(() => apiEnvelope<Documento[]>("/siesa/documentos").then((r) => {
+    setDocs(r.data ?? []);
+    setModulos((r.meta.extra?.modulos as string[]) ?? []);
+  }).catch((e) => setError(mensajeError(e))), []);
   useEffect(() => {
     cargar();
   }, [cargar]);
@@ -37,6 +48,7 @@ export default function BaseConocimiento() {
       for (let i = 0; i < pdfs.length; i += LOTE) {
         const form = new FormData();
         pdfs.slice(i, i + LOTE).forEach((f) => form.append("archivos", f));
+        form.append("modulo", modulo.trim());
         const r = await api<ResultadoCarga[]>("/siesa/documentos", { method: "POST", body: form });
         setResultados((ant) => [...ant, ...r]);
         setProgreso({ hechos: Math.min(i + LOTE, pdfs.length), total: pdfs.length });
@@ -46,6 +58,19 @@ export default function BaseConocimiento() {
     } finally {
       setProgreso(null);
       cargar();
+    }
+  }
+
+  async function guardarEdicion() {
+    if (!edicion) return;
+    try {
+      await api(`/siesa/documentos/${edicion.id}`, {
+        method: "PATCH", json: { titulo: edicion.titulo, modulo: edicion.modulo, fecha: edicion.fecha || null },
+      });
+      setEdicion(null);
+      cargar();
+    } catch (e) {
+      setError(mensajeError(e));
     }
   }
 
@@ -59,7 +84,8 @@ export default function BaseConocimiento() {
     }
   }
 
-  const filtrados = (docs ?? []).filter((d) => !q.trim() || `${d.titulo} ${d.nombre}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const filtrados = (docs ?? []).filter((d) => (!filtroModulo || d.modulo === filtroModulo) &&
+    (!q.trim() || `${d.titulo} ${d.nombre} ${d.modulo}`.toLowerCase().includes(q.trim().toLowerCase())));
   const paginas = (docs ?? []).reduce((s, d) => s + d.paginas, 0);
   const correctos = resultados.filter((r) => r.ok && !r.duplicado).length;
 
@@ -67,8 +93,9 @@ export default function BaseConocimiento() {
     <div className="space-y-5">
       <Titulo>Base de conocimiento</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Instructivos de SIESA que el chat puede consultar. De cada PDF se guarda solo su texto (por página); el archivo no se almacena.
-        Los PDF escaneados como imagen no tienen texto y no se pueden consultar.
+        Instructivos de SIESA que el chat puede consultar. De cada PDF se guarda solo su texto, dividido por secciones (del índice
+        del PDF o de sus títulos), con el módulo, el instructivo, la sección y la página; el archivo no se almacena. Los PDF
+        escaneados como imagen no tienen texto y no se pueden consultar.
       </p>
       {error && <Alerta>{error}</Alerta>}
 
@@ -87,6 +114,12 @@ export default function BaseConocimiento() {
             <>
               <Upload className="h-8 w-8 text-slate-400" />
               <p className="text-sm text-slate-600">Arrastre aquí los PDF de los instructivos (puede seleccionar muchos a la vez)</p>
+              <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+                <label htmlFor="modulo-carga" className="text-slate-600">Módulo de SIESA de estos PDF:</label>
+                <input id="modulo-carga" className="input w-56" list="modulos-siesa" maxLength={80} placeholder="p. ej. Nómina, Contabilidad"
+                  value={modulo} onChange={(e) => setModulo(e.target.value)} />
+                <datalist id="modulos-siesa">{modulos.map((m) => <option key={m} value={m} />)}</datalist>
+              </div>
               <button className="btn-primario" onClick={() => input.current?.click()}>Seleccionar PDF</button>
               <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden
                 onChange={(e) => { subir(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
@@ -112,24 +145,48 @@ export default function BaseConocimiento() {
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input className="input pl-8" placeholder="Buscar instructivo…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
+          {modulos.length > 0 && (
+            <select className="input w-48" value={filtroModulo} onChange={(e) => setFiltroModulo(e.target.value)}>
+              <option value="">Todos los módulos</option>
+              {modulos.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
           {docs && <span className="text-sm text-slate-500">{docs.length} instructivos · {paginas.toLocaleString("es-CO")} páginas</span>}
         </div>
         <table className="tabla text-sm">
           <thead>
-            <tr><th>Instructivo</th><th className="text-right">Páginas</th><th>Cargado</th>{gestionar && <th />}</tr>
+            <tr><th>Instructivo</th><th>Módulo</th><th>Fecha</th><th className="text-right">Secciones</th><th className="text-right">Páginas</th><th>Cargado</th>{gestionar && <th />}</tr>
           </thead>
           <tbody>
-            {filtrados.map((d) => (
+            {filtrados.map((d) => edicion?.id === d.id ? (
+              <tr key={d.id} className="bg-marca-50/40">
+                <td><input className="input" maxLength={255} value={edicion.titulo} onChange={(e) => setEdicion({ ...edicion, titulo: e.target.value })} /></td>
+                <td><input className="input w-40" list="modulos-siesa" maxLength={80} value={edicion.modulo} onChange={(e) => setEdicion({ ...edicion, modulo: e.target.value })} /></td>
+                <td><input className="input w-40" type="date" value={edicion.fecha} onChange={(e) => setEdicion({ ...edicion, fecha: e.target.value })} /></td>
+                <td colSpan={3} className="text-xs text-slate-500">El módulo y el título forman el contexto de cada fragmento del instructivo.</td>
+                <td className="whitespace-nowrap text-right">
+                  <button className="rounded-md p-1.5 text-green-700 hover:bg-green-50" onClick={guardarEdicion} aria-label="Guardar"><Check className="h-4 w-4" /></button>
+                  <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
+                </td>
+              </tr>
+            ) : (
               <tr key={d.id}>
                 <td>
                   <span className="flex items-center gap-2 font-medium"><FileText className="h-4 w-4 shrink-0 text-slate-400" /> {d.titulo}</span>
                   <span className="block pl-6 text-xs text-slate-500">{d.nombre}</span>
                   {d.paginas_sin_texto > 0 && <span className="block pl-6 text-xs text-amber-700">{d.paginas_sin_texto} páginas sin texto (imagen)</span>}
                 </td>
+                <td>{d.modulo || <span className="text-xs text-amber-700">Sin módulo</span>}</td>
+                <td className="whitespace-nowrap text-slate-500">{d.fecha ? new Date(d.fecha + "T12:00:00").toLocaleDateString("es-CO") : "—"}</td>
+                <td className="text-right tabular-nums" title={d.secciones ? undefined : "Sin índice ni títulos reconocibles: el contexto es solo el nombre del instructivo"}>
+                  {d.secciones || <span className="text-amber-700">0</span>}
+                </td>
                 <td className="text-right tabular-nums">{d.paginas}</td>
                 <td className="whitespace-nowrap text-slate-500">{d.cargado_en ? new Date(d.cargado_en).toLocaleDateString("es-CO") : "—"}</td>
                 {gestionar && (
-                  <td className="text-right">
+                  <td className="whitespace-nowrap text-right">
+                    <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Editar"
+                      onClick={() => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "" })}><Pencil className="h-4 w-4" /></button>
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700" onClick={() => eliminar(d)} aria-label="Quitar"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 )}

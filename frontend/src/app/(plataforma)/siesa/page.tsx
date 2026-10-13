@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { api, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
-type Fuente = { n: number; documento: string; archivo: string; pagina: number; extracto: string };
+type Fuente = { n: number; documento: string; archivo: string; pagina: number; seccion: string; modulo: string; fecha: string | null; extracto: string };
 type Mensaje = { rol: "usuario" | "asistente"; texto: string; fuentes?: Fuente[]; encontrado?: boolean; error?: boolean };
 type Estado = { configurado: boolean; documentos: number; paginas: number; usadas_hoy: number; limite_diario: number };
 type Respuesta = { texto: string; encontrado: boolean; fuentes: Fuente[]; usadas_hoy: number; limite_diario: number };
@@ -20,6 +20,8 @@ export default function ChatSiesa() {
   const [texto, setTexto] = useState("");
   const [cargando, setCargando] = useState(false);
   const [estado, setEstado] = useState<Estado | null>(null);
+  const [modulos, setModulos] = useState<string[]>([]);
+  const [modulo, setModulo] = useState("");
   const fin = useRef<HTMLDivElement>(null);
   const entrada = useRef<HTMLTextAreaElement>(null);
 
@@ -30,6 +32,10 @@ export default function ChatSiesa() {
       if (guardada) setMensajes(JSON.parse(guardada));
     } catch {}
     api<Estado>("/siesa/estado").then(setEstado).catch(() => {});
+    api<string[]>("/siesa/modulos").then(setModulos).catch(() => {});
+    try {
+      setModulo(sessionStorage.getItem(`${CLAVE}-modulo`) ?? "");
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -49,7 +55,7 @@ export default function ChatSiesa() {
     try {
       const r = await api<Respuesta>("/siesa/chat", {
         method: "POST",
-        json: { mensajes: historial.slice(-10).map(({ rol, texto }) => ({ rol, texto })) },
+        json: { mensajes: historial.slice(-10).map(({ rol, texto }) => ({ rol, texto })), modulo: modulo || null },
       });
       setMensajes((m) => [...m, { rol: "asistente", texto: r.texto, fuentes: r.fuentes, encontrado: r.encontrado }]);
       setEstado((e) => (e ? { ...e, usadas_hoy: r.usadas_hoy } : e));
@@ -105,8 +111,13 @@ export default function ChatSiesa() {
                       <summary className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-slate-700">
                         <span className="rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-800">[{f.n}]</span>
                         <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-                        <span className="truncate">{f.documento}</span>
-                        <span className="shrink-0 text-xs text-slate-500">· página {f.pagina}</span>
+                        <span className="min-w-0 truncate">
+                          {f.modulo && <span className="text-slate-500">{f.modulo} · </span>}{f.documento}
+                          {f.seccion && <span className="text-slate-500"> › {f.seccion}</span>}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-500">
+                          · pág. {f.pagina}{f.fecha ? ` · ${new Date(f.fecha + "T12:00:00").toLocaleDateString("es-CO")}` : ""}
+                        </span>
                       </summary>
                       <p className="whitespace-pre-line border-t border-slate-100 px-3 py-2 text-xs text-slate-600">{f.extracto}</p>
                     </details>
@@ -124,6 +135,16 @@ export default function ChatSiesa() {
         <div ref={fin} />
       </div>
 
+      {modulos.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 text-sm text-slate-600">
+          <label htmlFor="modulo-chat">Buscar en:</label>
+          <select id="modulo-chat" className="input w-56 py-1" value={modulo}
+            onChange={(e) => { setModulo(e.target.value); try { sessionStorage.setItem(`${CLAVE}-modulo`, e.target.value); } catch {} }}>
+            <option value="">Todos los módulos</option>
+            {modulos.map((m) => <option key={m} value={m}>Solo {m}</option>)}
+          </select>
+        </div>
+      )}
       <form onSubmit={(e) => { e.preventDefault(); enviar(); }} className="tarjeta flex items-end gap-2 p-2">
         <textarea ref={entrada} rows={1} value={texto} maxLength={2000} disabled={!!vacia}
           placeholder={vacia ? "Primero hay que cargar los instructivos" : "Escriba su pregunta sobre SIESA…"}

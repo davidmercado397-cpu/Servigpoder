@@ -245,6 +245,9 @@ La app original sigue en uso hasta terminar esta validación. Todo se compara co
 - [ ] Una pregunta que no está en los instructivos (p. ej. "¿quién ganó el mundial?") responde que no está en los instructivos cargados.
 - [ ] Una pregunta corta de seguimiento ("¿y para anularlo?") usa el contexto de la anterior.
 - [ ] Un usuario con el rol "Consulta instructivos SIESA" pregunta, pero no puede cargar ni quitar PDF.
+- [ ] Al cargar se elige el módulo (p. ej. Nómina); la tabla muestra módulo, fecha y número de secciones de cada instructivo; el lápiz permite corregir título, módulo y fecha.
+- [ ] Un instructivo con 0 secciones (sin índice ni títulos) se marca en ámbar: su contexto es solo el nombre del documento.
+- [ ] En el chat, "Buscar en: Solo Nómina" responde solo con instructivos de ese módulo; las fuentes muestran módulo › sección y página.
 
 ## Reporte de programación (PDF)
 

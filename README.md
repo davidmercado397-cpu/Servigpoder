@@ -294,7 +294,15 @@ Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA carga
 - **Base de conocimiento**: se cargan muchos PDF a la vez (hasta `SIESA_MAX_PDF_MB` cada uno). De cada PDF se
   guarda solo el texto por página, dividido en fragmentos; el archivo no se almacena. Un PDF repetido no se
   duplica; los escaneados como imagen no tienen texto y se rechazan (o se avisan las páginas sin texto).
-- **Búsqueda**: texto completo en español de PostgreSQL (índice GIN), por raíces de palabras.
+- **Troceo**: cada fragmento (~1.000 caracteres) pertenece a una sola sección y a una sola página. La sección sale
+  del índice (marcadores) del PDF o, si no tiene, de los títulos detectados en el texto (numerados "2.1 …" o en
+  mayúsculas). Se quitan los encabezados y pies de página que se repiten en las hojas y los números de página.
+- **Metadatos**: documento, sección, página, módulo de SIESA (se elige al cargar y se puede editar) y fecha del
+  instructivo (la del PDF, editable). El chat puede buscar solo en un módulo: el filtro se aplica antes de buscar.
+- **Contexto en el encabezado**: cada fragmento lleva su ruta, p. ej. `Nómina · Manual de vacaciones > Solicitud >
+  Plazos`; la ruta se indexa junto con el texto y se entrega al modelo.
+- **Búsqueda**: texto completo en español de PostgreSQL (índice GIN sobre encabezado + texto), por raíces de
+  palabras. Se recuperan pocos fragmentos (hasta 5) y se descartan los que puntúan menos del 25 % del mejor.
 - **Respuesta**: el modelo recibe solo los fragmentos encontrados, con temperatura 0 y reglas estrictas: no usar
   conocimiento general, no suponer, citar cada dato. Si no hay fragmentos relevantes no se consulta al modelo; si
   la respuesta no cita ningún fragmento se descarta. En ambos casos responde que no está en los instructivos.

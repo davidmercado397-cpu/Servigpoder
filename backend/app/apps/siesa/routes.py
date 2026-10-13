@@ -1,8 +1,9 @@
 """Chat de instructivos SIESA y administración de su base de conocimiento (PDF)."""
 
+from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, func, select
 
@@ -27,20 +28,63 @@ class DocumentoOut(BaseModel):
     id: int
     nombre: str
     titulo: str
+    modulo: str
+    fecha: date | None
+    secciones: int
     paginas: int
     paginas_sin_texto: int
     fragmentos: int
     cargado_en: str
 
 
-def _doc_out(d: SiesaDocumento) -> DocumentoOut:
-    return DocumentoOut(id=d.id, nombre=d.nombre, titulo=d.titulo, paginas=d.paginas, paginas_sin_texto=d.paginas_sin_texto,
-                        fragmentos=d.fragmentos, cargado_en=d.cargado_en.isoformat() if d.cargado_en else "")
+def _doc_out(d: SiesaDocumento, secciones: int = 0) -> DocumentoOut:
+    return DocumentoOut(id=d.id, nombre=d.nombre, titulo=d.titulo, modulo=d.modulo, fecha=d.fecha, secciones=secciones,
+                        paginas=d.paginas, paginas_sin_texto=d.paginas_sin_texto, fragmentos=d.fragmentos,
+                        cargado_en=d.cargado_en.isoformat() if d.cargado_en else "")
+
+
+def _secciones(db: DbSession) -> dict[int, int]:
+    return dict(db.execute(select(SiesaFragmento.documento_id, func.count(func.distinct(SiesaFragmento.seccion)))
+                           .where(SiesaFragmento.seccion != "").group_by(SiesaFragmento.documento_id)).all())
 
 
 @router.get("/documentos", response_model=ApiResponse[list[DocumentoOut]])
 def documentos(db: DbSession, _=Depends(require(CONSULTAR))):
-    return ok([_doc_out(d) for d in db.scalars(select(SiesaDocumento).order_by(SiesaDocumento.titulo))])
+    secciones = _secciones(db)
+    lista = db.scalars(select(SiesaDocumento).order_by(SiesaDocumento.modulo, SiesaDocumento.titulo))
+    return ok([_doc_out(d, secciones.get(d.id, 0)) for d in lista], modulos=services.modulos(db))
+
+
+@router.get("/modulos", response_model=ApiResponse[list[str]])
+def modulos(db: DbSession, _=Depends(require(CONSULTAR))):
+    """Módulos de SIESA con instructivos cargados (para filtrar el chat)."""
+    return ok(services.modulos(db))
+
+
+class DocumentoEditar(BaseModel):
+    titulo: str | None = Field(default=None, min_length=1, max_length=255)
+    modulo: str | None = Field(default=None, max_length=80)
+    fecha: date | None = None
+
+
+@router.patch("/documentos/{documento_id}", response_model=ApiResponse[DocumentoOut])
+def editar_documento(documento_id: int, data: DocumentoEditar, request: Request, db: DbSession,
+                     actual: Usuario = Depends(require(GESTIONAR))):
+    """Título, módulo y fecha del instructivo; el encabezado de sus fragmentos se actualiza con ellos."""
+    d = db.get(SiesaDocumento, documento_id)
+    if d is None:
+        raise ApiError(404, "Documento no encontrado")
+    cambios = data.model_dump(exclude_unset=True)
+    if "titulo" in cambios and data.titulo:
+        d.titulo = data.titulo.strip()
+    if "modulo" in cambios:
+        d.modulo = (data.modulo or "").strip()
+    if "fecha" in cambios:
+        d.fecha = data.fecha
+    services.actualizar_encabezados(d)
+    auditar(db, request, "siesa_documento_editado", actual.id, archivo=d.nombre, campos=sorted(cambios))
+    db.commit()
+    return ok(_doc_out(d, _secciones(db).get(d.id, 0)))
 
 
 @router.get("/estado", response_model=ApiResponse[dict])
@@ -69,7 +113,7 @@ async def _leer_pdf(archivo: UploadFile) -> bytes:
 
 
 @router.post("/documentos", response_model=ApiResponse[list[dict]], dependencies=[Depends(limitar("siesa_cargar", 10, 60))])
-async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = File(...),
+async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = File(...), modulo: str = Form("", max_length=80),
                  actual: Usuario = Depends(require(GESTIONAR))):
     """Carga uno o varios PDF. De cada uno queda solo su texto; el archivo no se guarda."""
     if len(archivos) > MAX_ARCHIVOS:
@@ -79,14 +123,14 @@ async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = F
         nombre = (archivo.filename or "documento.pdf")[:255]
         try:
             contenido = await _leer_pdf(archivo)
-            c = services.cargar(db, nombre, contenido, actual.id)
+            c = services.cargar(db, nombre, contenido, actual.id, modulo)
             del contenido
             if not c.duplicado:
-                auditar(db, request, "siesa_documento_cargado", actual.id, archivo=nombre, paginas=c.documento.paginas,
-                        fragmentos=c.documento.fragmentos)
+                auditar(db, request, "siesa_documento_cargado", actual.id, archivo=nombre, modulo=c.documento.modulo,
+                        paginas=c.documento.paginas, fragmentos=c.documento.fragmentos)
             db.commit()
             resultados.append({"archivo": nombre, "ok": True, "duplicado": c.duplicado, "advertencias": c.advertencias,
-                               "documento": _doc_out(c.documento).model_dump()})
+                               "documento": _doc_out(c.documento, len({f.seccion for f in c.documento.partes if f.seccion})).model_dump(mode="json")})
         except (ApiError, services.ErrorPDF) as e:
             db.rollback()
             resultados.append({"archivo": nombre, "ok": False, "error": e.detail if isinstance(e, ApiError) else str(e)})
@@ -112,6 +156,7 @@ class Mensaje(BaseModel):
 
 class PreguntaIn(BaseModel):
     mensajes: list[Mensaje] = Field(min_length=1, max_length=20)  # el historial vive en el navegador
+    modulo: str | None = Field(default=None, max_length=80)  # buscar solo en los instructivos de este módulo
 
     @model_validator(mode="after")
     def _ultimo_es_usuario(self):
@@ -128,14 +173,14 @@ def chat(data: PreguntaIn, request: Request, db: DbSession, actual: Usuario = De
         raise ApiError(429, f"Alcanzó el límite de {s.asistente_max_diario} preguntas diarias.")
     mensajes = [{"role": "user" if m.rol == "usuario" else "assistant", "content": m.texto} for m in data.mensajes]
     try:
-        r = services.responder(db, mensajes)
+        r = services.responder(db, mensajes, data.modulo or None)
     except ia.IANoConfigurada as e:
         raise ApiError(503, "El chat no está configurado: falta la clave IA_API_KEY en el servidor.", "ASISTENTE_NO_CONFIGURADO") from e
     except ia.IAError as e:
         raise ApiError(e.status, e.mensaje, e.codigo) from e
     uso = r.respuesta_ia
     # Auditoría: la pregunta recortada, si se encontró y de dónde; nunca la respuesta completa
-    auditar(db, request, "asistente_pregunta", actual.id, app="siesa", pregunta=data.mensajes[-1].texto[:300],
+    auditar(db, request, "asistente_pregunta", actual.id, app="siesa", pregunta=data.mensajes[-1].texto[:300], modulo=data.modulo,
             encontrado=r.encontrado, fuentes=[f"{f['archivo']} p.{f['pagina']}" for f in r.fuentes],
             tokens_entrada=uso.tokens_entrada if uso else 0, tokens_salida=uso.tokens_salida if uso else 0,
             modelo=uso.modelo if uso else "")

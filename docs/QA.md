@@ -225,6 +225,15 @@ La app original sigue en uso hasta terminar esta validación. Todo se compara co
 - [ ] Botón **Nómina** del periodo descarga `nomina_AAAA_MM_Q#.xlsx` con valor por concepto, total devengado, deducciones y neto, más las hojas de descuentos y tarifas usadas. El archivo de liquidación (horas) no cambia.
 - [ ] Un usuario sin `liquidador.nomina.ver` ve las horas pero no los valores.
 
+## Instructivos SIESA (chat)
+
+- [ ] En Servigpoder aparece "Instructivos SIESA"; Base de conocimiento permite arrastrar varios PDF a la vez.
+- [ ] Al terminar muestra cuántos se agregaron; un PDF repetido se avisa y no se duplica; uno escaneado se rechaza.
+- [ ] Chat: una pregunta sobre un proceso de un instructivo responde con pasos y cita [1], [2]…; "Fuentes" muestra el instructivo, la página y el texto.
+- [ ] Una pregunta que no está en los instructivos (p. ej. "¿quién ganó el mundial?") responde que no está en los instructivos cargados.
+- [ ] Una pregunta corta de seguimiento ("¿y para anularlo?") usa el contexto de la anterior.
+- [ ] Un usuario con el rol "Consulta instructivos SIESA" pregunta, pero no puede cargar ni quitar PDF.
+
 ## Reporte de programación (PDF)
 
 - [ ] En el portal aparece "Reporte de programación"; un usuario sin el permiso `reporte.generar` no la ve.

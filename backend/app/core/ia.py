@@ -182,6 +182,24 @@ def conversar(instrucciones: str, mensajes: list[dict], herramientas: list[Herra
     return res
 
 
+def completar(instrucciones: str, mensajes: list[dict], *, modelo: str = "", max_tokens: int = 1200) -> Respuesta:
+    """Una sola respuesta, sin herramientas y con temperatura 0 (respuestas literales y repetibles)."""
+    s = get_settings()
+    if not s.ia_api_key:
+        raise IANoConfigurada()
+    cuerpo: dict = {"model": modelo or s.ia_modelo, "max_tokens": max_tokens, "temperature": 0,
+                    "messages": [{"role": "system", "content": instrucciones}, *mensajes]}
+    if _es_openrouter(s.ia_base_url):
+        cuerpo["provider"] = {"data_collection": "deny", **({"zdr": True} if s.ia_zdr else {})}
+    with cliente_http() as http:
+        datos = _llamar(http, cuerpo)
+    uso = datos.get("usage") or {}
+    eleccion = (datos.get("choices") or [{}])[0]
+    return Respuesta(texto=((eleccion.get("message") or {}).get("content") or "").strip(),
+                     tokens_entrada=uso.get("prompt_tokens") or 0, tokens_salida=uso.get("completion_tokens") or 0,
+                     modelo=datos.get("model") or cuerpo["model"])
+
+
 def _ejecutar(h: Herramienta | None, argumentos: str | None) -> str:
     if h is None:
         return json.dumps({"error": "Herramienta desconocida"})

@@ -284,6 +284,20 @@ tras **30 min de inactividad** y a las **12 h** en cualquier caso, cierre de las
 la contraseña, y auditoría de cada ingreso (con el método de MFA usado). Si alguien pierde el celular y
 sus códigos, un administrador puede **restablecer su MFA** desde Administración → Usuarios.
 
+## Instructivos SIESA
+
+Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA cargados en su base de conocimiento.
+
+- **Base de conocimiento**: se cargan muchos PDF a la vez (hasta `SIESA_MAX_PDF_MB` cada uno). De cada PDF se
+  guarda solo el texto por página, dividido en fragmentos; el archivo no se almacena. Un PDF repetido no se
+  duplica; los escaneados como imagen no tienen texto y se rechazan (o se avisan las páginas sin texto).
+- **Búsqueda**: texto completo en español de PostgreSQL (índice GIN), por raíces de palabras.
+- **Respuesta**: el modelo recibe solo los fragmentos encontrados, con temperatura 0 y reglas estrictas: no usar
+  conocimiento general, no suponer, citar cada dato. Si no hay fragmentos relevantes no se consulta al modelo; si
+  la respuesta no cita ningún fragmento se descarta. En ambos casos responde que no está en los instructivos.
+- Cada respuesta muestra sus fuentes (instructivo y página, con el texto). La base es por empresa (habilitada
+  en Servigpoder). Permisos: `siesa.consultar` (chat) y `siesa.gestionar` (cargar y quitar PDF).
+
 ## Empresas
 
 Los desarrollos son por empresa (Servigpoder, SERA…) y **no comparten datos**: cada empresa tiene su propio

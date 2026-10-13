@@ -16,6 +16,7 @@ xlsxwriter==3.*
 tzdata
 httpx==0.28.*
 reportlab==4.*
+pypdf==5.*
 pyotp==2.*
 cryptography>=43
 qrcode==8.*

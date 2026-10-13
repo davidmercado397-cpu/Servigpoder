@@ -22,6 +22,9 @@ const csp = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Subidas por el proxy /api: lotes de hasta 5 PDF de instructivos (60 MB c/u) y los Excel de SIESA.
+  // El backend valida el tamaño real de cada archivo.
+  experimental: { middlewareClientMaxBodySize: "320mb" },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }];
   },

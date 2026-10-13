@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Aprobado por protección de datos: nombres y cédulas pueden enviarse al proveedor de IA
     asistente_datos_personales: bool = True
     asistente_max_diario: int = 100  # preguntas por usuario y día
+    # Chat de instructivos SIESA: modelo propio (vacío = IA_MODELO) y tamaño máximo de cada PDF
+    siesa_modelo: str = ""
+    siesa_max_pdf_mb: int = 60
 
     admin_username: str = "admin"
     admin_password: str = "admin"

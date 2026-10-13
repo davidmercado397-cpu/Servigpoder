@@ -26,7 +26,7 @@ PATRON_CODIGO = re.compile(r"^[a-z][a-z0-9]{1,19}$")
 # Empresas con las que arranca la plataforma: los datos que existían eran de Servigpoder, salvo los del
 # Liquidador de horas, que son de SERA (migración 0014).
 EMPRESAS_INICIALES = (
-    ("servigpoder", "Servigpoder", ("capacidad", "nomina", "reporte")),
+    ("servigpoder", "Servigpoder", ("capacidad", "nomina", "reporte", "siesa")),
     ("sera", "SERA", ("liquidador",)),
 )
 
@@ -127,7 +127,12 @@ def preparar_esquema(db: Session, empresa: Empresa) -> None:
             con.exec_driver_sql(f"ATTACH DATABASE ':memory:' AS {esquema}")
     else:
         con.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{esquema}"'))
-    BaseEmpresa.metadata.create_all(con.execution_options(**traduccion(esquema)))
+    traducida = con.execution_options(**traduccion(esquema))
+    BaseEmpresa.metadata.create_all(traducida)
+    # Índices agregados después de creada la tabla (create_all solo los crea junto con la tabla)
+    for tabla in BaseEmpresa.metadata.sorted_tables:
+        for indice in tabla.indexes:
+            indice.create(traducida, checkfirst=True)
     db.commit()
     with Session(bind=db.get_bind().execution_options(**traduccion(esquema)), autoflush=False, expire_on_commit=False) as s:
         for app in APPS:

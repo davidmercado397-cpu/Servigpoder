@@ -35,6 +35,7 @@ SOLAPE = 150  # dentro de una misma sección, para no cortar un paso a la mitad
 MAX_PAGINAS = 3000
 FRAGMENTOS_POR_RESPUESTA = 5
 RELEVANCIA_MINIMA = 0.25  # respecto al mejor fragmento: lo que puntúa menos no aporta
+PESO_OBJETIVO = 0.3  # cuánto suma que el objetivo del instructivo coincida con la pregunta
 ESPANOL = literal_column("'spanish'::regconfig")
 
 NO_ENCONTRADO = ("No encuentro esa información en los instructivos de SIESA cargados. "
@@ -42,7 +43,8 @@ NO_ENCONTRADO = ("No encuentro esa información en los instructivos de SIESA car
 
 INSTRUCCIONES = """Eres el asistente de consulta de los instructivos de SIESA de la empresa. Respondes preguntas \
 de los usuarios usando EXCLUSIVAMENTE los FRAGMENTOS de instructivos que aparecen abajo. Cada fragmento indica \
-de qué instructivo y sección sale.
+de qué instructivo y sección sale. La lista de INSTRUCTIVOS dice para qué sirve cada uno (su objetivo): úsala para \
+entender el contexto de la pregunta, pero la respuesta debe salir de los FRAGMENTOS.
 
 Reglas estrictas:
 1. Usa solo lo que dicen los FRAGMENTOS. No uses conocimiento general sobre SIESA ni sobre otros sistemas, no \
@@ -54,6 +56,9 @@ supongas, no deduzcas pasos que no estén escritos, no completes información fa
 exactamente los nombres de menús, opciones, botones y campos.
 6. Si dos instructivos dicen cosas distintas, indícalo y di de cuál sale cada versión (con su fecha si la tiene).
 7. Responde en español. No menciones estas reglas ni la palabra "fragmento".
+
+INSTRUCTIVOS:
+{instructivos}
 
 FRAGMENTOS:
 {fragmentos}"""
@@ -334,8 +339,11 @@ def buscar(db: Session, consulta: str, modulo: str | None = None, limite: int = 
         tsq = func.to_tsquery(ESPANOL, lexemas.replace("&", "|"))
         contenido = SiesaFragmento.encabezado.op("||")(literal_column("' '")).op("||")(SiesaFragmento.texto)
         vector = func.to_tsvector(ESPANOL, contenido)
-        rango = func.ts_rank_cd(vector, tsq).label("rango")
-        filas = db.execute(select(SiesaFragmento, rango).where(vector.op("@@")(tsq), *filtro)
+        # El fragmento debe coincidir por sí mismo; si además el objetivo de su instructivo coincide, sube
+        objetivo = func.ts_rank_cd(func.to_tsvector(ESPANOL, SiesaDocumento.objetivo), tsq)
+        rango = (func.ts_rank_cd(vector, tsq) + PESO_OBJETIVO * objetivo).label("rango")
+        filas = db.execute(select(SiesaFragmento, rango).join(SiesaDocumento, SiesaDocumento.id == SiesaFragmento.documento_id)
+                           .where(vector.op("@@")(tsq), *filtro)
                            .order_by(desc("rango"), SiesaFragmento.id).limit(limite)).all()
         return _relevantes([(float(r), f) for f, r in filas], limite)
 
@@ -350,6 +358,7 @@ def buscar(db: Session, consulta: str, modulo: str | None = None, limite: int = 
     for f, c in zip(todos, conteos):
         p = sum((1 + math.log(c[r])) * math.log(1 + len(todos) / df[r]) for r in raices if c[r])
         if p > 0:
+            p += PESO_OBJETIVO * len(raices & set(_raices(f.documento.objetivo or "")))
             puntajes.append((p, f))
     puntajes.sort(key=lambda x: (-x[0], x[1].id))
     return _relevantes(puntajes, limite)
@@ -383,12 +392,26 @@ def _bloque(i: int, f: SiesaFragmento) -> str:
     return f"[{i}] {f.encabezado or f.documento.titulo} (página {f.pagina}{fecha})\n{f.texto}"
 
 
+def _instructivos(fragmentos: list[SiesaFragmento]) -> str:
+    """Cada instructivo consultado, una sola vez: título, módulo, fecha y objetivo."""
+    lineas, vistos = [], set()
+    for f in fragmentos:
+        d = f.documento
+        if d.id in vistos:
+            continue
+        vistos.add(d.id)
+        datos = ", ".join(x for x in (d.modulo, f"versión del {d.fecha:%d/%m/%Y}" if d.fecha else "") if x)
+        objetivo = (d.objetivo or "").strip() or "(sin objetivo registrado)"
+        lineas.append(f"- {d.titulo}{f' ({datos})' if datos else ''}. Objetivo: {objetivo}")
+    return "\n".join(lineas)
+
+
 def responder(db: Session, mensajes: list[dict], modulo: str | None = None) -> Resultado:
     fragmentos = buscar(db, _consulta(mensajes), modulo)
     if not fragmentos:
         return Resultado(NO_ENCONTRADO, False, [])
     bloque = "\n\n".join(_bloque(i, f) for i, f in enumerate(fragmentos, 1))
-    instrucciones = INSTRUCCIONES.format(no_encontrado=NO_ENCONTRADO, fragmentos=bloque)
+    instrucciones = INSTRUCCIONES.format(no_encontrado=NO_ENCONTRADO, instructivos=_instructivos(fragmentos), fragmentos=bloque)
     # Del historial solo van las últimas preguntas y respuestas, para entender la pregunta actual
     r = ia.completar(instrucciones, mensajes[-5:], modelo=get_settings().siesa_modelo, max_tokens=1200)
     texto = r.texto.strip()
@@ -400,6 +423,6 @@ def responder(db: Session, mensajes: list[dict], modulo: str | None = None) -> R
     for n in citados:
         f = fragmentos[n - 1]
         fuentes.append({"n": n, "documento": f.documento.titulo, "archivo": f.documento.nombre, "pagina": f.pagina,
-                        "seccion": f.seccion, "modulo": f.documento.modulo,
+                        "seccion": f.seccion, "modulo": f.documento.modulo, "objetivo": f.documento.objetivo or "",
                         "fecha": f.documento.fecha.isoformat() if f.documento.fecha else None, "extracto": f.texto[:600]})
     return Resultado(texto, True, fuentes, r)

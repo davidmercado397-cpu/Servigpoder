@@ -181,3 +181,24 @@ def test_permisos(admin):
     entrar(admin, "admin", "admin-clave-123")
     assert admin.delete(f"{API}/documentos/{doc}").status_code == 200
     assert admin.get(f"{API}/documentos").json()["data"] == []
+
+
+def test_objetivo_del_instructivo(admin, en_empresa, monkeypatch):
+    _subir(admin, ("terceros.pdf", INSTRUCTIVO))
+    doc = admin.get(f"{API}/documentos").json()["data"][0]
+    assert doc["objetivo"] == ""
+    objetivo = "Explica como registrar clientes y proveedores (terceros) y como anular documentos contables."
+    r = admin.patch(f"{API}/documentos/{doc['id']}", json={"objetivo": objetivo})
+    assert r.json()["data"]["objetivo"] == objetivo
+
+    recibido = []
+    monkeypatch.setattr(ia, "completar", lambda instr, m, **k: recibido.append(instr) or ia.Respuesta(texto="Ingrese a Generales [1]."))
+    monkeypatch.setattr(ia, "configurada", lambda: True)
+    r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿Cómo creo un tercero?"}]}).json()["data"]
+    # La IA recibe el objetivo una sola vez, en la lista de instructivos, y la fuente lo trae
+    assert recibido[0].count(f"Objetivo: {objetivo}") == 1 and "INSTRUCTIVOS:" in recibido[0]
+    assert r["fuentes"][0]["objetivo"] == objetivo
+
+    # El objetivo suma en la búsqueda, pero el fragmento debe coincidir por sí mismo
+    with en_empresa("servigpoder") as s:
+        assert services.buscar(s, "proveedores clientes") == []  # solo están en el objetivo

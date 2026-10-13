@@ -299,6 +299,9 @@ Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA carga
   mayúsculas). Se quitan los encabezados y pies de página que se repiten en las hojas y los números de página.
 - **Metadatos**: documento, sección, página, módulo de SIESA (se elige al cargar y se puede editar) y fecha del
   instructivo (la del PDF, editable). El chat puede buscar solo en un módulo: el filtro se aplica antes de buscar.
+- **Objetivo**: cada instructivo tiene un objetivo (para qué sirve, qué cubre), editable en la Base de conocimiento.
+  La IA recibe una vez por instructivo consultado su título, módulo, fecha y objetivo; en la búsqueda, que el objetivo
+  coincida con la pregunta sube el puntaje de sus fragmentos (que igual deben coincidir por sí mismos).
 - **Contexto en el encabezado**: cada fragmento lleva su ruta, p. ej. `Nómina · Manual de vacaciones > Solicitud >
   Plazos`; la ruta se indexa junto con el texto y se entrega al modelo.
 - **Búsqueda**: texto completo en español de PostgreSQL (índice GIN sobre encabezado + texto), por raíces de

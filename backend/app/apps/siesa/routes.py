@@ -30,6 +30,7 @@ class DocumentoOut(BaseModel):
     titulo: str
     modulo: str
     fecha: date | None
+    objetivo: str
     secciones: int
     paginas: int
     paginas_sin_texto: int
@@ -38,7 +39,8 @@ class DocumentoOut(BaseModel):
 
 
 def _doc_out(d: SiesaDocumento, secciones: int = 0) -> DocumentoOut:
-    return DocumentoOut(id=d.id, nombre=d.nombre, titulo=d.titulo, modulo=d.modulo, fecha=d.fecha, secciones=secciones,
+    return DocumentoOut(id=d.id, nombre=d.nombre, titulo=d.titulo, modulo=d.modulo, fecha=d.fecha, objetivo=d.objetivo or "",
+                        secciones=secciones,
                         paginas=d.paginas, paginas_sin_texto=d.paginas_sin_texto, fragmentos=d.fragmentos,
                         cargado_en=d.cargado_en.isoformat() if d.cargado_en else "")
 
@@ -65,12 +67,13 @@ class DocumentoEditar(BaseModel):
     titulo: str | None = Field(default=None, min_length=1, max_length=255)
     modulo: str | None = Field(default=None, max_length=80)
     fecha: date | None = None
+    objetivo: str | None = Field(default=None, max_length=1000)
 
 
 @router.patch("/documentos/{documento_id}", response_model=ApiResponse[DocumentoOut])
 def editar_documento(documento_id: int, data: DocumentoEditar, request: Request, db: DbSession,
                      actual: Usuario = Depends(require(GESTIONAR))):
-    """Título, módulo y fecha del instructivo; el encabezado de sus fragmentos se actualiza con ellos."""
+    """Título, módulo, fecha y objetivo del instructivo; el encabezado de sus fragmentos se actualiza con ellos."""
     d = db.get(SiesaDocumento, documento_id)
     if d is None:
         raise ApiError(404, "Documento no encontrado")
@@ -81,6 +84,8 @@ def editar_documento(documento_id: int, data: DocumentoEditar, request: Request,
         d.modulo = (data.modulo or "").strip()
     if "fecha" in cambios:
         d.fecha = data.fecha
+    if "objetivo" in cambios:
+        d.objetivo = (data.objetivo or "").strip()
     services.actualizar_encabezados(d)
     auditar(db, request, "siesa_documento_editado", actual.id, archivo=d.nombre, campos=sorted(cambios))
     db.commit()

@@ -7,10 +7,10 @@ import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Documento = {
-  id: number; nombre: string; titulo: string; modulo: string; fecha: string | null; secciones: number;
+  id: number; nombre: string; titulo: string; modulo: string; fecha: string | null; objetivo: string; secciones: number;
   paginas: number; paginas_sin_texto: number; fragmentos: number; cargado_en: string;
 };
-type Edicion = { id: number; titulo: string; modulo: string; fecha: string };
+type Edicion = { id: number; titulo: string; modulo: string; fecha: string; objetivo: string };
 type ResultadoCarga = { archivo: string; ok: boolean; duplicado?: boolean; advertencias?: string[]; error?: string; documento?: Documento };
 
 const LOTE = 5; // PDF por petición, para no esperar demasiado en cada una
@@ -65,7 +65,7 @@ export default function BaseConocimiento() {
     if (!edicion) return;
     try {
       await api(`/siesa/documentos/${edicion.id}`, {
-        method: "PATCH", json: { titulo: edicion.titulo, modulo: edicion.modulo, fecha: edicion.fecha || null },
+        method: "PATCH", json: { titulo: edicion.titulo, modulo: edicion.modulo, fecha: edicion.fecha || null, objetivo: edicion.objetivo },
       });
       setEdicion(null);
       cargar();
@@ -160,10 +160,17 @@ export default function BaseConocimiento() {
           <tbody>
             {filtrados.map((d) => edicion?.id === d.id ? (
               <tr key={d.id} className="bg-marca-50/40">
-                <td><input className="input" maxLength={255} value={edicion.titulo} onChange={(e) => setEdicion({ ...edicion, titulo: e.target.value })} /></td>
-                <td><input className="input w-40" list="modulos-siesa" maxLength={80} value={edicion.modulo} onChange={(e) => setEdicion({ ...edicion, modulo: e.target.value })} /></td>
-                <td><input className="input w-40" type="date" value={edicion.fecha} onChange={(e) => setEdicion({ ...edicion, fecha: e.target.value })} /></td>
-                <td colSpan={3} className="text-xs text-slate-500">El módulo y el título forman el contexto de cada fragmento del instructivo.</td>
+                <td className="min-w-[22rem] space-y-2">
+                  <input className="input" maxLength={255} aria-label="Título" value={edicion.titulo} onChange={(e) => setEdicion({ ...edicion, titulo: e.target.value })} />
+                  <textarea className="input min-h-[4.5rem]" maxLength={1000} aria-label="Objetivo"
+                    placeholder="Objetivo: para qué sirve este instructivo, qué procesos cubre y a quién va dirigido"
+                    value={edicion.objetivo} onChange={(e) => setEdicion({ ...edicion, objetivo: e.target.value })} />
+                </td>
+                <td className="align-top"><input className="input w-40" list="modulos-siesa" maxLength={80} aria-label="Módulo" value={edicion.modulo} onChange={(e) => setEdicion({ ...edicion, modulo: e.target.value })} /></td>
+                <td className="align-top"><input className="input w-40" type="date" aria-label="Fecha" value={edicion.fecha} onChange={(e) => setEdicion({ ...edicion, fecha: e.target.value })} /></td>
+                <td colSpan={3} className="align-top text-xs text-slate-500">
+                  El módulo y el título forman el encabezado de cada fragmento; el objetivo le dice a la IA para qué sirve el instructivo.
+                </td>
                 <td className="whitespace-nowrap text-right">
                   <button className="rounded-md p-1.5 text-green-700 hover:bg-green-50" onClick={guardarEdicion} aria-label="Guardar"><Check className="h-4 w-4" /></button>
                   <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
@@ -174,6 +181,9 @@ export default function BaseConocimiento() {
                 <td>
                   <span className="flex items-center gap-2 font-medium"><FileText className="h-4 w-4 shrink-0 text-slate-400" /> {d.titulo}</span>
                   <span className="block pl-6 text-xs text-slate-500">{d.nombre}</span>
+                  {d.objetivo
+                    ? <span className="block max-w-xl pl-6 text-xs text-slate-600" title={d.objetivo}><b>Objetivo:</b> {d.objetivo.length > 160 ? `${d.objetivo.slice(0, 160)}…` : d.objetivo}</span>
+                    : <span className="block pl-6 text-xs text-amber-700">Sin objetivo: agréguelo con el lápiz para dar más contexto a la IA</span>}
                   {d.paginas_sin_texto > 0 && <span className="block pl-6 text-xs text-amber-700">{d.paginas_sin_texto} páginas sin texto (imagen)</span>}
                 </td>
                 <td>{d.modulo || <span className="text-xs text-amber-700">Sin módulo</span>}</td>
@@ -186,7 +196,7 @@ export default function BaseConocimiento() {
                 {gestionar && (
                   <td className="whitespace-nowrap text-right">
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Editar"
-                      onClick={() => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "" })}><Pencil className="h-4 w-4" /></button>
+                      onClick={() => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "", objetivo: d.objetivo })}><Pencil className="h-4 w-4" /></button>
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700" onClick={() => eliminar(d)} aria-label="Quitar"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 )}

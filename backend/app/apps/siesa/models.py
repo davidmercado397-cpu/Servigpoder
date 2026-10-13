@@ -22,6 +22,8 @@ class SiesaDocumento(Base):
     # fecha del instructivo (la del PDF, editable)
     modulo: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
     fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Para qué sirve el instructivo: contexto para la IA (y apoyo a la búsqueda)
+    objetivo: Mapped[str] = mapped_column(Text, default="", server_default="")
     huella: Mapped[str] = mapped_column(String(64), unique=True)  # SHA-256 del PDF: evita cargar dos veces el mismo
     paginas: Mapped[int] = mapped_column(Integer, default=0)
     paginas_sin_texto: Mapped[int] = mapped_column(Integer, default=0)  # escaneadas (imagen): no se pueden consultar

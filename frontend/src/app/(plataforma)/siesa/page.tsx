@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { api, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
-type Fuente = { n: number; documento: string; archivo: string; pagina: number; seccion: string; modulo: string; fecha: string | null; extracto: string };
+type Fuente = { n: number; documento: string; archivo: string; pagina: number; seccion: string; modulo: string; objetivo: string; fecha: string | null; extracto: string };
 type Mensaje = { rol: "usuario" | "asistente"; texto: string; fuentes?: Fuente[]; encontrado?: boolean; error?: boolean };
 type Estado = { configurado: boolean; documentos: number; paginas: number; usadas_hoy: number; limite_diario: number };
 type Respuesta = { texto: string; encontrado: boolean; fuentes: Fuente[]; usadas_hoy: number; limite_diario: number };
@@ -119,6 +119,7 @@ export default function ChatSiesa() {
                           · pág. {f.pagina}{f.fecha ? ` · ${new Date(f.fecha + "T12:00:00").toLocaleDateString("es-CO")}` : ""}
                         </span>
                       </summary>
+                      {f.objetivo && <p className="border-t border-slate-100 px-3 pt-2 text-xs text-slate-500"><b>Objetivo del instructivo:</b> {f.objetivo}</p>}
                       <p className="whitespace-pre-line border-t border-slate-100 px-3 py-2 text-xs text-slate-600">{f.extracto}</p>
                     </details>
                   ))}

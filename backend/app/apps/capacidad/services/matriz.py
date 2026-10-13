@@ -239,3 +239,13 @@ def horas(inicio: time, fin: time) -> float:
     a = inicio.hour + inicio.minute / 60
     b = fin.hour + fin.minute / 60
     return (b - a) % 24 or 24.0
+
+
+def agregar_puesto(periodo: MatrizPeriodo, puesto: Puesto, hombres: Decimal, secuencia: str = "", nota: str = "") -> MatrizPuesto:
+    """Agrega un puesto a la matriz del mes, sin franjas: queda marcado para revisión hasta configurarlas."""
+    if any(mp.puesto_id == puesto.id for mp in periodo.puestos):
+        raise ValueError(f"El puesto {puesto.codigo} ya está en la matriz de {periodo.mes:02d}/{periodo.anio}")
+    mp = MatrizPuesto(puesto_id=puesto.id, hombres=hombres, secuencia=secuencia, jornada="", incluye_festivos=True,
+                      requiere_revision=True, nota=nota or "Agregado desde la aplicación: configure su cobertura (franjas).")
+    periodo.puestos.append(mp)
+    return mp

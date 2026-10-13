@@ -19,7 +19,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import MatrizExcepcion, MatrizFranja, MatrizPeriodo, MatrizPuesto, Puesto, Ubicacion, Usuario
 from app.apps.capacidad.models.matriz import CERRADO
 from app.apps.capacidad.schemas.f1 import (
-    DiaRequerido, EstadoIn, ExcepcionIn, ExcepcionOut, FranjaHorario, ImportacionOut, MatrizPuestoEditar,
+    DiaRequerido, EstadoIn, ExcepcionIn, ExcepcionOut, FranjaHorario, ImportacionOut, MatrizPuestoAgregar, MatrizPuestoEditar,
     MatrizPuestoOut, PeriodoOut, ProyectarIn, ResumenPeriodo,
 )
 from app.apps.capacidad.services import matriz as svc
@@ -103,6 +103,26 @@ def puestos_periodo(periodo_id: int, db: DbSession, p: Paginacion, solo_revision
         consulta = consulta.where(Puesto.codigo.ilike(patron) | Puesto.descripcion.ilike(patron) | Ubicacion.nombre.ilike(patron))
     lista, meta = paginar_consulta(db, consulta, p)
     return ok(lista, **meta)
+
+
+@router.post("/periodos/{periodo_id}/puestos", response_model=ApiResponse[MatrizPuestoOut], status_code=201, dependencies=escritura)
+def agregar_puesto(periodo_id: int, data: MatrizPuestoAgregar, request: Request, db: DbSession,
+                   actual: Usuario = Depends(require("capacidad.matriz.gestionar"))):
+    """Agrega a la matriz del mes un puesto del maestro que no estaba; su cobertura se configura después."""
+    p = _periodo(db, periodo_id)
+    _editable(p)
+    puesto = db.get(Puesto, data.puesto_id)
+    if puesto is None:
+        raise ApiError(404, "Puesto no encontrado")
+    try:
+        mp = svc.agregar_puesto(p, puesto, data.hombres, data.secuencia, data.nota)
+    except ValueError as e:
+        raise ApiError(409, str(e)) from e
+    db.flush()
+    auditar(db, request, "matriz_puesto_agregado", actual.id, periodo_id=p.id, puesto=puesto.codigo)
+    db.commit()
+    db.refresh(mp)
+    return ok(mp)
 
 
 @router.patch("/puestos/{mp_id}", response_model=ApiResponse[MatrizPuestoOut], dependencies=escritura)

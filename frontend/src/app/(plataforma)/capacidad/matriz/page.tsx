@@ -6,6 +6,7 @@ import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo, type DiaRequerido, type Excepcion, type Franja, type MatrizPuesto, type Periodo } from "@/lib/api";
 import { DIAS, ESTADO_COLOR, MESES, franjaTexto, hora, nombreMes } from "@/lib/formato";
 import { usePermiso } from "@/lib/sesion";
+import { SelectorPuesto } from "@/components/selector-puesto";
 
 export default function MatrizPage() {
   const puedeEditar = usePermiso("capacidad.matriz.gestionar");
@@ -17,6 +18,7 @@ export default function MatrizPage() {
   const [seleccion, setSeleccion] = useState<MatrizPuesto | null>(null);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [importando, setImportando] = useState(false);
+  const [agregando, setAgregando] = useState(false);
 
   const periodo = periodos.find((p) => p.id === periodoId) ?? null;
   const editable = puedeEditar && periodo?.estado !== "cerrado";
@@ -120,6 +122,7 @@ export default function MatrizPage() {
               </span>
               <div className="ml-auto flex flex-wrap gap-2">
                 <a className="btn-secundario" href={`/api/capacidad/matriz/periodos/${periodo.id}/exportar`}>Descargar Excel</a>
+                {editable && <button className="btn-secundario" onClick={() => setAgregando((v) => !v)}>Agregar puesto</button>}
                 {puedeEditar && <button className="btn-primario" onClick={proyectar}>Proyectar al mes siguiente</button>}
                 {editable && periodo.estado === "borrador" && <button className="btn-secundario" onClick={() => cambiarEstado("aprobado")}>Aprobar</button>}
                 {editable && periodo.estado === "aprobado" && <button className="btn-secundario" onClick={() => cambiarEstado("borrador")}>Desaprobar</button>}
@@ -127,6 +130,18 @@ export default function MatrizPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {periodo && agregando && editable && (
+        <div className="tarjeta flex flex-wrap items-center gap-3 p-4 text-sm">
+          <span className="font-medium">Agregar a la matriz de {nombreMes(periodo.anio, periodo.mes)} un puesto del maestro:</span>
+          <SelectorPuesto onElegir={(p) => accion(async () => {
+            const mp = await api<MatrizPuesto>(`/capacidad/matriz/periodos/${periodo.id}/puestos`, { method: "POST", json: { puesto_id: p.id, hombres: "1" } });
+            setAgregando(false);
+            setSeleccion(mp);
+          }, `Puesto ${p.codigo} agregado: configure su cobertura (horarios y hombres) en el panel de la derecha.`)} />
+          <span className="text-xs text-slate-500">¿No existe? Créelo en Maestros → Ubicaciones y puestos (o desde Puestos por aclarar).</span>
         </div>
       )}
 

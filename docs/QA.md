@@ -101,6 +101,12 @@ docker compose up -d --build
 
 ---
 
+- [ ] Un código de SIESA que no existe en el maestro muestra su ubicación de SIESA y el botón **Crear puesto**.
+- [ ] Crear puesto: viene con el código, la descripción y la ubicación de SIESA; si la ubicación no existe pide su nombre y la crea.
+- [ ] Con "Agregarlo a la matriz comercial de <mes>" marcado, el puesto aparece en la Matriz comercial con sus hombres, sin franjas y "por revisar"; al guardarle la cobertura queda listo.
+- [ ] Después de crearlo, el código desaparece de Puestos por aclarar (la equivalencia quedó asignada y la programación ya cargada se cruzó).
+- [ ] Maestros → Ubicaciones y puestos → **Nuevo puesto** crea un puesto sin pasar por SIESA; Matriz comercial → **Agregar puesto** lo incluye en el mes.
+
 ## F2. Motor de cobertura, tablero y vista por puesto
 
 ### Tablero (Capacidad → Operación → Cobertura)

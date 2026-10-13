@@ -93,7 +93,11 @@ export type Ubicacion = { id: number; codigo: string; nombre: string; nit: strin
 export type Puesto = { id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion };
 export type Turno = { codigo: string; descripcion: string; clase: string; franjas: { inicio: string; fin: string }[] };
 export type Novedad = { codigo: string; descripcion: string; requiere_cubrimiento: boolean };
-export type PorAclarar = { codigo_siesa: string; descripcion: string; filas: number; motivo: string; puesto_sugerido: Puesto | null };
+export type PorAclarar = {
+  codigo_siesa: string; descripcion: string; filas: number; motivo: string; puesto_sugerido: Puesto | null;
+  /** Ubicación con la que llega en SIESA y la del maestro con ese código (si existe) */
+  ubicacion_siesa: string; ubicacion_nombre: string; ubicacion: Ubicacion | null;
+};
 
 export type Periodo = {
   id: number; anio: number; mes: number; estado: string; proyectado_desde_id: number | null; creado_en: string;

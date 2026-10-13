@@ -5,7 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Alerta, Insignia, Pestanas, SubirArchivo, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo, type Novedad, type PorAclarar, type Puesto, type Turno } from "@/lib/api";
 import { hora } from "@/lib/formato";
+import { FormularioPuesto, type PuestoCreado } from "@/components/formulario-puesto";
 import { SelectorPuesto } from "@/components/selector-puesto";
+import Link from "next/link";
+import { MESES } from "@/lib/formato";
 import { usePermiso } from "@/lib/sesion";
 
 type Tab = "aclarar" | "puestos" | "turnos" | "novedades";
@@ -33,13 +36,30 @@ function PorAclararTab() {
   const [items, setItems] = useState<PorAclarar[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const [creando, setCreando] = useState<PorAclarar | null>(null);
+  const [matriz, setMatriz] = useState<{ id: number; etiqueta: string; estado: string } | null>(null);
   const pag = usePaginacion();
 
   const cargar = useCallback(async () => {
     const r = await apiEnvelope<PorAclarar[]>(`/capacidad/maestros/por-aclarar?${pag.query}`);
     setItems(r.data ?? []);
     setMeta(metaDe(r));
+    const m = r.meta.extra?.matriz as { id: number; estado: string } | null | undefined;
+    const mes = r.meta.extra?.mes as number | undefined;
+    const anio = r.meta.extra?.anio as number | undefined;
+    setMatriz(m && mes && anio ? { ...m, etiqueta: `${MESES[mes - 1]} ${anio}` } : null);
   }, [pag.query]);
+
+  function creado(r: PuestoCreado) {
+    setCreando(null);
+    setMsg({
+      tipo: "ok",
+      texto: `Puesto ${r.puesto.codigo} creado${r.ubicacion_creada ? ` (y la ubicación ${r.puesto.ubicacion.codigo})` : ""}` +
+        `${r.equivalencia ? `; el código ${r.equivalencia} de SIESA quedó asignado` : ""}` +
+        `${r.matriz_puesto_id ? `. Configure su cobertura en la Matriz comercial (está en "por revisar")` : ""}.`,
+    });
+    cargar();
+  }
 
   useEffect(() => {
     cargar();
@@ -65,14 +85,18 @@ function PorAclararTab() {
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead>
-            <tr><th>Código SIESA</th><th>Descripción en SIESA</th><th>Filas</th><th>Estado</th><th>Puesto del maestro</th></tr>
+            <tr><th>Código SIESA</th><th>Descripción en SIESA</th><th>Ubicación en SIESA</th><th>Filas</th><th>Estado</th><th>Puesto del maestro</th></tr>
           </thead>
           <tbody>
-            {items.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">No hay puestos por aclarar</td></tr>}
+            {items.length === 0 && <tr><td colSpan={6} className="text-center text-slate-500">No hay puestos por aclarar</td></tr>}
             {items.map((i) => (
               <tr key={i.codigo_siesa}>
                 <td className="font-mono font-semibold">{i.codigo_siesa}</td>
                 <td className="max-w-md">{i.descripcion}</td>
+                <td className="text-sm">
+                  <span className="font-mono">{i.ubicacion_siesa}</span>
+                  <span className="block text-xs text-slate-500">{i.ubicacion?.nombre ?? i.ubicacion_nombre}</span>
+                </td>
                 <td>{i.filas}</td>
                 <td>
                   {i.motivo === "aproximada" ? <Insignia color="bg-amber-100 text-amber-800">Verificar</Insignia> : <Insignia color="bg-red-100 text-red-700">Sin equivalencia</Insignia>}
@@ -86,6 +110,10 @@ function PorAclararTab() {
                           Confirmar {i.puesto_sugerido.codigo}
                         </button>
                       )}
+                      <button className="btn-secundario whitespace-nowrap" onClick={() => { setMsg(null); setCreando(i); }}
+                        title="El puesto no existe en el maestro: crearlo con este código">
+                        Crear puesto
+                      </button>
                     </div>
                   ) : (
                     i.puesto_sugerido?.codigo ?? "—"
@@ -97,6 +125,24 @@ function PorAclararTab() {
         </table>
         <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
+      {matriz && (
+        <p className="text-xs text-slate-500">
+          Al crear un puesto se puede agregar a la <Link href="/capacidad/matriz" className="text-marca-600 hover:underline">matriz comercial de {matriz.etiqueta}</Link>
+          {matriz.estado !== "borrador" && ` (está ${matriz.estado})`}.
+        </p>
+      )}
+      {creando && (
+        <FormularioPuesto
+          titulo="Crear puesto de SIESA"
+          inicial={{
+            codigo: creando.codigo_siesa, descripcion: creando.descripcion, codigo_siesa: creando.codigo_siesa,
+            ubicacion_codigo: creando.ubicacion?.codigo ?? creando.ubicacion_siesa, ubicacion_nombre: creando.ubicacion_nombre,
+          }}
+          matriz={matriz && matriz.estado !== "cerrado" ? matriz : null}
+          onCreado={creado}
+          onCancelar={() => setCreando(null)}
+        />
+      )}
     </div>
   );
 }
@@ -119,6 +165,9 @@ function PuestosTab() {
     return () => clearTimeout(t);
   }, [cargar]);
 
+  const [creando, setCreando] = useState(false);
+  const [aviso, setAviso] = useState("");
+
   async function cambiar(p: Puesto, campo: "excluido" | "activo", valor: boolean) {
     await api(`/capacidad/maestros/puestos/${p.id}`, { method: "PATCH", json: { [campo]: valor } });
     cargar();
@@ -126,7 +175,22 @@ function PuestosTab() {
 
   return (
     <div className="space-y-4">
-      <input className="input max-w-sm" placeholder="Buscar por código, puesto o ubicación…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-3">
+        <input className="input max-w-sm" placeholder="Buscar por código, puesto o ubicación…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {puedeEditar && <button className="btn-primario ml-auto" onClick={() => { setAviso(""); setCreando(true); }}>Nuevo puesto</button>}
+      </div>
+      {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
+      {creando && (
+        <FormularioPuesto
+          titulo="Nuevo puesto"
+          onCreado={(r) => {
+            setCreando(false);
+            setAviso(`Puesto ${r.puesto.codigo} creado. Para incluirlo en la base comercial, agréguelo en la Matriz comercial del mes.`);
+            setQ(r.puesto.codigo);
+          }}
+          onCancelar={() => setCreando(false)}
+        />
+      )}
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead>

@@ -60,6 +60,36 @@ class PuestoEditar(BaseModel):
     activo: bool | None = None
 
 
+class PuestoCrear(BaseModel):
+    codigo: str = Field(min_length=1, max_length=30)
+    descripcion: str = Field(default="", max_length=200)
+    ubicacion_codigo: str = Field(min_length=1, max_length=30)
+    # Solo si la ubicación no existe todavía: se crea con estos datos
+    ubicacion_nombre: str | None = Field(default=None, max_length=200)
+    ubicacion_ciudad: str | None = Field(default=None, max_length=80)
+    excluido: bool = False
+    # Código con el que llega en la programación de SIESA: queda asignado (equivalencia) de una vez
+    codigo_siesa: str | None = Field(default=None, max_length=40)
+    # Agregarlo a la matriz comercial de un mes (las franjas se configuran luego en la matriz)
+    periodo_id: int | None = None
+    hombres: Decimal = Field(default=Decimal("0"), ge=0, le=500)
+    secuencia: str = Field(default="", max_length=80)
+
+
+class PuestoCreado(BaseModel):
+    puesto: PuestoOut
+    ubicacion_creada: bool
+    equivalencia: str | None
+    matriz_puesto_id: int | None
+
+
+class MatrizPuestoAgregar(BaseModel):
+    puesto_id: int
+    hombres: Decimal = Field(default=Decimal("0"), ge=0, le=500)
+    secuencia: str = Field(default="", max_length=80)
+    nota: str = Field(default="", max_length=2000)
+
+
 class EquivalenciaOut(Orm):
     codigo_siesa: str
     origen: str
@@ -77,6 +107,10 @@ class PorAclarar(BaseModel):
     filas: int
     motivo: str  # sin_equivalencia | aproximada
     puesto_sugerido: PuestoOut | None = None
+    # Ubicación con la que llega en SIESA, para crear el puesto si no existe
+    ubicacion_siesa: str = ""
+    ubicacion_nombre: str = ""
+    ubicacion: UbicacionOut | None = None  # la del maestro con ese código, si existe
 
 
 # --- Matriz comercial --------------------------------------------------------

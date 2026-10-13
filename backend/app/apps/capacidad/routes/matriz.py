@@ -12,6 +12,7 @@ from sqlalchemy import case, func, select
 from app.api.deps import DbSession, require
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
+from app.core.config import get_settings
 from app.core.rate_limit import limitar
 from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.respuestas import ApiError, ApiResponse, ok
@@ -191,9 +192,16 @@ def _franja_texto(dias: int, inicio, fin, cantidad: int) -> str:
     return f"{_dias_texto(dias)} {rango}" + (f" x{cantidad}" if cantidad > 1 else "")
 
 
+def _respaldo_habilitado() -> None:
+    """Solo para migrar la base entre instalaciones: se enciende con RESPALDO_COMERCIAL=true."""
+    if not get_settings().respaldo_comercial:
+        raise ApiError(403, "El respaldo de la base comercial está deshabilitado", "RESPALDO_DESHABILITADO")
+
+
 @router.get("/respaldo", dependencies=[Depends(limitar("exportar", 10, 60))])
 def descargar_respaldo(request: Request, db: DbSession, actual: Usuario = Depends(require("capacidad.matriz.ver"))):
     """Base comercial completa (maestros y matriz de todos los meses) para restaurarla en otra instalación."""
+    _respaldo_habilitado()
     if "capacidad.maestros.ver" not in actual.permisos:
         raise ApiError(403, "No tiene permiso para ver los maestros", details=[{"permiso": "capacidad.maestros.ver"}])
     datos = respaldo.exportar(db)
@@ -209,6 +217,7 @@ def descargar_respaldo(request: Request, db: DbSession, actual: Usuario = Depend
 async def restaurar_respaldo(request: Request, db: DbSession, archivo: UploadFile = File(...),
                              actual: Usuario = Depends(require("capacidad.matriz.gestionar"))):
     """Restaura un respaldo de la base comercial. El archivo se procesa en memoria y no se guarda."""
+    _respaldo_habilitado()
     if "capacidad.maestros.gestionar" not in actual.permisos:
         raise ApiError(403, "Restaurar también modifica los maestros: necesita permiso para editarlos",
                        details=[{"permiso": "capacidad.maestros.gestionar"}])

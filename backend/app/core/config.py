@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     asistente_max_diario: int = 100  # preguntas por usuario y día
     # Chat de instructivos SIESA: modelo propio (vacío = IA_MODELO) y tamaño máximo de cada PDF
     siesa_modelo: str = ""
+    # Respaldo y restauración de la base comercial (Capacidad): apagado salvo para migrar entre instalaciones
+    respaldo_comercial: bool = False
     siesa_max_pdf_mb: int = 60
 
     admin_username: str = "admin"

@@ -2,10 +2,24 @@
 
 import json
 
+import pytest
+
+from app.core.config import get_settings
 from tests.conftest import archivo, xlsx
 from tests.test_f1 import HORARIOS, importar_matriz
 
 API = "/api/capacidad/matriz/respaldo"
+
+
+@pytest.fixture
+def habilitado(monkeypatch):
+    monkeypatch.setattr(get_settings(), "respaldo_comercial", True)
+
+
+def test_deshabilitado_por_defecto(admin):
+    r = admin.get(API)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "RESPALDO_DESHABILITADO"
+    assert admin.post(API, files={"archivo": ("base.json", b"{}", "application/json")}).status_code == 403
 
 
 def _sin_fecha(datos: dict) -> dict:
@@ -16,7 +30,7 @@ def _restaurar(cliente, contenido: bytes, nombre: str = "base_comercial.json"):
     return cliente.post(API, files={"archivo": (nombre, contenido, "application/json")})
 
 
-def test_respaldo_y_restauracion_en_otra_empresa(admin):
+def test_respaldo_y_restauracion_en_otra_empresa(admin, habilitado):
     # Base comercial con ajustes hechos en la aplicación: horarios, una excepción, una nota y un mes aprobado
     admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
     sep = importar_matriz(admin).json()["data"]["periodo_id"]
@@ -48,7 +62,7 @@ def test_respaldo_y_restauracion_en_otra_empresa(admin):
     assert _sin_fecha(admin.get(API).json()) == _sin_fecha(original)
 
 
-def test_respaldo_invalido(admin):
+def test_respaldo_invalido(admin, habilitado):
     assert _restaurar(admin, b"no es json").status_code == 422
     assert _restaurar(admin, json.dumps({"tipo": "otra cosa"}).encode()).status_code == 422
     assert _restaurar(admin, b"{}", "base.xlsx").status_code == 415

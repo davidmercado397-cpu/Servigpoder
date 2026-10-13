@@ -1,7 +1,7 @@
 "use client";
 
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo, type DiaRequerido, type Excepcion, type Franja, type MatrizPuesto, type Periodo } from "@/lib/api";
 import { DIAS, ESTADO_COLOR, MESES, franjaTexto, hora, nombreMes } from "@/lib/formato";
@@ -9,10 +9,6 @@ import { usePermiso } from "@/lib/sesion";
 
 export default function MatrizPage() {
   const puedeEditar = usePermiso("capacidad.matriz.gestionar");
-  const puedeRespaldar = usePermiso("capacidad.maestros.ver");
-  const editaMaestros = usePermiso("capacidad.maestros.gestionar");
-  const puedeRestaurar = puedeEditar && editaMaestros;
-  const archivoRespaldo = useRef<HTMLInputElement>(null);
   const [periodos, setPeriodos] = useState<Periodo[]>([]);
   const [periodoId, setPeriodoId] = useState<number | null>(null);
   const [puestos, setPuestos] = useState<MatrizPuesto[]>([]);
@@ -96,53 +92,10 @@ export default function MatrizPage() {
     await accion(() => api(`/capacidad/matriz/periodos/${periodo.id}/estado`, { method: "PUT", json: { estado } }), texto);
   }
 
-  async function restaurar(archivo: File) {
-    if (!confirm(
-      `¿Restaurar la base comercial desde «${archivo.name}»?\n\n` +
-      "Se crean o actualizan ubicaciones, puestos, equivalencias, horarios y novedades, y la matriz de cada mes del respaldo. " +
-      "Un mes que ya exista aprobado o cerrado no se modifica. No se borra nada que no venga en el respaldo.",
-    )) return;
-    setMsg(null);
-    try {
-      const r = await subirArchivo<{
-        creados: Record<string, number>; actualizados: Record<string, number>; meses_restaurados: string[]; meses_omitidos: string[]; advertencias: string[];
-      }>("/capacidad/matriz/respaldo", archivo);
-      const resumen = (d: Record<string, number>) => Object.entries(d).map(([k, v]) => `${v} ${k}`).join(", ") || "ninguno";
-      setMsg({
-        tipo: "ok",
-        texto: `Base comercial restaurada. Creados: ${resumen(r.creados)}. Actualizados: ${resumen(r.actualizados)}. ` +
-          `Meses: ${r.meses_restaurados.join(", ") || "ninguno"}.` +
-          (r.meses_omitidos.length ? ` Sin cambios: ${r.meses_omitidos.join("; ")}.` : "") +
-          (r.advertencias.length ? ` Avisos: ${r.advertencias.slice(0, 5).join("; ")}${r.advertencias.length > 5 ? "…" : ""}` : ""),
-      });
-      setPeriodoId(null);
-      await cargarPeriodos();
-    } catch (e) {
-      setMsg({ tipo: "error", texto: mensajeError(e) });
-    }
-  }
-
   return (
     <div className="max-w-7xl space-y-4">
       <Titulo
-        accion={
-          <div className="flex flex-wrap gap-2">
-            {puedeRespaldar && (
-              <a className="btn-secundario" href="/api/capacidad/matriz/respaldo"
-                title="Maestros y matriz de todos los meses, para llevarlos a otra instalación (p. ej. a producción)">
-                Descargar base comercial
-              </a>
-            )}
-            {puedeRestaurar && (
-              <>
-                <button className="btn-secundario" onClick={() => archivoRespaldo.current?.click()}>Restaurar base comercial</button>
-                <input ref={archivoRespaldo} type="file" accept=".json,application/json" hidden
-                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) restaurar(f); }} />
-              </>
-            )}
-            {puedeEditar && <button className="btn-secundario" onClick={() => setImportando((v) => !v)}>Importar matriz desde Excel</button>}
-          </div>
-        }
+        accion={puedeEditar && <button className="btn-secundario" onClick={() => setImportando((v) => !v)}>Importar matriz desde Excel</button>}
       >
         Matriz comercial
       </Titulo>

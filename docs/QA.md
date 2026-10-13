@@ -83,6 +83,7 @@ docker compose up -d --build
 - [ ] "Cerrar mes" pide confirmación. Después, la matriz ya no se puede editar (campos y casillas bloqueados).
 
 ### Respaldo de la base comercial (Capacidad → Configuración → Matriz comercial)
+- [ ] Por defecto está apagado (no hay botones y la API responde 403). Para migrar se enciende con `RESPALDO_COMERCIAL=true` y se usa por la API: `GET /api/capacidad/matriz/respaldo` y `POST` del mismo con el archivo.
 - [ ] "Descargar base comercial" baja `base_comercial_AAAA-MM-DD.json` con maestros y la matriz de todos los meses, con las modificaciones hechas en la aplicación.
 - [ ] En otra instalación vacía, "Restaurar base comercial" con ese archivo deja la misma matriz (mismos meses, estados, puestos, franjas y excepciones).
 - [ ] Restaurar de nuevo no duplica nada y no toca un mes aprobado.

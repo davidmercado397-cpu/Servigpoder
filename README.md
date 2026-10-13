@@ -305,7 +305,15 @@ Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA carga
 - **Contexto en el encabezado**: cada fragmento lleva su ruta, p. ej. `Nómina · Manual de vacaciones > Solicitud >
   Plazos`; la ruta se indexa junto con el texto y se entrega al modelo.
 - **Búsqueda**: texto completo en español de PostgreSQL (índice GIN sobre encabezado + texto), por raíces de
-  palabras. Se recuperan pocos fragmentos (hasta 5) y se descartan los que puntúan menos del 25 % del mejor.
+  palabras. Se quitan de la pregunta las palabras genéricas de los instructivos ("crear", "configurar", "pantalla",
+  "sistema"…) y se exigen todos los términos importantes (con tres o más, se tolera que falte uno). Se recuperan
+  hasta 5 fragmentos y se descartan los que puntúan menos del 25 % del mejor. Sin coincidencias no se consulta a la IA.
+- **Troceo**: se descartan el índice del manual (renglones con puntos suspensivos), guiones sueltos y encabezados o
+  pies de página (la misma línea en la misma posición en el 15 % de las hojas o más). Si el documento numera sus
+  títulos, solo esos abren secciones. Si el PDF trae una sección "Objetivo", su texto llena el objetivo inicial.
+- **Tokens**: instrucciones cortas, cada instructivo descrito una sola vez (D1, D2…), fragmentos con solo su
+  referencia, página y sección, historial reducido a la pregunta y respuesta anteriores (recortada) y respuesta de
+  máximo 600 tokens. Para respuestas rápidas conviene un modelo ligero en `SIESA_MODELO` (p. ej. Claude Haiku).
 - **Respuesta**: el modelo recibe solo los fragmentos encontrados, con temperatura 0 y reglas estrictas: no usar
   conocimiento general, no suponer, citar cada dato. Si no hay fragmentos relevantes no se consulta al modelo; si
   la respuesta no cita ningún fragmento se descarta. En ambos casos responde que no está en los instructivos.

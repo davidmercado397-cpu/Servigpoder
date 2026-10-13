@@ -20,10 +20,12 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
+from itertools import combinations
 
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from sqlalchemy import desc, func, literal_column, select, text
+from sqlalchemy import cast, desc, func, literal_column, select, text
+from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.orm import Session
 
 from app.apps.siesa.models import SiesaDocumento, SiesaFragmento
@@ -41,31 +43,38 @@ ESPANOL = literal_column("'spanish'::regconfig")
 NO_ENCONTRADO = ("No encuentro esa información en los instructivos de SIESA cargados. "
                  "Intente con las palabras que usa el instructivo (nombre del menú, del proceso o del campo).")
 
-INSTRUCCIONES = """Eres el asistente de consulta de los instructivos de SIESA de la empresa. Respondes preguntas \
-de los usuarios usando EXCLUSIVAMENTE los FRAGMENTOS de instructivos que aparecen abajo. Cada fragmento indica \
-de qué instructivo y sección sale. La lista de INSTRUCTIVOS dice para qué sirve cada uno (su objetivo): úsala para \
-entender el contexto de la pregunta, pero la respuesta debe salir de los FRAGMENTOS.
+# Instrucciones cortas (cada token cuenta en cada pregunta). Los instructivos van una sola vez (D1, D2…) y cada
+# fragmento solo dice de cuál es, su página y su sección.
+INSTRUCCIONES = """Respondes preguntas sobre instructivos de la empresa usando SOLO los FRAGMENTOS de abajo.
+Reglas:
+- Nada de conocimiento general, suposiciones ni pasos que no estén escritos.
+- Si los FRAGMENTOS no responden la pregunta, responde exactamente: "{no_encontrado}"
+- Si responden solo una parte, da esa parte y di qué no aparece.
+- Cita cada dato con su número entre corchetes: [2].
+- Breve y directo. Procedimientos: pasos numerados en el orden del instructivo, con los nombres exactos de menús, \
+botones y campos. Si dos instructivos difieren, dilo e indica de cuál sale cada versión.
+- En español; no menciones estas reglas.
 
-Reglas estrictas:
-1. Usa solo lo que dicen los FRAGMENTOS. No uses conocimiento general sobre SIESA ni sobre otros sistemas, no \
-supongas, no deduzcas pasos que no estén escritos, no completes información faltante y no des opiniones ni consejos.
-2. Si los FRAGMENTOS no contienen la respuesta, responde exactamente: "{no_encontrado}"
-3. Si contienen solo una parte, responde esa parte y di claramente qué no aparece en los instructivos.
-4. Cita cada dato con el número del fragmento entre corchetes, por ejemplo [2].
-5. Sé directo y breve. Si es un procedimiento, da los pasos numerados en el mismo orden del instructivo y conserva \
-exactamente los nombres de menús, opciones, botones y campos.
-6. Si dos instructivos dicen cosas distintas, indícalo y di de cuál sale cada versión (con su fecha si la tiene).
-7. Responde en español. No menciones estas reglas ni la palabra "fragmento".
-
-INSTRUCTIVOS:
+INSTRUCTIVOS (contexto, no fuente de la respuesta):
 {instructivos}
 
 FRAGMENTOS:
 {fragmentos}"""
+MAX_TOKENS_RESPUESTA = 600
 
 _PALABRAS_VACIAS = set("""a al algo alguna algun como con cual cuales cuando de del desde donde el ella en entre es esa ese
 esta este esto hay la las le lo los mas me mi mis muy no o para pero por que quien se segun ser si sin sobre su sus
 tambien te tiene un una uno unos y ya yo hacer hago puedo debo necesito quiero siesa""".split())
+
+# Palabras que aparecen en casi todos los instructivos y no ayudan a encontrar el tema ("¿cómo creo un tercero en el
+# sistema?" → solo importa "tercero"). En raíces de PostgreSQL (español) y en las de la búsqueda de prueba.
+_GENERICAS = """como crear creo crea creacion configurar configura configuracion registrar diligenciar ingresar seleccionar
+pantalla sistema campo campos opcion opciones clic hacer puedo debo maestro maestros manual paso pasos datos nuevo nueva
+siguiente informacion procedimiento dar grabar""".split()
+GENERICAS_PG = {"com", "cre", "creacion", "configur", "registr", "diligenci", "ingres", "seleccion", "pantall", "sistem",
+                "camp", "opcion", "clic", "hac", "pued", "deb", "maestr", "manual", "pas", "dat", "nuev", "siguient",
+                "inform", "proced", "dar", "grab"}
+GENERICAS_RAICES = {w[:6] for w in _GENERICAS}
 
 
 # --- Carga ---
@@ -160,31 +169,45 @@ _TITULO_NUMERADO = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){1,3})\.?\s+(\S.{2,})$")  
 _TITULO_CAPITULO = re.compile(r"^(\d{1,2})[.)]\s+(\S.{2,})$")  # 1. TÍTULO (solo si está en mayúsculas)
 
 
+_INDICE = re.compile(r"(\.\s?){5,}|…{2,}|_{5,}")  # líneas de tabla de contenido: "3.1. Título ........ 12"
+
+
+def _ruido(linea: str) -> bool:
+    """Líneas sin contenido útil: guiones o viñetas sueltas, números de página o renglones del índice."""
+    return sum(c.isalnum() for c in linea) < 2 or bool(_NUMERO_PAGINA.match(linea)) or bool(_INDICE.search(linea))
+
+
 def _repetidas(paginas: list[str]) -> set[str]:
-    """Líneas de encabezado o pie de página: aparecen al inicio o final de muchas hojas."""
+    """Encabezados y pies de página: la misma línea en la misma posición (arriba o abajo) en muchas hojas.
+    Se cuenta por posición para no confundirlos con frases que se repiten en el contenido ("Finalmente… Grabar")."""
     if len(paginas) < 3:
         return set()
     conteo: Counter = Counter()
     for texto in paginas:
         lineas = [l for l in texto.split("\n") if l]
-        conteo.update({_normal(l) for l in lineas[:3] + lineas[-3:]})
-    minimo = max(3, int(len(paginas) * 0.4))
-    return {l for l, n in conteo.items() if n >= minimo}
+        conteo.update({(i, _normal(l)) for i, l in enumerate(lineas[:6])})
+        conteo.update({(-i - 1, _normal(l)) for i, l in enumerate(reversed(lineas[-2:]))})
+    minimo = max(3, int(len(paginas) * 0.15))
+    return {l for (_, l), n in conteo.items() if n >= minimo}
 
 
-def _es_titulo(linea: str) -> tuple[int, str] | None:
-    """Título detectado en el texto (cuando el PDF no trae índice): numerado (2.1 …) o en mayúsculas."""
-    if len(linea) > 90 or linea.endswith((".", ",", ";")):
+def _es_titulo(linea: str, solo_numerados: bool = False) -> tuple[int, str] | None:
+    """Título detectado en el texto (cuando el PDF no trae índice): numerado (2.1 …) o en mayúsculas. Si el
+    documento numera sus títulos, solo se aceptan los numerados (una línea suelta en mayúsculas no rompe la jerarquía)."""
+    if len(linea) > 90 or linea.endswith((",", ";")):
         return None
     letras = [c for c in linea if c.isalpha()]
     mayusculas = len(letras) >= 4 and sum(c.isupper() for c in letras) / len(letras) >= 0.8
     m = _TITULO_NUMERADO.match(linea)
-    if m:
-        return m.group(1).count(".") + 1, linea
+    # Un título numerado puede terminar en punto ("3.12. MAESTRO DE PLUVIOMETROS."); uno en minúsculas, solo si es corto
+    if m and (mayusculas or not linea.endswith(".") or len(linea.split()) <= 6):
+        return m.group(1).count(".") + 1, linea.rstrip(".").strip()
+    if linea.endswith("."):
+        return None
     m = _TITULO_CAPITULO.match(linea)
     if m and mayusculas:
         return 1, linea
-    if mayusculas and len(linea.split()) <= 12 and not linea[0].isdigit():
+    if mayusculas and not solo_numerados and len(linea.split()) <= 12 and not linea[0].isdigit():
         return 1, linea
     return None
 
@@ -219,6 +242,10 @@ def trocear(paginas: list[str], marcadores: dict[int, list[tuple[int, str]]] | N
     marcadores = marcadores or {}
     usar_titulos = not marcadores
     ignorar = _repetidas(paginas)
+    limpias = [[l for l in texto.split("\n") if l and _normal(l) not in ignorar and not _ruido(l)] for texto in paginas]
+    # ¿El documento numera sus títulos (1., 2.1, 3.2.4…)? Entonces solo esos abren secciones
+    numerados = sum(1 for lineas in limpias for l in lineas if l[0].isdigit() and _es_titulo(l))
+    solo_numerados = numerados >= 3
     ruta: list[tuple[int, str]] = []
     salida: list[Fragmento] = []
     buf, buf_pagina, buf_seccion = "", 1, ""
@@ -241,8 +268,7 @@ def trocear(paginas: list[str], marcadores: dict[int, list[tuple[int, str]]] | N
         buf = "" if nueva_seccion or not nuevo else _cola(t)
         nuevo = False
 
-    for numero, texto in enumerate(paginas, start=1):
-        lineas = [l for l in texto.split("\n") if l and _normal(l) not in ignorar and not _NUMERO_PAGINA.match(l)]
+    for numero, lineas in enumerate(limpias, start=1):
         # Cada fragmento es de una sola página (sin solape entre hojas): la cita apunta a la página exacta
         emitir(True)
         pendientes = list(marcadores.get(numero, []))
@@ -254,7 +280,7 @@ def trocear(paginas: list[str], marcadores: dict[int, list[tuple[int, str]]] | N
         for linea in lineas:
             titulos = [m for m in pendientes if _es_linea_de(linea, m[1])]
             if not titulos and usar_titulos:
-                titulos = [t] if (t := _es_titulo(linea)) else []
+                titulos = [t] if (t := _es_titulo(linea, solo_numerados)) else []
             if titulos:
                 emitir(True)
                 for m in titulos:  # una línea puede abrir varios niveles ("Cierre" > "Cierre mensual")
@@ -285,6 +311,15 @@ def actualizar_encabezados(doc: SiesaDocumento) -> None:
         f.encabezado = encabezado(doc.titulo, f.seccion, doc.modulo)
 
 
+def objetivo_del_texto(fragmentos: list[Fragmento]) -> str:
+    """Si el instructivo trae su propia sección "Objetivo", su texto es el objetivo inicial (editable)."""
+    for f in fragmentos:
+        ultima = f.seccion.split(" > ")[-1] if f.seccion else ""
+        if re.fullmatch(r"(\d+(\.\d+)*\.?\s*)?objetivos?(\s+general(es)?)?[:.]?", _normal(ultima).strip()):
+            return re.sub(r"\s+", " ", f.texto).strip()[:600]
+    return ""
+
+
 def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, modulo: str = "") -> Carga:
     huella = hashlib.sha256(contenido).hexdigest()
     existente = db.scalar(select(SiesaDocumento).where(SiesaDocumento.huella == huella))
@@ -296,8 +331,9 @@ def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, m
     if not fragmentos:
         raise ErrorPDF("El PDF no tiene texto que se pueda leer (parece escaneado como imagen). "
                        "Cárguelo en una versión con texto seleccionable.")
-    titulo = (pdf.titulo or re.sub(r"\.pdf$", "", nombre, flags=re.I))[:255]
+    titulo = (pdf.titulo or re.sub(r"\s+", " ", re.sub(r"\.pdf$", "", nombre, flags=re.I).replace("_", " ")).strip())[:255]
     doc = SiesaDocumento(nombre=nombre[:255], titulo=titulo, huella=huella, modulo=modulo.strip()[:80], fecha=pdf.fecha,
+                         objetivo=objetivo_del_texto(fragmentos),
                          paginas=len(pdf.paginas), paginas_sin_texto=sin_texto, fragmentos=len(fragmentos),
                          caracteres=sum(len(f.texto) for f in fragmentos), cargado_por=usuario_id)
     doc.partes = [SiesaFragmento(pagina=f.pagina, orden=i, seccion=f.seccion[:300], texto=f.texto,
@@ -326,42 +362,64 @@ def _relevantes(puntuados: list[tuple[float, SiesaFragmento]], limite: int) -> l
     return [f for p, f in puntuados[:limite] if p >= mejor * RELEVANCIA_MINIMA]
 
 
+def _niveles(terminos: list[str]) -> list[list[tuple[str, ...]]]:
+    """Exigencia de la búsqueda: primero todos los términos juntos; si no hay, todos menos uno (con 3 o más).
+    Con uno o dos términos no se relaja: mejor "no está" que fragmentos que solo comparten una palabra."""
+    niveles = [[tuple(terminos)]]
+    if len(terminos) >= 3:
+        niveles.append(list(combinations(terminos, len(terminos) - 1)))
+    return niveles
+
+
+def _q(lexema: str) -> str:
+    return "'" + lexema.replace("'", "''") + "'"
+
+
 def buscar(db: Session, consulta: str, modulo: str | None = None, limite: int = FRAGMENTOS_POR_RESPUESTA) -> list[SiesaFragmento]:
+    """Fragmentos que contienen los términos importantes de la pregunta (sin palabras genéricas como "crear",
+    "pantalla" o "sistema"), ordenados por relevancia; el objetivo de su instructivo suma."""
     filtro = []
     if modulo:
         filtro.append(SiesaFragmento.documento_id.in_(select(SiesaDocumento.id).where(SiesaDocumento.modulo == modulo)))
 
     if db.get_bind().dialect.name == "postgresql":
-        # Cualquiera de las palabras (OR); el orden lo da cuántas y qué tan juntas aparecen, también en el encabezado
-        lexemas = db.execute(text("select plainto_tsquery('spanish', :q)::text"), {"q": consulta}).scalar() or ""
-        if not lexemas.strip():
+        lexemas = re.findall(r"'([^']+)'", db.execute(text("select plainto_tsquery('spanish', :q)::text"), {"q": consulta}).scalar() or "")
+        terminos = list(dict.fromkeys(l for l in lexemas if l not in GENERICAS_PG))
+        if not terminos:
             return []
-        tsq = func.to_tsquery(ESPANOL, lexemas.replace("&", "|"))
         contenido = SiesaFragmento.encabezado.op("||")(literal_column("' '")).op("||")(SiesaFragmento.texto)
         vector = func.to_tsvector(ESPANOL, contenido)
-        # El fragmento debe coincidir por sí mismo; si además el objetivo de su instructivo coincide, sube
-        objetivo = func.ts_rank_cd(func.to_tsvector(ESPANOL, SiesaDocumento.objetivo), tsq)
-        rango = (func.ts_rank_cd(vector, tsq) + PESO_OBJETIVO * objetivo).label("rango")
-        filas = db.execute(select(SiesaFragmento, rango).join(SiesaDocumento, SiesaDocumento.id == SiesaFragmento.documento_id)
-                           .where(vector.op("@@")(tsq), *filtro)
-                           .order_by(desc("rango"), SiesaFragmento.id).limit(limite)).all()
-        return _relevantes([(float(r), f) for f, r in filas], limite)
+        cualquiera = cast(" | ".join(_q(t) for t in terminos), TSQUERY)  # para el puntaje
+        objetivo = func.ts_rank_cd(func.to_tsvector(ESPANOL, SiesaDocumento.objetivo), cualquiera)
+        rango = (func.ts_rank_cd(vector, cualquiera) + PESO_OBJETIVO * objetivo).label("rango")
+        for grupos in _niveles(terminos):
+            exige = cast(" | ".join("(" + " & ".join(_q(t) for t in g) + ")" for g in grupos), TSQUERY)
+            filas = db.execute(select(SiesaFragmento, rango).join(SiesaDocumento, SiesaDocumento.id == SiesaFragmento.documento_id)
+                               .where(vector.op("@@")(exige), *filtro)
+                               .order_by(desc("rango"), SiesaFragmento.id).limit(limite)).all()
+            if filas:
+                return _relevantes([(float(r), f) for f, r in filas], limite)
+        return []
 
-    # Pruebas (SQLite): puntaje por raíces de palabras con peso por rareza
-    raices = set(_raices(consulta))
-    if not raices:
+    # Pruebas (SQLite): las mismas reglas con raíces de palabras y peso por rareza
+    terminos = [r for r in dict.fromkeys(_raices(consulta)) if r not in GENERICAS_RAICES]
+    if not terminos:
         return []
     todos = list(db.scalars(select(SiesaFragmento).where(*filtro)))
     conteos = [Counter(_raices(f"{f.encabezado} {f.texto}")) for f in todos]
-    df = Counter(r for c in conteos for r in raices if c[r])
-    puntajes = []
-    for f, c in zip(todos, conteos):
-        p = sum((1 + math.log(c[r])) * math.log(1 + len(todos) / df[r]) for r in raices if c[r])
-        if p > 0:
-            p += PESO_OBJETIVO * len(raices & set(_raices(f.documento.objetivo or "")))
+    df = Counter(r for c in conteos for r in terminos if c[r])
+    for grupos in _niveles(terminos):
+        puntajes = []
+        for f, c in zip(todos, conteos):
+            if not any(all(c[t] for t in g) for g in grupos):
+                continue
+            p = sum((1 + math.log(c[r])) * math.log(1 + len(todos) / df[r]) for r in terminos if c[r])
+            p += PESO_OBJETIVO * len(set(terminos) & set(_raices(f.documento.objetivo or "")))
             puntajes.append((p, f))
-    puntajes.sort(key=lambda x: (-x[0], x[1].id))
-    return _relevantes(puntajes, limite)
+        if puntajes:
+            puntajes.sort(key=lambda x: (-x[0], x[1].id))
+            return _relevantes(puntajes, limite)
+    return []
 
 
 def modulos(db: Session) -> list[str]:
@@ -387,12 +445,20 @@ def _consulta(mensajes: list[dict]) -> str:
     return actual
 
 
-def _bloque(i: int, f: SiesaFragmento) -> str:
-    fecha = f" · versión del {f.documento.fecha:%d/%m/%Y}" if f.documento.fecha else ""
-    return f"[{i}] {f.encabezado or f.documento.titulo} (página {f.pagina}{fecha})\n{f.texto}"
+def _referencias(fragmentos: list[SiesaFragmento]) -> dict[int, str]:
+    """Referencia corta de cada instructivo consultado (D1, D2…), en orden de aparición."""
+    refs: dict[int, str] = {}
+    for f in fragmentos:
+        refs.setdefault(f.documento_id, f"D{len(refs) + 1}")
+    return refs
 
 
-def _instructivos(fragmentos: list[SiesaFragmento]) -> str:
+def _bloque(i: int, f: SiesaFragmento, ref: str) -> str:
+    seccion = f" · {f.seccion}" if f.seccion else ""
+    return f"[{i}] {ref} p.{f.pagina}{seccion}\n{f.texto}"
+
+
+def _instructivos(fragmentos: list[SiesaFragmento], refs: dict[int, str]) -> str:
     """Cada instructivo consultado, una sola vez: título, módulo, fecha y objetivo."""
     lineas, vistos = [], set()
     for f in fragmentos:
@@ -400,20 +466,26 @@ def _instructivos(fragmentos: list[SiesaFragmento]) -> str:
         if d.id in vistos:
             continue
         vistos.add(d.id)
-        datos = ", ".join(x for x in (d.modulo, f"versión del {d.fecha:%d/%m/%Y}" if d.fecha else "") if x)
-        objetivo = (d.objetivo or "").strip() or "(sin objetivo registrado)"
-        lineas.append(f"- {d.titulo}{f' ({datos})' if datos else ''}. Objetivo: {objetivo}")
+        datos = ", ".join(x for x in (d.modulo, f"versión {d.fecha:%d/%m/%Y}" if d.fecha else "") if x)
+        objetivo = f" Objetivo: {d.objetivo.strip()}" if (d.objetivo or "").strip() else ""
+        lineas.append(f"{refs[d.id]}: {d.titulo}{f' ({datos})' if datos else ''}.{objetivo}")
     return "\n".join(lineas)
+
+
+def _historial(mensajes: list[dict]) -> list[dict]:
+    """Solo lo necesario para entender la pregunta actual: la pregunta y respuesta anteriores (recortada) y la actual."""
+    previos = mensajes[:-1][-2:]
+    return [{**m, "content": m["content"][:400]} if m["role"] == "assistant" else m for m in previos] + mensajes[-1:]
 
 
 def responder(db: Session, mensajes: list[dict], modulo: str | None = None) -> Resultado:
     fragmentos = buscar(db, _consulta(mensajes), modulo)
     if not fragmentos:
-        return Resultado(NO_ENCONTRADO, False, [])
-    bloque = "\n\n".join(_bloque(i, f) for i, f in enumerate(fragmentos, 1))
-    instrucciones = INSTRUCCIONES.format(no_encontrado=NO_ENCONTRADO, instructivos=_instructivos(fragmentos), fragmentos=bloque)
-    # Del historial solo van las últimas preguntas y respuestas, para entender la pregunta actual
-    r = ia.completar(instrucciones, mensajes[-5:], modelo=get_settings().siesa_modelo, max_tokens=1200)
+        return Resultado(NO_ENCONTRADO, False, [])  # sin consultar al modelo: 0 tokens
+    refs = _referencias(fragmentos)
+    bloque = "\n\n".join(_bloque(i, f, refs[f.documento_id]) for i, f in enumerate(fragmentos, 1))
+    instrucciones = INSTRUCCIONES.format(no_encontrado=NO_ENCONTRADO, instructivos=_instructivos(fragmentos, refs), fragmentos=bloque)
+    r = ia.completar(instrucciones, _historial(mensajes), modelo=get_settings().siesa_modelo, max_tokens=MAX_TOKENS_RESPUESTA)
     texto = r.texto.strip()
     citados = sorted({int(n) for n in re.findall(r"\[(\d{1,2})\]", texto) if 1 <= int(n) <= len(fragmentos)})
     if not texto or NO_ENCONTRADO[:40] in texto or not citados:

@@ -71,7 +71,7 @@ def test_responde_solo_con_la_base_y_cita_las_fuentes(admin, monkeypatch):
     r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿Cómo creo un tercero nuevo?"}]}).json()["data"]
     assert r["encontrado"] and r["fuentes"][0]["documento"] == "Manual de terceros y documentos" and r["fuentes"][0]["pagina"] == 1
     assert "Paso 2. Haga clic en el boton Nuevo" in llamadas[0]  # el modelo recibe el texto del instructivo
-    assert "EXCLUSIVAMENTE" in llamadas[0]
+    assert "SOLO los FRAGMENTOS" in llamadas[0]
 
     # Pregunta sin relación con los instructivos: ni siquiera se consulta al modelo
     r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿Quién ganó el mundial de fútbol?"}]}).json()["data"]
@@ -155,7 +155,7 @@ def test_metadatos_y_filtro_por_modulo(admin, en_empresa, monkeypatch):
     monkeypatch.setattr(ia, "configurada", lambda: True)
     r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿En qué plazo se aprueban las vacaciones?"}],
                                        "modulo": "Nómina"}).json()["data"]
-    assert "[1] Nómina · Manual de vacaciones > VACACIONES > 1.2 Plazos (página 2" in recibido[0]
+    assert "[1] D1 p.2 · VACACIONES > 1.2 Plazos" in recibido[0] and "D1: Manual de vacaciones (Nómina" in recibido[0]
     assert r["fuentes"][0]["seccion"] == "VACACIONES > 1.2 Plazos" and r["fuentes"][0]["modulo"] == "Nómina"
 
     # Editar el módulo actualiza el encabezado de sus fragmentos
@@ -196,9 +196,45 @@ def test_objetivo_del_instructivo(admin, en_empresa, monkeypatch):
     monkeypatch.setattr(ia, "configurada", lambda: True)
     r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿Cómo creo un tercero?"}]}).json()["data"]
     # La IA recibe el objetivo una sola vez, en la lista de instructivos, y la fuente lo trae
-    assert recibido[0].count(f"Objetivo: {objetivo}") == 1 and "INSTRUCTIVOS:" in recibido[0]
+    assert recibido[0].count(f"Objetivo: {objetivo}") == 1 and "INSTRUCTIVOS (contexto" in recibido[0]
     assert r["fuentes"][0]["objetivo"] == objetivo
 
     # El objetivo suma en la búsqueda, pero el fragmento debe coincidir por sí mismo
     with en_empresa("servigpoder") as s:
         assert services.buscar(s, "proveedores clientes") == []  # solo están en el objetivo
+
+
+def test_busqueda_estricta_sin_palabras_genericas(admin, en_empresa):
+    """Solo cuentan los términos importantes: "crear", "sistema", "pantalla"… no traen fragmentos por sí solos."""
+    _subir(admin, ("terceros.pdf", INSTRUCTIVO))
+    with en_empresa("servigpoder") as s:
+        assert services.buscar(s, "¿Cómo creo una bodega nueva en el sistema?") == []  # "bodega" no está
+        assert services.buscar(s, "¿Cómo creo un tercero en el sistema?")[0].pagina == 1
+        # Con 3 términos o más se tolera que falte uno; con 2, no
+        assert services.buscar(s, "anular documento contable bodega")[0].pagina == 2
+        assert services.buscar(s, "anular bodega") == []
+
+
+def test_trocear_limpia_indice_y_toma_el_objetivo():
+    encabezado = "EMPRESA S.A.S - MANUAL DE TERCEROS"
+    paginas = ["\n".join(lineas) for lineas in (
+        [encabezado, "CONTENIDO", "1. OBJETIVO ........................ 2", "2. CREACION DE TERCEROS ............ 2",
+         "2.1. Datos basicos ........ 3"],
+        [encabezado, "1. OBJETIVO", "Enseñar a crear y actualizar terceros en el sistema.", "2. CREACION DE TERCEROS",
+         "2.1. Datos basicos", "Digite el NIT.", "–"],
+        [encabezado, "MANUAL CAPACITACION", "2.2. Direcciones", "Registre la direccion principal."],
+    )]
+    partes = services.trocear(paginas)
+    assert all("......" not in f.texto and f.texto != "–" for f in partes)  # sin renglones del índice ni guiones sueltos
+    secciones = [f.seccion for f in partes]
+    # El documento numera sus títulos: "MANUAL CAPACITACION" (en mayúsculas, sin número) no rompe la jerarquía
+    assert secciones[-1] == "2. CREACION DE TERCEROS > 2.2. Direcciones"
+    assert services.objetivo_del_texto(partes) == "Enseñar a crear y actualizar terceros en el sistema."
+
+
+def test_historial_corto():
+    largo = "x" * 2000
+    h = services._historial([{"role": "user", "content": "uno"}, {"role": "assistant", "content": "r1"},
+                             {"role": "user", "content": "dos"}, {"role": "assistant", "content": largo},
+                             {"role": "user", "content": "tres"}])
+    assert [m["content"][:4] for m in h] == ["dos", "xxxx", "tres"] and len(h[1]["content"]) == 400

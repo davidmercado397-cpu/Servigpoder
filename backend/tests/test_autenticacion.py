@@ -76,10 +76,8 @@ def test_bloqueo_por_codigos_incorrectos(client):
 def test_contrasena_temporal_obliga_a_cambiarla(admin):
     admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "nuevo", "nombre": "Nuevo", "password": "temporal-123"})
     with TestClient(app, headers=CSRF) as c:
-        _login(c, "nuevo", "temporal-123")
-        conf = c.post("/api/auth/mfa/configurar").json()["data"]
-        r = c.post("/api/auth/mfa/activar", json={"codigo": pyotp.TOTP(conf["secreto"]).now()})
-        assert r.json()["data"]["sesion"]["debe_cambiar_password"] is True
+        r = _login(c, "nuevo", "temporal-123")  # no es administrador: entra sin segundo paso
+        assert r.json()["data"]["paso"] == "listo" and r.json()["data"]["sesion"]["debe_cambiar_password"] is True
         # Solo puede cambiar la contraseña
         r = c.get("/api/plataforma/apps")
         assert r.status_code == 403 and r.json()["error"]["code"] == "CAMBIO_PASSWORD_REQUERIDO"
@@ -91,7 +89,9 @@ def test_contrasena_temporal_obliga_a_cambiarla(admin):
 
 
 def test_restablecer_mfa(admin):
-    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "perdio", "nombre": "Perdió el teléfono", "password": "clave-segura-1"})
+    rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Administrador")
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "perdio", "nombre": "Perdió el teléfono", "password": "clave-segura-1",
+                                      "roles": [rid]})
     uid = next(u["id"] for u in admin.get("/api/usuarios").json()["data"] if u["username"] == "perdio")
     with TestClient(app, headers=CSRF) as c:
         entrar(c, "perdio", "clave-segura-1")
@@ -115,3 +115,21 @@ def test_auditoria(admin):
     r = admin.get("/api/plataforma/auditoria?accion=login").json()
     assert r["success"] and any(a["accion"] == "login_exitoso" and a["usuario"] == "admin" for a in r["data"])
     assert any(a["detalle"].get("mfa") == "totp" for a in r["data"] if a["accion"] == "login_exitoso")
+
+
+def test_doble_factor_solo_para_administradores(admin):
+    """Por defecto la verificación en dos pasos se exige solo al rol Administrador."""
+    rid_admin = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Administrador")
+    rid_prog = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Programador")
+    r = admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "prog2", "nombre": "Programador", "password": "clave-segura-1",
+                                          "roles": [rid_prog]})
+    uid = r.json()["data"]["id"]
+    with TestClient(app, headers=CSRF) as c:
+        assert _login(c, "prog2", "clave-segura-1").json()["data"]["paso"] == "listo"
+        c.post("/api/auth/cambiar-password", json={"actual": "clave-segura-1", "nueva": "clave-segura-2"})
+        assert c.get("/api/capacidad/analisis/meses").status_code == 200
+        # Al volverlo administrador se cierra su sesión y en el próximo ingreso debe configurar el segundo paso
+        admin.patch(f"/api/usuarios/{uid}", json={"roles": [rid_prog, rid_admin]})
+        assert c.get("/api/auth/me").status_code == 401
+        assert _login(c, "prog2", "clave-segura-2").json()["data"]["paso"] == "enrolar_mfa"
+        assert c.get("/api/auth/me").status_code == 401  # sin terminar el segundo paso no hay sesión

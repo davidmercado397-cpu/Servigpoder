@@ -13,7 +13,7 @@ from app.core.rate_limit import limitador, limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.core.security import (
     PREAUTH, cifrar_secreto, decodificar, descifrar_secreto, generar_codigos_recuperacion, hash_password, nuevo_secreto_totp,
-    qr_svg, uri_totp, usar_codigo_recuperacion, validar_password, verificar_totp, verify_password,
+    qr_svg, requiere_mfa, uri_totp, usar_codigo_recuperacion, validar_password, verificar_totp, verify_password,
 )
 from app.core.sesion import COOKIE_PREAUTH, borrar_preauth, borrar_sesion, emitir_preauth, emitir_sesion
 from app.models import Usuario
@@ -114,12 +114,10 @@ def login(data: LoginIn, request: Request, response: Response, db: DbSession):
         raise ApiError(401, "Usuario o contraseña incorrectos")
 
     limitador.limpiar(clave)
-    if user.mfa_activo:
+    # Verificación en dos pasos solo para quien la requiere (por defecto, los administradores)
+    if requiere_mfa(user):
         emitir_preauth(response, user.id, user.sesion_version)
-        return ok(PasoOut(paso=PASO_MFA))
-    if s.mfa_obligatorio:
-        emitir_preauth(response, user.id, user.sesion_version)
-        return ok(PasoOut(paso=PASO_ENROLAR))
+        return ok(PasoOut(paso=PASO_MFA if user.mfa_activo else PASO_ENROLAR))
     _completar(response, request, db, user, "no_requerida")
     return ok(PasoOut(paso=PASO_LISTO, sesion=sesion_out(user)))
 

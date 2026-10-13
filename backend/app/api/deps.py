@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.respuestas import ApiError
-from app.core.security import SESION, decodificar
+from app.core.security import SESION, decodificar, requiere_mfa
 from app.core.sesion import emitir_sesion
 from app.models import Usuario
 
@@ -31,7 +31,7 @@ def get_current_user(request: Request, response: Response, db: DbSession) -> Usu
     # Denegar por defecto (OWASP A01): token inválido o vencido, usuario inactivo o sesión revocada
     if user is None or not user.activo or datos.get("ver") != user.sesion_version:
         raise ApiError(401, "Sesión inválida o expirada")
-    if s.mfa_obligatorio and not user.mfa_activo:
+    if requiere_mfa(user) and not user.mfa_activo:
         raise ApiError(401, "Debe configurar la verificación en dos pasos")
     if user.debe_cambiar_password and request.url.path not in RUTAS_CON_PASSWORD_TEMPORAL:
         raise ApiError(403, "Debe cambiar su contraseña temporal antes de continuar", "CAMBIO_PASSWORD_REQUERIDO")

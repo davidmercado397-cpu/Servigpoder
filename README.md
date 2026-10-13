@@ -284,6 +284,9 @@ tras **30 min de inactividad** y a las **12 h** en cualquier caso, cierre de las
 la contraseña, y auditoría de cada ingreso (con el método de MFA usado). Si alguien pierde el celular y
 sus códigos, un administrador puede **restablecer su MFA** desde Administración → Usuarios.
 
+
+La verificación en dos pasos se exige solo a quienes tienen el rol **Administrador** (`MFA_SOLO_ADMINISTRADORES=true`, por defecto). Los demás entran con usuario y contraseña. Si a alguien se le asigna el rol Administrador, su sesión se cierra y en el siguiente ingreso debe configurar la app Authenticator. Con `MFA_SOLO_ADMINISTRADORES=false` vuelve a exigirse a todos.
+
 ## Instructivos SIESA
 
 Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA cargados en su base de conocimiento.

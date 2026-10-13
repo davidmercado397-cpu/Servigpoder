@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     cookie_name: str = "sesion"
 
     # Autenticación (OWASP ASVS V2/V3)
-    mfa_obligatorio: bool = True  # verificación en dos pasos con app Authenticator para todos
+    mfa_obligatorio: bool = True  # verificación en dos pasos con app Authenticator
+    # true: solo se exige a quienes tienen el rol Administrador; false: a todos los usuarios
+    mfa_solo_administradores: bool = True
     mfa_emisor: str = "Servigpoder"  # nombre que aparece en la app Authenticator
     sesion_inactividad_min: int = 30  # la sesión se cierra tras este tiempo sin actividad
     sesion_max_horas: int = 12  # duración máxima de una sesión aunque haya actividad

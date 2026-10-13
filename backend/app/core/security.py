@@ -167,3 +167,17 @@ def usar_codigo_recuperacion(codigo: str, hashes: list[str]) -> list[str] | None
         if secrets.compare_digest(guardado, h):
             return [x for x in hashes if x != guardado]
     return None
+
+
+ROL_ADMINISTRADOR = "Administrador"
+
+
+def requiere_mfa(user) -> bool:
+    """Verificación en dos pasos exigida a este usuario: según la configuración, solo a los administradores
+    (rol Administrador) o a todos."""
+    from app.core.config import get_settings
+
+    s = get_settings()
+    if not s.mfa_obligatorio:
+        return False
+    return not s.mfa_solo_administradores or any(r.nombre == ROL_ADMINISTRADOR for r in user.roles)

@@ -61,6 +61,8 @@ export default function BaseConocimiento() {
     }
   }
 
+  const editar = (d: Documento) => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "", objetivo: d.objetivo });
+
   async function guardarEdicion() {
     if (!edicion) return;
     try {
@@ -136,6 +138,21 @@ export default function BaseConocimiento() {
               <TriangleAlert className="mr-1 inline h-4 w-4" /> <b>{r.archivo}</b>: {r.ok ? r.advertencias?.join(" · ") : r.error}
             </p>
           ))}
+          {gestionar && resultados.some((r) => r.ok && !r.duplicado) && (
+            <div className="space-y-1 border-t border-slate-100 pt-2">
+              <p className="text-slate-600">Agregue el objetivo de cada instructivo nuevo para dar más contexto a la IA:</p>
+              {resultados.filter((r) => r.ok && !r.duplicado && r.documento).map((r) => {
+                const d = docs?.find((x) => x.id === r.documento!.id) ?? r.documento!;
+                return (
+                  <p key={r.archivo} className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-slate-400" /> {d.titulo}
+                    {d.objetivo ? <span className="text-xs text-green-700">✓ con objetivo</span>
+                      : <button className="text-sm font-medium text-marca-600 hover:underline" onClick={() => editar(d)}>Agregar objetivo</button>}
+                  </p>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -162,7 +179,8 @@ export default function BaseConocimiento() {
               <tr key={d.id} className="bg-marca-50/40">
                 <td className="min-w-[22rem] space-y-2">
                   <input className="input" maxLength={255} aria-label="Título" value={edicion.titulo} onChange={(e) => setEdicion({ ...edicion, titulo: e.target.value })} />
-                  <textarea className="input min-h-[4.5rem]" maxLength={1000} aria-label="Objetivo"
+                  <label className="label mb-0">Objetivo del instructivo</label>
+                  <textarea className="input min-h-[4.5rem]" maxLength={1000} aria-label="Objetivo" autoFocus
                     placeholder="Objetivo: para qué sirve este instructivo, qué procesos cubre y a quién va dirigido"
                     value={edicion.objetivo} onChange={(e) => setEdicion({ ...edicion, objetivo: e.target.value })} />
                 </td>
@@ -172,8 +190,8 @@ export default function BaseConocimiento() {
                   El módulo y el título forman el encabezado de cada fragmento; el objetivo le dice a la IA para qué sirve el instructivo.
                 </td>
                 <td className="whitespace-nowrap text-right">
-                  <button className="rounded-md p-1.5 text-green-700 hover:bg-green-50" onClick={guardarEdicion} aria-label="Guardar"><Check className="h-4 w-4" /></button>
-                  <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
+                  <button className="btn-primario inline-flex items-center gap-1" onClick={guardarEdicion}><Check className="h-4 w-4" /> Guardar</button>
+                  <button className="ml-1 rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
                 </td>
               </tr>
             ) : (
@@ -183,7 +201,11 @@ export default function BaseConocimiento() {
                   <span className="block pl-6 text-xs text-slate-500">{d.nombre}</span>
                   {d.objetivo
                     ? <span className="block max-w-xl pl-6 text-xs text-slate-600" title={d.objetivo}><b>Objetivo:</b> {d.objetivo.length > 160 ? `${d.objetivo.slice(0, 160)}…` : d.objetivo}</span>
-                    : <span className="block pl-6 text-xs text-amber-700">Sin objetivo: agréguelo con el lápiz para dar más contexto a la IA</span>}
+                    : gestionar
+                      ? <button className="ml-6 mt-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100" onClick={() => editar(d)}>
+                          + Agregar objetivo
+                        </button>
+                      : <span className="block pl-6 text-xs text-amber-700">Sin objetivo</span>}
                   {d.paginas_sin_texto > 0 && <span className="block pl-6 text-xs text-amber-700">{d.paginas_sin_texto} páginas sin texto (imagen)</span>}
                 </td>
                 <td>{d.modulo || <span className="text-xs text-amber-700">Sin módulo</span>}</td>
@@ -196,7 +218,7 @@ export default function BaseConocimiento() {
                 {gestionar && (
                   <td className="whitespace-nowrap text-right">
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Editar"
-                      onClick={() => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "", objetivo: d.objetivo })}><Pencil className="h-4 w-4" /></button>
+                      title="Editar título, objetivo, módulo y fecha" onClick={() => editar(d)}><Pencil className="h-4 w-4" /></button>
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700" onClick={() => eliminar(d)} aria-label="Quitar"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 )}

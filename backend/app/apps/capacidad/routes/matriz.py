@@ -1,4 +1,5 @@
 import calendar
+import json
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -21,10 +22,12 @@ from app.apps.capacidad.schemas.f1 import (
     MatrizPuestoOut, PeriodoOut, ProyectarIn, ResumenPeriodo,
 )
 from app.apps.capacidad.services import matriz as svc
+from app.apps.capacidad.services import respaldo
 
 router = APIRouter(prefix="/matriz", tags=["matriz comercial"])
 
 escritura = [Depends(limitar("matriz-escritura", 60, 60))]
+MAX_RESPALDO = 30 * 1024 * 1024
 
 
 def _periodo(db: DbSession, periodo_id: int) -> MatrizPeriodo:
@@ -186,6 +189,48 @@ def _dias_texto(mascara: int) -> str:
 def _franja_texto(dias: int, inicio, fin, cantidad: int) -> str:
     rango = "24 h" if inicio == fin else f"{inicio:%H:%M}-{fin:%H:%M}"
     return f"{_dias_texto(dias)} {rango}" + (f" x{cantidad}" if cantidad > 1 else "")
+
+
+@router.get("/respaldo", dependencies=[Depends(limitar("exportar", 10, 60))])
+def descargar_respaldo(request: Request, db: DbSession, actual: Usuario = Depends(require("capacidad.matriz.ver"))):
+    """Base comercial completa (maestros y matriz de todos los meses) para restaurarla en otra instalación."""
+    if "capacidad.maestros.ver" not in actual.permisos:
+        raise ApiError(403, "No tiene permiso para ver los maestros", details=[{"permiso": "capacidad.maestros.ver"}])
+    datos = respaldo.exportar(db)
+    auditar(db, request, "base_comercial_respaldada", actual.id, puestos=len(datos["puestos"]), meses=len(datos["periodos"]))
+    db.commit()
+    contenido = json.dumps(datos, ensure_ascii=False, indent=1).encode("utf-8")
+    nombre = f"base_comercial_{datetime.now(timezone.utc):%Y-%m-%d}.json"
+    return StreamingResponse(BytesIO(contenido), media_type="application/json",
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+@router.post("/respaldo", response_model=ApiResponse[dict], dependencies=[Depends(limitar("matriz-importar", 5, 60))])
+async def restaurar_respaldo(request: Request, db: DbSession, archivo: UploadFile = File(...),
+                             actual: Usuario = Depends(require("capacidad.matriz.gestionar"))):
+    """Restaura un respaldo de la base comercial. El archivo se procesa en memoria y no se guarda."""
+    if "capacidad.maestros.gestionar" not in actual.permisos:
+        raise ApiError(403, "Restaurar también modifica los maestros: necesita permiso para editarlos",
+                       details=[{"permiso": "capacidad.maestros.gestionar"}])
+    try:
+        if not (archivo.filename or "").lower().endswith(".json"):
+            raise ApiError(415, "Seleccione el archivo de respaldo (.json) descargado de la matriz comercial")
+        contenido = await archivo.read(MAX_RESPALDO + 1)
+    finally:
+        await archivo.close()
+    if len(contenido) > MAX_RESPALDO:
+        raise ApiError(413, "El archivo de respaldo es demasiado grande")
+    try:
+        datos = json.loads(contenido)
+        r = respaldo.restaurar(db, datos)
+    except (ValueError, respaldo.RespaldoInvalido) as e:
+        db.rollback()
+        raise ApiError(422, str(e) if isinstance(e, respaldo.RespaldoInvalido) else "El archivo no es un respaldo válido", "RESPALDO_INVALIDO") from e
+    auditar(db, request, "base_comercial_restaurada", actual.id, archivo=(archivo.filename or "")[:200], creados=r.creados,
+            actualizados=r.actualizados, meses=r.meses_restaurados, omitidos=r.meses_omitidos)
+    db.commit()
+    return ok({"creados": r.creados, "actualizados": r.actualizados, "meses_restaurados": r.meses_restaurados,
+               "meses_omitidos": r.meses_omitidos, "advertencias": r.advertencias[:200]})
 
 
 @router.get("/periodos/{periodo_id}/exportar", dependencies=[Depends(limitar("exportar", 10, 60))])

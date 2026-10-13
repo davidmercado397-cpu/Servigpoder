@@ -82,6 +82,11 @@ docker compose up -d --build
 - [ ] Un puesto marcado **inactivo** en Maestros no se proyecta al mes siguiente.
 - [ ] "Cerrar mes" pide confirmación. Después, la matriz ya no se puede editar (campos y casillas bloqueados).
 
+### Respaldo de la base comercial (Capacidad → Configuración → Matriz comercial)
+- [ ] "Descargar base comercial" baja `base_comercial_AAAA-MM-DD.json` con maestros y la matriz de todos los meses, con las modificaciones hechas en la aplicación.
+- [ ] En otra instalación vacía, "Restaurar base comercial" con ese archivo deja la misma matriz (mismos meses, estados, puestos, franjas y excepciones).
+- [ ] Restaurar de nuevo no duplica nada y no toca un mes aprobado.
+
 ### Programación SIESA (Capacidad → Operación → Programación SIESA)
 - [ ] Subir `ReporteAsignacionResumido`: **2.181 filas**, **1.870 empleados**, **724 puestos**.
 - [ ] Clases: turnos 19.639 · descansos 9.030 · novedades 1.358 · **ninguno sin interpretar**.

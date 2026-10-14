@@ -6,10 +6,12 @@ import { Suspense, useState } from "react";
 import { BarraPlataforma } from "@/components/barra-plataforma";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
+import { LogoMarca, useMarca } from "@/lib/marca";
 import { useSesion } from "@/lib/sesion";
 
 function Cuenta() {
   const sesion = useSesion();
+  const { marca } = useMarca();
   const forzado = useSearchParams().get("forzado") === "1" || sesion.debe_cambiar_password;
   const [actual, setActual] = useState("");
   const [nueva, setNueva] = useState("");
@@ -99,7 +101,9 @@ function Cuenta() {
   return (
     <div className="min-h-screen bg-slate-50">
       {forzado ? (
-        <header className="bg-gradient-to-r from-[#0f2d5c] to-[#081a38] px-6 py-4 font-bold text-white">Plataforma Servigpoder</header>
+        <header className="flex items-center gap-3 bg-gradient-to-r from-(--barra-desde) to-(--barra-hasta) px-6 py-3 font-bold text-white">
+          <LogoMarca alto={32} /> {marca.nombre}
+        </header>
       ) : (
         <BarraPlataforma />
       )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BadgeCheck, BookOpen, Boxes, Building2, Calculator, FileText, KeyRound, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
+import { ArrowRight, BadgeCheck, BookOpen, Boxes, Building2, Calculator, FileText, KeyRound, Palette, ScrollText, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BarraPlataforma } from "@/components/barra-plataforma";
@@ -24,6 +24,7 @@ export default function Portal() {
     { href: "/admin/usuarios", texto: "Usuarios", desc: "Crear cuentas, restablecer acceso", icono: UserCog, permiso: "usuarios.ver" },
     { href: "/admin/roles", texto: "Roles y permisos", desc: "Qué puede hacer cada rol en cada app", icono: KeyRound, permiso: "roles.ver" },
     { href: "/admin/empresas", texto: "Empresas", desc: "Empresas del holding y sus desarrollos", icono: Building2, permiso: "usuarios.ver" },
+    { href: "/admin/marca", texto: "Marca", desc: "Nombre, colores, logo, favicon y fondo de ingreso", icono: Palette, permiso: "marca.gestionar" },
     { href: "/admin/auditoria", texto: "Auditoría", desc: "Bitácora de accesos y cambios", icono: ScrollText, permiso: "auditoria.ver" },
   ].filter((a) => sesion.permisos.includes(a.permiso));
 
@@ -59,7 +60,7 @@ export default function Portal() {
                 <Link key={a.codigo} href={a.ruta}
                   className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                   <div className="absolute inset-x-0 top-0 h-1" style={{ background: a.color }} />
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md" style={{ background: `linear-gradient(135deg, ${a.color}, #0f2d5c)` }}>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md" style={{ background: `linear-gradient(135deg, ${a.color}, var(--barra-desde))` }}>
                     <Icono className="h-6 w-6" strokeWidth={2} />
                   </div>
                   <h3 className="mt-4 text-lg font-semibold text-slate-900">{a.nombre}</h3>

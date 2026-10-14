@@ -85,18 +85,18 @@ export function Asistente({ base, bienvenida, sugerencias }: ConfigAsistente) {
 
       {abierto && (
         <section className="fixed bottom-5 right-5 z-40 flex h-[min(640px,calc(100vh-2.5rem))] w-[min(420px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-          <header className="flex items-center gap-3 bg-gradient-to-r from-[#0f2d5c] to-[#174c99] px-4 py-3 text-white">
+          <header className="flex items-center gap-3 bg-gradient-to-r from-(--barra-desde) to-marca-700 px-4 py-3 text-white">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15"><Bot className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">Asistente de análisis</p>
-              <p className="truncate text-[11px] text-sky-200">Explica de dónde salen los datos · uso interno y confidencial</p>
+              <p className="truncate text-[11px] text-acento-200">Explica de dónde salen los datos · uso interno y confidencial</p>
             </div>
             {mensajes.length > 0 && (
-              <button onClick={() => setMensajes([])} className="rounded p-1 text-sky-200 hover:bg-white/10 hover:text-white" title="Nueva conversación" aria-label="Nueva conversación">
+              <button onClick={() => setMensajes([])} className="rounded p-1 text-acento-200 hover:bg-white/10 hover:text-white" title="Nueva conversación" aria-label="Nueva conversación">
                 <RotateCcw className="h-4 w-4" />
               </button>
             )}
-            <button onClick={() => setAbierto(false)} className="rounded p-1 text-sky-200 hover:bg-white/10 hover:text-white" aria-label="Cerrar asistente">
+            <button onClick={() => setAbierto(false)} className="rounded p-1 text-acento-200 hover:bg-white/10 hover:text-white" aria-label="Cerrar asistente">
               <X className="h-4 w-4" />
             </button>
           </header>

@@ -1,11 +1,23 @@
 @import "tailwindcss";
 
+/* Colores de la marca: valores de fábrica. Administración → Marca los reemplaza al cargar (lib/marca.tsx). */
 @theme {
   --color-marca-50: #eef6ff;
   --color-marca-100: #d9eaff;
+  --color-marca-200: #b9d3f5;
   --color-marca-600: #1d5fbf;
   --color-marca-700: #174c99;
+  --color-marca-800: #14417f;
   --color-marca-900: #0f2d5c;
+  --color-acento-200: #bae6fd;
+  --color-acento-300: #7dd3fc;
+  --color-acento-400: #38bdf8;
+}
+
+:root {
+  --barra-desde: #0f2d5c;
+  --barra-medio: #0c2750;
+  --barra-hasta: #081a38;
 }
 
 body {

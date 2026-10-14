@@ -320,6 +320,19 @@ Chat aparte (`/siesa`) que responde **solo** con los instructivos de SIESA carga
 - Cada respuesta muestra sus fuentes (instructivo y página, con el texto). La base es por empresa (habilitada
   en Servigpoder). Permisos: `siesa.consultar` (chat) y `siesa.gestionar` (cargar y quitar PDF).
 
+## Marca
+
+**Administración → Marca** (permiso `marca.gestionar`): nombre y subtítulo de la plataforma, color principal y de
+acento, degradado de la barra y del menú, logo, favicon y fondo de la pantalla de ingreso (degradado, color sólido o
+imagen con oscurecimiento ajustable). Tiene vista previa en vivo; los cambios se aplican al guardar.
+
+- Las imágenes se validan por su contenido (PNG, JPG, WEBP, GIF o ICO; SVG no), se vuelven a codificar sin
+  metadatos y se ajustan: logo hasta 800×400, favicon 64×64, fondo hasta 2560 px. Se guardan en la base (tabla
+  `marca_imagen`), no como archivos.
+- La marca se lee sin iniciar sesión (`GET /api/marca`), porque la usa la pantalla de ingreso. Los tonos del color
+  principal se calculan en el navegador y reemplazan las variables `--color-marca-*` del tema.
+- "Valores de fábrica" vuelve a la marca original.
+
 ## Empresas
 
 Los desarrollos son por empresa (Servigpoder, SERA…) y **no comparten datos**: cada empresa tiene su propio

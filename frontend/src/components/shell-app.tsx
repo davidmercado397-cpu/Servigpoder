@@ -84,18 +84,18 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
       {movilAbierto && <div className="fixed inset-0 z-30 bg-slate-900/50 lg:hidden" onClick={() => setMovilAbierto(false)} />}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-gradient-to-b from-[#0f2d5c] via-[#0c2750] to-[#081a38] text-slate-300 shadow-xl transition-all duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-gradient-to-b from-(--barra-desde) via-(--barra-medio) to-(--barra-hasta) text-slate-300 shadow-xl transition-all duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0
           ${movilAbierto ? "translate-x-0" : "-translate-x-full"} ${angosto ? "w-[72px]" : "w-64"}`}
       >
         {/* Marca */}
         <div className={`flex items-center gap-3 border-b border-white/10 py-5 ${angosto ? "justify-center px-2" : "px-5"}`}>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-marca-600 shadow-lg shadow-sky-900/40 ring-1 ring-white/20">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-acento-400 to-marca-600 shadow-lg shadow-black/30 ring-1 ring-white/20">
             <IconoApp className="h-5 w-5 text-white" strokeWidth={2.2} />
           </div>
           {!angosto && (
             <div className="min-w-0">
               <p className="truncate text-[15px] font-bold leading-tight text-white">{nombre}</p>
-              <p className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-300/80">{subtitulo}</p>
+              <p className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-acento-300/80">{subtitulo}</p>
             </div>
           )}
           <button className="ml-auto rounded-md p-1 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setMovilAbierto(false)} aria-label="Cerrar menú">
@@ -126,7 +126,7 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
                           ${angosto ? "justify-center px-2" : "px-3"}
                           ${on ? "bg-white/[0.12] font-medium text-white shadow-inner shadow-black/10" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"}`}
                       >
-                        <span className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-sky-400 transition-opacity ${on ? "opacity-100" : "opacity-0"}`} />
+                        <span className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-acento-400 transition-opacity ${on ? "opacity-100" : "opacity-0"}`} />
                         <Icono className={`h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110 ${on ? "text-sky-300" : "text-slate-400 group-hover:text-sky-200"}`} strokeWidth={1.9} />
                         {!angosto && <span className="flex-1 truncate">{i.texto}</span>}
                         {n > 0 && (

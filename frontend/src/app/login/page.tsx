@@ -1,25 +1,26 @@
 "use client";
 
-import { Copy, KeyRound, Lock, ShieldCheck, Smartphone, User } from "lucide-react";
+import { Copy, KeyRound, Lock, Smartphone, User } from "lucide-react";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, mensajeError } from "@/lib/api";
+import { LogoMarca, estiloFondo, useMarca } from "@/lib/marca";
 
 type Paso = "credenciales" | "mfa" | "enrolar_mfa" | "recuperacion";
 type RespuestaPaso = { paso: "mfa" | "enrolar_mfa" | "listo"; sesion: { debe_cambiar_password: boolean } | null; codigos_recuperacion: string[] | null };
 type ConfigMfa = { secreto: string; uri: string; qr: string };
 
 function Marca() {
+  const { marca } = useMarca();
   return (
     <div className="mb-6 flex flex-col items-center text-center">
-      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-marca-600 shadow-lg shadow-sky-900/50 ring-1 ring-white/20">
-        <ShieldCheck className="h-7 w-7 text-white" strokeWidth={2.2} />
-      </div>
-      <h1 className="text-2xl font-bold text-white">Plataforma Servigpoder</h1>
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">Acceso restringido a personal autorizado</p>
+      <div className="mb-3 drop-shadow-lg"><LogoMarca alto={56} /></div>
+      <h1 className="text-2xl font-bold text-white">{marca.nombre}</h1>
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-acento-300/80">Acceso restringido a personal autorizado</p>
     </div>
   );
 }
+
 
 function Formulario() {
   const expirada = useSearchParams().get("expirada") === "1";
@@ -179,10 +180,16 @@ function Formulario() {
 }
 
 export default function LoginPage() {
+  const { marca } = useMarca();
+  const conImagen = marca.login_fondo === "imagen" && !!marca.fondo;
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-[#0f2d5c] via-[#0c2750] to-[#081a38] px-4 py-10">
-      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-sky-500/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 h-[28rem] w-[28rem] rounded-full bg-indigo-500/20 blur-3xl" />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10" style={estiloFondo(marca)}>
+      {!conImagen && (
+        <>
+          <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-acento-400/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-40 -right-24 h-[28rem] w-[28rem] rounded-full bg-marca-600/20 blur-3xl" />
+        </>
+      )}
       <Suspense fallback={null}>
         <Formulario />
       </Suspense>

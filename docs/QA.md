@@ -35,6 +35,14 @@ docker compose up -d --build
 - [ ] Un usuario sin permisos de Capacidad no ve la tarjeta y la API le responde 403.
 - [ ] 30 minutos sin actividad: la siguiente acción lleva a `/login` con el aviso "Su sesión se cerró por inactividad".
 
+### Marca (Administración → Marca)
+- [ ] Cambiar nombre, colores y fondo muestra el resultado en la vista previa sin afectar la plataforma hasta "Guardar".
+- [ ] Al guardar, la barra superior, el menú de cada desarrollo, los botones y la pantalla de ingreso toman los nuevos colores.
+- [ ] Subir un logo PNG transparente: aparece en la barra y en la pantalla de ingreso. Subir un favicon: cambia el ícono de la pestaña.
+- [ ] Fondo "Imagen": subir una foto y ajustar el oscurecimiento; la pantalla de ingreso (sin sesión) la muestra.
+- [ ] Un archivo .svg o que no es imagen se rechaza.
+- [ ] "Valores de fábrica" vuelve a la marca original; un usuario sin el permiso no ve la pestaña.
+
 ### Empresas (Administración → Empresas / Usuarios)
 - [ ] Empresas muestra Servigpoder (Capacidad, Validación de nómina, Reporte) y SERA (Liquidador de horas).
 - [ ] Arriba a la derecha se elige la empresa: en SERA el portal muestra solo el Liquidador; en Servigpoder, los demás.

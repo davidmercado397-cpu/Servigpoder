@@ -17,6 +17,7 @@ tzdata
 httpx==0.28.*
 reportlab==4.*
 pypdf==5.*
+Pillow>=10
 pyotp==2.*
 cryptography>=43
 qrcode==8.*

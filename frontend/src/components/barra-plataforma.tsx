@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronDown, KeyRound, LayoutGrid, LogOut, ShieldCheck } from "lucide-react";
+import { ChevronDown, KeyRound, LayoutGrid, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { SelectorEmpresa } from "@/components/selector-empresa";
+import { LogoMarca, useMarca } from "@/lib/marca";
 import { useSesion } from "@/lib/sesion";
 
 export function iniciales(nombre: string) {
@@ -19,6 +20,7 @@ export async function cerrarSesion() {
 /** Barra superior del portal y de la administración de la plataforma. */
 export function BarraPlataforma({ children }: { children?: React.ReactNode }) {
   const sesion = useSesion();
+  const { marca } = useMarca();
   const [menu, setMenu] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -29,15 +31,13 @@ export function BarraPlataforma({ children }: { children?: React.ReactNode }) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 bg-gradient-to-r from-[#0f2d5c] via-[#0c2750] to-[#081a38] text-white shadow-md">
+    <header className="sticky top-0 z-30 bg-gradient-to-r from-(--barra-desde) via-(--barra-medio) to-(--barra-hasta) text-white shadow-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 lg:px-8">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-marca-600 ring-1 ring-white/20">
-            <ShieldCheck className="h-5 w-5" strokeWidth={2.2} />
-          </div>
+          <LogoMarca alto={36} />
           <div className="leading-tight">
-            <p className="text-[15px] font-bold">Plataforma Servigpoder</p>
-            <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-sky-300/80">Desarrollos internos</p>
+            <p className="text-[15px] font-bold">{marca.nombre}</p>
+            {marca.subtitulo && <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-acento-300/80">{marca.subtitulo}</p>}
           </div>
         </Link>
         <nav className="ml-4 hidden items-center gap-1 text-sm md:flex">{children}</nav>
@@ -45,11 +45,11 @@ export function BarraPlataforma({ children }: { children?: React.ReactNode }) {
         <div className="ml-auto"><SelectorEmpresa oscuro /></div>
         <div className="relative" ref={ref}>
           <button onClick={() => setMenu(!menu)} className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 transition hover:bg-white/10" aria-haspopup="menu" aria-expanded={menu}>
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 text-xs font-bold ring-2 ring-white/15">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-acento-400 to-marca-600 text-xs font-bold ring-2 ring-white/15">
               {iniciales(sesion.nombre)}
             </span>
             <span className="hidden text-sm sm:inline">{sesion.nombre}</span>
-            <ChevronDown className="h-4 w-4 text-sky-200" />
+            <ChevronDown className="h-4 w-4 text-acento-200" />
           </button>
           {menu && (
             <div role="menu" className="absolute right-0 mt-2 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white text-sm text-slate-700 shadow-xl">

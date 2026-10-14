@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.routes import auth, empresas, plataforma, roles, usuarios
+from app.api.routes import auth, empresas, marca, plataforma, roles, usuarios
 from app.apps import APPS
 from app.core.config import API_VERSION, get_settings
 from app.core.empresas import dependencias_app
@@ -26,7 +26,7 @@ registrar_manejadores(app)
 registrar_middlewares(app)
 
 api = APIRouter(prefix="/api")
-for modulo in (auth, usuarios, roles, plataforma, empresas):
+for modulo in (auth, usuarios, roles, plataforma, empresas, marca):
     api.include_router(modulo.router)
 # Cada desarrollo publica sus rutas bajo /api/<codigo>, siempre dentro de la empresa elegida
 for aplicacion in APPS:

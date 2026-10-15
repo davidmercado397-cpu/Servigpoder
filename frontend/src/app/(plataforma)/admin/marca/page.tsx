@@ -5,38 +5,58 @@ import { useEffect, useRef, useState } from "react";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { LogoMarca, estiloFondo, useMarca, variables, type Marca } from "@/lib/marca";
-import { usePermiso } from "@/lib/sesion";
+import { usePermiso, useSesion } from "@/lib/sesion";
 
 type Tipo = "logo" | "favicon" | "fondo";
 const CAMPOS = ["nombre", "subtitulo", "color_primario", "color_acento", "color_barra", "color_barra_fin", "login_fondo", "login_color", "login_oscurecer"] as const;
 
 export default function MarcaPage() {
   const puede = usePermiso("marca.gestionar");
-  const { marca, recargar } = useMarca();
-  const [f, setF] = useState<Marca>(marca);
-  const sincronizada = useRef<Marca>(marca); // la marca con la que se abrió el formulario
+  const { recargar } = useMarca();
+  const { empresas, empresa_actual } = useSesion();
+  // Marca que se edita: "" = la general (pantalla de ingreso y empresas sin marca propia) o el código de una empresa
+  const [destino, setDestino] = useState<string>(empresa_actual ?? "");
+  const [marca, setMarca] = useState<Marca | null>(null); // como está guardada
+  const [f, setF] = useState<Marca | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState<Tipo | null>(null);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
+  const q = `?empresa=${encodeURIComponent(destino)}`;
+  const nombreDestino = destino ? empresas.find((e) => e.codigo === destino)?.nombre ?? destino : "General";
 
-  // Si llega la marca del servidor y el formulario no tiene cambios, se muestra la del servidor
   useEffect(() => {
-    setF((actual) => (CAMPOS.some((k) => actual[k] !== sincronizada.current[k]) ? actual : marca));
-    sincronizada.current = marca;
-  }, [marca]);
+    setMarca(null);
+    setMsg(null);
+    api<Marca>(`/marca?empresa=${encodeURIComponent(destino)}`).then((m) => { setMarca(m); setF(m); })
+      .catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
+  }, [destino]);
 
+  if (!puede) return <Alerta>No tiene permiso para editar la marca.</Alerta>;
+  if (!f || !marca) {
+    return msg ? <Alerta>{msg.texto}</Alerta>
+      : <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando marca…</div>;
+  }
   const cambios = CAMPOS.some((k) => f[k] !== marca[k]);
   const cambiar = <K extends keyof Marca>(k: K, v: Marca[K]) => setF({ ...f, [k]: v });
+
+  /** Tras un cambio: el formulario toma lo guardado y la plataforma se repinta (si es la marca que se está viendo). */
+  async function aplicar(m: Marca, soloImagenes = false) {
+    setMarca(m);
+    setF((actual) => (soloImagenes && actual
+      ? { ...actual, logo: m.logo, favicon: m.favicon, fondo: m.fondo, version: m.version, propia: m.propia, login_fondo: m.login_fondo }
+      : m));
+    await recargar();
+  }
 
   async function guardar() {
     setMsg(null);
     setGuardando(true);
     try {
-      const datos = Object.fromEntries(CAMPOS.map((k) => [k, f[k]]));
-      const m = await api<Marca>("/marca", { method: "PUT", json: datos });
-      setF(m);
-      await recargar();
-      setMsg({ tipo: "ok", texto: "Marca guardada: ya se ve en toda la plataforma (los demás usuarios la verán al recargar)." });
+      const formulario = f as Marca; // ya cargado: la página no llega aquí sin él
+      const datos = Object.fromEntries(CAMPOS.map((k) => [k, formulario[k]]));
+      const m = await api<Marca>(`/marca${q}`, { method: "PUT", json: datos });
+      await aplicar(m);
+      setMsg({ tipo: "ok", texto: `Marca de ${nombreDestino} guardada (los demás usuarios la verán al recargar).` });
     } catch (e) {
       setMsg({ tipo: "error", texto: mensajeError(e) });
     } finally {
@@ -50,11 +70,9 @@ export default function MarcaPage() {
     try {
       const form = new FormData();
       form.append("archivo", archivo);
-      const m = await api<Marca>(`/marca/imagen/${tipo}`, { method: "POST", body: form });
-      // Solo cambian la imagen (y el tipo de fondo si fue el fondo); lo demás sigue como se está editando
-      setF((actual) => ({ ...actual, logo: m.logo, favicon: m.favicon, fondo: m.fondo, version: m.version,
-        ...(tipo === "fondo" ? { login_fondo: "imagen" as const } : {}) }));
-      await recargar();
+      const m = await api<Marca>(`/marca/imagen/${tipo}${q}`, { method: "POST", body: form });
+      // Solo cambian las imágenes (y el tipo de fondo si fue el fondo); lo demás sigue como se está editando
+      await aplicar(m, true);
     } catch (e) {
       setMsg({ tipo: "error", texto: mensajeError(e) });
     } finally {
@@ -65,45 +83,66 @@ export default function MarcaPage() {
   async function quitar(tipo: Tipo) {
     if (!confirm(`¿Quitar ${tipo === "logo" ? "el logo" : tipo === "favicon" ? "el favicon" : "la imagen de fondo"}?`)) return;
     try {
-      const m = await api<Marca>(`/marca/imagen/${tipo}`, { method: "DELETE" });
-      setF((actual) => ({ ...actual, logo: m.logo, favicon: m.favicon, fondo: m.fondo, version: m.version,
-        ...(tipo === "fondo" && actual.login_fondo === "imagen" ? { login_fondo: "degradado" as const } : {}) }));
-      await recargar();
+      const m = await api<Marca>(`/marca/imagen/${tipo}${q}`, { method: "DELETE" });
+      await aplicar(m, true);
     } catch (e) {
       setMsg({ tipo: "error", texto: mensajeError(e) });
     }
   }
 
   async function restablecer() {
-    if (!confirm("¿Volver a la marca de fábrica? Se quitan el logo, el favicon y el fondo, y los colores vuelven a los originales.")) return;
+    const pregunta = destino
+      ? `¿Quitar la marca propia de ${nombreDestino}? Volverá a verse con la marca general.`
+      : "¿Volver a la marca de fábrica? Se quitan el logo, el favicon y el fondo generales, y los colores vuelven a los originales.";
+    if (!confirm(pregunta)) return;
     try {
-      const m = await api<Marca>("/marca/restablecer", { method: "POST" });
-      setF(m);
-      await recargar();
-      setMsg({ tipo: "ok", texto: "Marca restablecida a los valores de fábrica." });
+      const m = await api<Marca>(`/marca/restablecer${q}`, { method: "POST" });
+      await aplicar(m);
+      setMsg({ tipo: "ok", texto: destino ? `${nombreDestino} vuelve a usar la marca general.` : "Marca general restablecida a los valores de fábrica." });
     } catch (e) {
       setMsg({ tipo: "error", texto: mensajeError(e) });
     }
   }
-
-  if (!puede) return <Alerta>No tiene permiso para editar la marca.</Alerta>;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-2xl font-bold text-marca-900">Marca</h1>
-          <p className="text-sm text-slate-500">Nombre, colores, logo, favicon y fondo de la pantalla de ingreso de la plataforma.</p>
+          <p className="text-sm text-slate-500">Nombre, colores, logo, favicon y fondo de la pantalla de ingreso, en general o por empresa.</p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100" onClick={restablecer}>
-            <RotateCcw className="h-4 w-4" /> Valores de fábrica
-          </button>
+          {(!destino || marca.propia) && (
+            <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100" onClick={restablecer}>
+              <RotateCcw className="h-4 w-4" /> {destino ? "Usar la marca general" : "Valores de fábrica"}
+            </button>
+          )}
           {cambios && <button className="btn-secundario" onClick={() => setF(marca)}>Descartar cambios</button>}
           <button className="btn-primario inline-flex items-center gap-1.5" disabled={!cambios || guardando} onClick={guardar}>
             <Save className="h-4 w-4" /> {guardando ? "Guardando…" : "Guardar"}
           </button>
         </div>
+      </div>
+
+      <div className="tarjeta flex flex-wrap items-center gap-3 p-4">
+        <span className="text-sm font-medium text-slate-700">Marca de</span>
+        <div className="flex flex-wrap gap-1.5">
+          {[{ codigo: "", nombre: "General" }, ...empresas].map((e) => (
+            <button key={e.codigo} disabled={cambios && destino !== e.codigo}
+              title={cambios && destino !== e.codigo ? "Guarde o descarte los cambios antes de cambiar de marca" : undefined}
+              onClick={() => setDestino(e.codigo)}
+              className={`rounded-full border px-3 py-1 text-sm disabled:opacity-40 ${destino === e.codigo ? "border-marca-600 bg-marca-50 font-medium text-marca-800" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+              {e.nombre}
+            </button>
+          ))}
+        </div>
+        <p className="w-full text-xs text-slate-500">
+          {!destino
+            ? "La general se ve en la pantalla de ingreso de quien aún no ha elegido empresa y en las empresas sin marca propia."
+            : marca.propia
+              ? `${nombreDestino} tiene marca propia: se ve al trabajar con esta empresa y en la pantalla de ingreso de quien la usó por última vez. Lo que no cargue (logo, favicon o fondo) se toma de la general.`
+              : `${nombreDestino} usa la marca general. Al guardar o subir una imagen aquí, se crea su marca propia.`}
+        </p>
       </div>
       {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
 
@@ -272,9 +311,10 @@ function Imagen({ titulo, ayuda, imagen, subiendo, onSubir, onQuitar, vista }: {
       {vista}
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-secundario inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs" disabled={subiendo} onClick={() => input.current?.click()}>
-          {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />} {imagen ? "Cambiar" : "Subir imagen"}
+          {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />} {imagen && !imagen.heredada ? "Cambiar" : "Subir imagen"}
         </button>
-        {imagen && (
+        {imagen?.heredada && <span className="text-xs text-slate-400">De la marca general</span>}
+        {imagen && !imagen.heredada && (
           <>
             <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-red-50 hover:text-red-700" onClick={onQuitar}>
               <Trash2 className="h-3.5 w-3.5" /> Quitar

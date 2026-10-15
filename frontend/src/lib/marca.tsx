@@ -3,11 +3,13 @@
 import { ShieldCheck } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-export type ImagenMarca = { url: string; ancho: number; alto: number; bytes: number } | null;
+export type ImagenMarca = { url: string; ancho: number; alto: number; bytes: number; heredada?: boolean } | null;
 export type Marca = {
   nombre: string; subtitulo: string; color_primario: string; color_acento: string; color_barra: string; color_barra_fin: string;
   login_fondo: "degradado" | "color" | "imagen"; login_color: string; login_oscurecer: number; version: number;
   logo: ImagenMarca; favicon: ImagenMarca; fondo: ImagenMarca;
+  /** Empresa dueña de la marca (null = general) y si la empresa tiene marca propia o usa la general */
+  empresa?: string | null; propia?: boolean;
 };
 
 export const MARCA_INICIAL: Marca = {

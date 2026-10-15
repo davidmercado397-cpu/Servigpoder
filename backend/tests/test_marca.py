@@ -50,7 +50,7 @@ def test_imagenes_se_validan_y_normalizan(admin):
     r = _subir(admin, "logo", _imagen(tamano=(2000, 600)))
     assert r.status_code == 200, r.text
     logo = r.json()["data"]["logo"]
-    assert (logo["ancho"], logo["alto"]) == (800, 240) and logo["url"].startswith("/api/marca/imagen/logo?v=")
+    assert (logo["ancho"], logo["alto"]) == (800, 240) and logo["url"].startswith("/api/marca/imagen/logo?m=")
 
     r = _subir(admin, "favicon", _imagen("JPEG", (300, 200)), "icono.jpg")
     assert r.json()["data"]["favicon"]["ancho"] == 64 and r.json()["data"]["favicon"]["alto"] == 64
@@ -88,3 +88,36 @@ def test_solo_con_permiso(admin):
     assert admin.post(f"{API}/restablecer").status_code == 403
     with TestClient(app, headers=CSRF) as anonimo:
         assert anonimo.put(API, json=VALORES).status_code == 401
+
+
+def test_marca_por_empresa(admin):
+    # La general tiene logo y fondo; SERA tendrá su propio favicon, colores y fondo
+    _subir(admin, "logo", _imagen())
+    _subir(admin, "fondo", _imagen("PNG", (1600, 900)))
+    r = admin.put(f"{API}?empresa=sera", json={**VALORES, "login_fondo": "degradado"})
+    assert r.status_code == 200, r.text
+    sera = r.json()["data"]
+    assert sera["empresa"] == "sera" and sera["propia"] and sera["color_primario"] == "#0f766e"
+    assert sera["logo"]["heredada"] is True  # sin logo propio usa el de la general
+    r = admin.post(f"{API}/imagen/favicon?empresa=sera", files={"archivo": ("f.png", _imagen(), "image/png")})
+    fav = r.json()["data"]["favicon"]
+    assert fav["heredada"] is False and "m=1&" not in fav["url"]
+
+    # La pública depende de la empresa pedida (o de la cookie de la última empresa elegida)
+    with TestClient(app, headers=CSRF) as anonimo:
+        g = anonimo.get(API).json()["data"]
+        assert g["empresa"] is None and g["nombre"] == "Plataforma Servigpoder" and g["login_fondo"] == "imagen"
+        s = anonimo.get(f"{API}?empresa=sera").json()["data"]
+        assert s["nombre"] == "Grupo SERA" and s["login_fondo"] == "degradado" and s["favicon"]["url"] == fav["url"]
+        anonimo.cookies.set("empresa", "sera")
+        assert anonimo.get(API).json()["data"]["nombre"] == "Grupo SERA"
+        assert anonimo.get(API.replace("marca", "marca") + "?empresa=noexiste").json()["data"]["empresa"] is None
+        assert anonimo.get(fav["url"]).headers["content-type"] == "image/png"
+        sv = anonimo.get(f"{API}?empresa=servigpoder").json()["data"]
+        assert sv["propia"] is False and sv["nombre"] == "Plataforma Servigpoder"
+
+    assert admin.put(f"{API}?empresa=noexiste", json=VALORES).status_code == 404
+    # Restablecer SERA: vuelve a la general
+    r = admin.post(f"{API}/restablecer?empresa=sera").json()["data"]
+    assert r["propia"] is False and r["nombre"] == "Plataforma Servigpoder"
+    assert admin.get(fav["url"]).status_code == 404

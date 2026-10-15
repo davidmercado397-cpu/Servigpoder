@@ -1,6 +1,7 @@
 """Marca de la plataforma: nombre, colores, logo, favicon y fondo de la pantalla de ingreso.
 
-Una sola fila (id = 1). Las imágenes se guardan en la base (ya validadas, recortadas a su tamaño y sin
+La marca general (empresa_id vacío) se ve en la pantalla de ingreso y en las empresas sin marca propia; cada
+empresa puede tener la suya (logo, favicon, fondo y colores distintos). Las imágenes se guardan en la base (ya validadas, recortadas a su tamaño y sin
 metadatos), nunca como archivos en el servidor.
 """
 
@@ -28,7 +29,9 @@ MARCA_INICIAL = {
 class Marca(Base):
     __tablename__ = "marca"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Vacío = marca general; si no, la marca propia de esa empresa
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresa.id", ondelete="CASCADE"), unique=True, nullable=True)
     nombre: Mapped[str] = mapped_column(String(80), default=MARCA_INICIAL["nombre"])
     subtitulo: Mapped[str] = mapped_column(String(80), default=MARCA_INICIAL["subtitulo"])
     color_primario: Mapped[str] = mapped_column(String(7), default=MARCA_INICIAL["color_primario"])
@@ -45,10 +48,11 @@ class Marca(Base):
 
 
 class MarcaImagen(Base):
-    """logo | favicon | fondo (de la pantalla de ingreso)."""
+    """logo | favicon | fondo (de la pantalla de ingreso), de una marca."""
 
     __tablename__ = "marca_imagen"
 
+    marca_id: Mapped[int] = mapped_column(ForeignKey("marca.id", ondelete="CASCADE"), primary_key=True)
     tipo: Mapped[str] = mapped_column(String(20), primary_key=True)
     contenido: Mapped[bytes] = mapped_column(LargeBinary)
     mime: Mapped[str] = mapped_column(String(40))

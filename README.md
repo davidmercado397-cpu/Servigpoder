@@ -332,6 +332,35 @@ imagen con oscurecimiento ajustable). Tiene vista previa en vivo; los cambios se
 - La marca se lee sin iniciar sesión (`GET /api/marca`), porque la usa la pantalla de ingreso. Los tonos del color
   principal se calculan en el navegador y reemplazan las variables `--color-marca-*` del tema.
 - "Valores de fábrica" vuelve a la marca original.
+- **Por empresa:** arriba se elige qué marca se edita: la *General* o la de cada empresa. Una empresa sin marca
+  propia usa la general; la primera vez que se guarda o se sube una imagen en una empresa, nace su marca propia
+  (copia de la general). Lo que esa empresa no cargue (logo, favicon o fondo) se toma de la general.
+  `GET /api/marca` devuelve la marca de la empresa pedida (`?empresa=`) o la de la cookie `empresa` (la última con
+  la que se trabajó en ese navegador, también en la pantalla de ingreso); sin empresa, la general.
+  "Usar la marca general" quita la marca propia de la empresa.
+
+## Planos SIESA
+
+Deja listos para cargar a SIESA los planos de **empleados** (63 columnas, A–BK) y **contratos** (94 columnas, A–CP)
+de Servigpoder, con las reglas de los prompts maestros que antes se aplicaban en el chat. Regla de oro: un dato se
+convierte con una regla o se reporta; nunca se inventa.
+
+- El plano trae **una sola hoja con información**; las hojas de errores de una corrida anterior se reemplazan.
+  El archivo no se guarda: se procesa en memoria y se devuelve `<nombre>_CARGUE.xlsx` con la hoja **Errores**
+  (fila de origen, cédula, columna, tipo y problema). Tipos: Error, Revisar (convertido por parecido), Advertencia
+  (el dato es válido pero no cuadra) e Informativo.
+- **Empleados:** país/departamento/ciudad → códigos DANE (catálogo en `app/apps/planos/datos`). Solo la
+  coincidencia exacta o un alias se acepta en silencio; un nombre parecido se escribe y se marca "aproximada".
+  Fechas YYYYMMDD (anteriores a 1920 son inválidas), documento expedido antes de los 17 años y 6 meses, menor de
+  16 al ingresar, cédulas repetidas. Modos: todo el plano o solo códigos y fechas.
+- **Contratos:** bancos, AFP, EPS, cesantías, cajas y cargos → código (catálogos editables). Fijos, defectos,
+  copias de la fecha de ingreso, vigilantes (032, 033 y 052: salario mínimo, 999, 406999, 004), auxilio de
+  transporte (3 hasta 2 SMLV, 0 si gana más), "contrato hasta" vacía = ingreso + 3 meses − 1 día, ingreso fuera
+  del año en curso = error, salario menor al mínimo (salvo aprendices), cuentas repetidas.
+- **Cruce:** si en la misma sesión se procesa primero el plano de empleados, el de contratos verifica que cada
+  cédula exista y que la fecha de ingreso coincida (el cruce vive solo en el navegador).
+- **Configuración:** alias (texto → código, se crean desde la tabla de errores con un clic), correcciones manuales
+  por cédula y columna, catálogos de entidades y salario mínimo por año.
 
 ## Empresas
 

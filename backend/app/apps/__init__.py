@@ -12,11 +12,12 @@ Para agregar un desarrollo nuevo:
 from app.apps.capacidad.manifest import APP as CAPACIDAD
 from app.apps.liquidador.manifest import APP as LIQUIDADOR
 from app.apps.nomina.manifest import APP as NOMINA
+from app.apps.planos.manifest import APP as PLANOS
 from app.apps.reporte.manifest import APP as REPORTE
 from app.apps.siesa.manifest import APP as SIESA
 from app.core.plataforma import App
 
-APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA]
+APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA, PLANOS]
 
 
 def por_codigo(codigo: str) -> App | None:

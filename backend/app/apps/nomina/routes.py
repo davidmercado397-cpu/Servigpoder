@@ -42,7 +42,7 @@ def _periodo_out(db: Session, p: NomPeriodo, completo: bool = False) -> dict:
     pendientes = db.scalar(select(func.count()).select_from(NomAlerta).outerjoin(NomDecision, _union_decision()).where(
         NomAlerta.periodo_id == p.id, NomAlerta.tipo.not_in(motor.INFORMATIVAS),
         or_(NomDecision.id.is_(None), NomDecision.estado == PENDIENTE))) or 0
-    out = {"id": p.id, "anio": p.anio, "mes": p.mes, "nomina": p.nomina, "nombre": _nombre(p), "calculado_en": p.calculado_en,
+    out = {"id": p.id, "anio": p.anio, "mes": p.mes, "nomina": p.nomina, "quincena": p.quincena, "nombre": _nombre(p), "calculado_en": p.calculado_en,
            "archivos": archivos, "alertas": resumen.get("alertas", 0), "pendientes": pendientes,
            "personas": resumen.get("personas", {}), "revisiones": len(p.historial or []),
            "requeridos": list(servicio.archivos_del_periodo(p))}
@@ -57,7 +57,9 @@ def _periodo_out(db: Session, p: NomPeriodo, completo: bool = False) -> dict:
 
 def _nombre(p: NomPeriodo) -> str:
     mes = f"{MESES[p.mes]} {p.anio}"
-    return f"Mensual · {mes}" if p.nomina == MENSUAL else f"Quincenal · 2.ª quincena de {mes}"
+    if p.nomina == MENSUAL:
+        return f"Mensual · {mes}"
+    return f"Quincenal · {'1.ª quincena' if p.quincena == 1 else '2.ª quincena'} de {mes}"
 
 
 def _union_decision():
@@ -71,22 +73,27 @@ class PeriodoIn(BaseModel):
     anio: int = Field(ge=2020, le=2100)
     mes: int = Field(ge=1, le=12)
     nomina: Literal["quincenal", "mensual"]
+    quincena: Literal[1, 2] = 2  # solo en la quincenal: 1 = del 1 al 15, 2 = del 16 al 30
 
 
 @router.get("/periodos", response_model=ApiResponse[list[dict]])
 def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
-    periodos, meta = paginar_consulta(db, select(NomPeriodo).order_by(NomPeriodo.anio.desc(), NomPeriodo.mes.desc(), NomPeriodo.nomina), p)
+    periodos, meta = paginar_consulta(db, select(NomPeriodo).order_by(NomPeriodo.anio.desc(), NomPeriodo.mes.desc(), NomPeriodo.nomina,
+                                                                  NomPeriodo.quincena.desc()), p)
     return ok([_periodo_out(db, x) for x in periodos], **meta)
 
 
 @router.post("/periodos", response_model=ApiResponse[dict], status_code=201)
 def crear(data: PeriodoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CARGAR))):
-    if db.scalar(select(NomPeriodo).where(NomPeriodo.anio == data.anio, NomPeriodo.mes == data.mes, NomPeriodo.nomina == data.nomina)):
-        raise ApiError(409, f"Ya existe la revisión de la nómina {data.nomina} de {MESES[data.mes]} {data.anio}")
-    p = NomPeriodo(anio=data.anio, mes=data.mes, nomina=data.nomina, resumen={}, historial=[])
+    quincena = 0 if data.nomina == MENSUAL else data.quincena
+    if db.scalar(select(NomPeriodo).where(NomPeriodo.anio == data.anio, NomPeriodo.mes == data.mes, NomPeriodo.nomina == data.nomina,
+                                          NomPeriodo.quincena == quincena)):
+        cual = "mensual" if not quincena else f"quincenal ({quincena}.ª quincena)"
+        raise ApiError(409, f"Ya existe la revisión de la nómina {cual} de {MESES[data.mes]} {data.anio}")
+    p = NomPeriodo(anio=data.anio, mes=data.mes, nomina=data.nomina, quincena=quincena, resumen={}, historial=[])
     db.add(p)
     db.flush()
-    auditar(db, request, "nom_periodo_creado", actual.id, periodo=f"{data.mes:02d}/{data.anio}", nomina=data.nomina)
+    auditar(db, request, "nom_periodo_creado", actual.id, periodo=f"{data.mes:02d}/{data.anio}", nomina=data.nomina, quincena=quincena)
     db.commit()
     return ok(_periodo_out(db, p, completo=True))
 
@@ -454,4 +461,4 @@ def informe(periodo_id: int, request: Request, db: DbSession, actual: Usuario = 
     db.commit()
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                             headers={"Content-Disposition": f'attachment; filename="validacion_nomina_{p.nomina}_{p.anio}-{p.mes:02d}.xlsx"'})
+                             headers={"Content-Disposition": f'attachment; filename="validacion_nomina_{p.nomina}{p.quincena or ''}_{p.anio}-{p.mes:02d}.xlsx"'})

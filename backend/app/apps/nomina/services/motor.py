@@ -1,7 +1,7 @@
 """Motor de validación de la nómina (modalidades FIJAS).
 
-Para cada persona de cada nómina cargada (quincenal: días 16 al 30; mensual: días 1 al 30; el día 31 no
-suma) se calcula, con la programación del mes:
+Para cada persona de cada nómina cargada (quincenal: 1.ª quincena del 1 al 15 o 2.ª del 16 al 30; mensual:
+días 1 al 30; el día 31 no suma) se calcula, con la programación del mes:
 
 - días pagables: días con turno, Z, L, IND… (todo código sin el check "Descuenta"); también son los días
   que llevan auxilio de transporte;
@@ -115,9 +115,11 @@ def pesos(v: float) -> str:
     return "$" + f"{v:,.0f}".replace(",", ".")
 
 
-def rango(nomina: str, anio: int, mes: int) -> tuple[date, date]:
-    """Quincenal: 16 al 30 (2.ª quincena); mensual: 1 al 30. El día 31 nunca suma."""
+def rango(nomina: str, anio: int, mes: int, quincena: int = 2) -> tuple[date, date]:
+    """Quincenal: 1 al 15 (1.ª quincena) o 16 al 30 (2.ª); mensual: 1 al 30. El día 31 nunca suma."""
     ultimo = min(30, calendar.monthrange(anio, mes)[1])
+    if nomina == QUINCENAL and quincena == 1:
+        return date(anio, mes, 1), date(anio, mes, 15)
     return (date(anio, mes, 16) if nomina == QUINCENAL else date(anio, mes, 1)), date(anio, mes, ultimo)
 
 
@@ -146,7 +148,8 @@ def mapa_modalidades(datos: dict) -> tuple[dict[str, dict], dict[tuple[str, str]
 
 
 def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupos: dict[str, str],
-             puestos_aprobados: set[tuple[str, str]], p: Parametros) -> Resultado:
+             puestos_aprobados: set[tuple[str, str]], p: Parametros, quincena: int = 2) -> Resultado:
+    """quincena: 1 o 2 para la nómina quincenal (la mensual la ignora)."""
     mods, puestos = mapa_modalidades(datos)
     conceptos_modalidad = sorted({c for m in mods.values() for c in m["conceptos"]})
     desc_concepto = {c: d["descripcion"] for m in mods.values() for c, d in m["conceptos"].items()}
@@ -174,7 +177,7 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
         archivo = datos.get(nomina)
         if not archivo:
             continue
-        desde, hasta = rango(nomina, anio, mes)
+        desde, hasta = rango(nomina, anio, mes, quincena)
         if p_desde > desde or p_hasta < hasta:
             raise ValueError(f"La programación cargada ({p_desde:%d/%m} al {p_hasta:%d/%m}) no cubre el periodo de la nómina "
                              f"{nomina} ({desde:%d/%m} al {hasta:%d/%m})")
@@ -191,7 +194,8 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
             persona = _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas_por_persona.get(ced, []),
                                codigos, puestos, puestos_aprobados, mods, conceptos_modalidad, desc_concepto, p, sin_modalidad)
             a = _alertas_persona(persona, pago, contrato, trat, nomina, base_dias, p)
-            a += _alertas_cuotas(persona, pago, cuotas_por_persona.get(ced, []), conceptos_cuota, archivo["conceptos"], nomina, p)
+            a += _alertas_cuotas(persona, pago, cuotas_por_persona.get(ced, []), conceptos_cuota, archivo["conceptos"], nomina, p,
+                                 quincena)
             persona["alertas"] = sum(1 for x in a if not x.informativa)
             personas.append(persona)
             alertas += a
@@ -416,7 +420,7 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
 
 
 def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: set[str], conceptos_nomina: dict[str, str],
-                    nomina: str, p: Parametros) -> list[Alerta]:
+                    nomina: str, p: Parametros, quincena: int = 2) -> list[Alerta]:
     a: list[Alerta] = []
     ced, nombre = per["cedula"], per["nombre"]
     devengos, deducciones = pago["devengos"], pago["deducciones"]
@@ -431,8 +435,8 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
 
     for concepto in sorted(set(activas) | {k for k in conceptos_cuota if deducciones.get(k) or devengos.get(k)}):
         lista = activas.get(concepto, [])
-        if nomina == QUINCENAL and concepto in p.solo_primera_quincena:
-            continue  # en la 2.ª quincena estas cuotas no se descuentan
+        if nomina == QUINCENAL and quincena == 2 and concepto in p.solo_primera_quincena:
+            continue  # en la 2.ª quincena estas cuotas no se descuentan (en la 1.ª sí)
         if concepto in p.conceptos_ajuste:
             continue  # ajustes por mayor o menor valor pagado: no se validan
         esperado = 0.0

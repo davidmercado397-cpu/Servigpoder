@@ -146,8 +146,8 @@ QUINCENAL["1012"] = {**_completo(15), "DEVENGO_130": 8 * 20000 + 7 * 30000, "DEV
 MENSUAL = {"2001": _completo(30)}
 
 
-def _cargar_todo(cliente, nomina: str = "quincenal") -> int:
-    pid = cliente.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": nomina}).json()["data"]["id"]
+def _cargar_todo(cliente, nomina: str = "quincenal", quincena: int = 2) -> int:
+    pid = cliente.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": nomina, "quincena": quincena}).json()["data"]["id"]
     for tipo, contenido in [("modalidades", _modalidades()), ("ubicaciones", _ubicaciones()), ("contratos", _contratos()),
                             ("cuotas", _cuotas()), ("programacion", _programacion()),
                             (nomina, _nomina(QUINCENAL if nomina == "quincenal" else MENSUAL))]:
@@ -275,7 +275,7 @@ def test_faltan_archivos_y_validacion_de_formato(admin):
 def test_informe_excel(admin):
     pid = _cargar_todo(admin)
     r = admin.get(f"{API}/periodos/{pid}/informe")
-    assert r.status_code == 200 and r.headers["content-disposition"] == 'attachment; filename="validacion_nomina_quincenal_2026-09.xlsx"'
+    assert r.status_code == 200 and r.headers["content-disposition"] == 'attachment; filename="validacion_nomina_quincenal2_2026-09.xlsx"'
     libro = load_workbook(BytesIO(r.content))
     assert libro.sheetnames == ["Resumen", "Revisiones", "Alertas", "Puestos sin modalidad"]
     assert libro["Alertas"].max_row > 10
@@ -344,3 +344,27 @@ def test_cambio_de_puesto_paga_la_modalidad_de_cada_puesto(admin):
     assert puestos["10-1"]["dias_pagables"] == 7 and puestos["10-1"]["origen"] == "puesto"
     assert puestos["10-1"]["conceptos"] == {"130": 30000}
     assert d["dias"]["2026-09-23"]["modalidad"] == "4X2 1 GRP" and d["dias"]["2026-09-24"]["modalidad"] == "6X1 ESP"
+
+
+def test_primera_quincena(admin):
+    from app.apps.nomina.services.motor import rango
+    from datetime import date
+
+    assert rango("quincenal", 2026, 9, 1) == (date(2026, 9, 1), date(2026, 9, 15))
+    assert rango("quincenal", 2026, 9, 2) == (date(2026, 9, 16), date(2026, 9, 30))
+    assert rango("mensual", 2026, 2, 1) == (date(2026, 2, 1), date(2026, 2, 28))
+
+    q1 = _cargar_todo(admin, quincena=1)
+    p = admin.get(f"{API}/periodos/{q1}").json()["data"]
+    assert p["nombre"] == "Quincenal · 1.ª quincena de septiembre 2026" and p["quincena"] == 1 and p["calculado_en"]
+    # La cuota 600 solo se descuenta en la 1.ª quincena: aquí se valida (a Ana no se le descontó)
+    assert any(ref == "600" for _, ref in _alertas(admin, q1).get("1001", set()))
+
+    # Pueden convivir la 1.ª, la 2.ª y la mensual del mismo mes; repetir una es un error
+    q2 = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal"})
+    m = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "mensual", "quincena": 1})
+    assert q2.status_code == 201 and q2.json()["data"]["quincena"] == 2
+    assert m.status_code == 201 and m.json()["data"]["quincena"] == 0 and m.json()["data"]["nombre"] == "Mensual · septiembre 2026"
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal", "quincena": 1})
+    assert r.status_code == 409 and "1.ª quincena" in r.json()["error"]["message"]
+    assert admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal", "quincena": 3}).status_code == 422

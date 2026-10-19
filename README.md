@@ -183,8 +183,9 @@ mes completo (28 a 31 días).
 
 ## Validación de nómina
 
-Cada **revisión** es de una nómina: quincenal (2.ª quincena, días 16 a 30) o mensual (días 1 a 30; el 31 no
-suma). Se exigen todos los archivos del día: maestro de modalidades, ubicaciones y puestos con modalidad,
+Cada **revisión** es de una nómina: quincenal de la **1.ª quincena** (días 1 a 15), quincenal de la
+**2.ª quincena** (días 16 a 30) o mensual (días 1 a 30; el 31 no suma). Las tres pueden existir para el mismo mes.
+Las cuotas marcadas "solo 1.ª quincena" (600, 630–632) se validan en la 1.ª y se omiten en la 2.ª. Se exigen todos los archivos del día: maestro de modalidades, ubicaciones y puestos con modalidad,
 contratos, cuotas, programación y la nómina. Después se puede **recargar solo la nómina** cuantas veces haga
 falta: cada carga recalcula y deja una revisión con alertas corregidas, que persisten y nuevas. Las revisiones
 de alertas (revisada, justificada, error) se conservan.

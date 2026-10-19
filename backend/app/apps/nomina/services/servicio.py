@@ -173,7 +173,8 @@ def recalcular(db: Session, periodo: NomPeriodo, motivo: str = "Recálculo") -> 
     grupos = {g.nombre: g.tratamiento for g in db.scalars(select(NomGrupo))}
     aprobados = {(d.ubicacion, d.puesto) for d in db.scalars(select(NomPuestoDecision).where(NomPuestoDecision.estado == "aprobado"))}
     try:
-        r = motor.calcular(periodo.anio, periodo.mes, datos, codigos, grupos, aprobados, parametros_motor(parametros(db)))
+        r = motor.calcular(periodo.anio, periodo.mes, datos, codigos, grupos, aprobados, parametros_motor(parametros(db)),
+                           periodo.quincena or 2)
     except ValueError as e:
         raise ErrorValidacion(str(e)) from e
 

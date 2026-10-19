@@ -37,15 +37,17 @@ ERROR = "error"  # error confirmado para corregir
 
 
 class NomPeriodo(Base):
-    """Una revisión de nómina: año, mes y tipo (quincenal = 2.ª quincena; mensual = mes completo)."""
+    """Una revisión de nómina: año, mes y tipo (quincenal: 1.ª quincena del 1 al 15 o 2.ª del 16 al 30;
+    mensual: mes completo)."""
 
     __tablename__ = "nom_periodo"
-    __table_args__ = (UniqueConstraint("anio", "mes", "nomina"),)
+    __table_args__ = (UniqueConstraint("anio", "mes", "nomina", "quincena", name="uq_nom_periodo"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     anio: Mapped[int] = mapped_column(Integer)
     mes: Mapped[int] = mapped_column(Integer)
     nomina: Mapped[str] = mapped_column(String(10))  # quincenal | mensual
+    quincena: Mapped[int] = mapped_column(Integer, default=2, server_default="2")  # 1 o 2 en la quincenal; 0 en la mensual
     # Cada cálculo deja una revisión: alertas corregidas, que persisten y nuevas frente a la anterior
     historial: Mapped[list] = mapped_column(JSON, default=list)
     resumen: Mapped[dict] = mapped_column(JSON, default=dict)

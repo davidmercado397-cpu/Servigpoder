@@ -15,7 +15,7 @@ export default function PeriodosNomina() {
   const cargar = usePermiso("nomina.cargar");
   const router = useRouter();
   const hoy = new Date();
-  const [nuevo, setNuevo] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, nomina: "quincenal" });
+  const [nuevo, setNuevo] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, nomina: "quincenal-2" });
   const [lista, setLista] = useState<Periodo[] | null>(null);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [error, setError] = useState("");
@@ -35,7 +35,7 @@ export default function PeriodosNomina() {
     e.preventDefault();
     setError("");
     try {
-      const p = await api<Periodo>("/nomina/periodos", { method: "POST", json: nuevo });
+      const p = await api<Periodo>("/nomina/periodos", { method: "POST", json: { anio: nuevo.anio, mes: nuevo.mes, nomina: nuevo.nomina.split("-")[0], quincena: Number(nuevo.nomina.split("-")[1] ?? 2) } });
       router.push(`/nomina/periodos/${p.id}`);
     } catch (err) {
       setError(mensajeError(err));
@@ -46,7 +46,7 @@ export default function PeriodosNomina() {
     <div className="space-y-5">
       <Titulo>Validación de nómina</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Cada revisión es de una nómina: quincenal (2.ª quincena, del 16 al 30) o mensual (del 1 al 30). Se exigen todos los archivos del día;
+        Cada revisión es de una nómina: quincenal de la 1.ª quincena (del 1 al 15), quincenal de la 2.ª quincena (del 16 al 30) o mensual (del 1 al 30). Se exigen todos los archivos del día;
         después puede recargar solo la nómina, las veces que necesite, para ver qué se corrigió. Los grupos de &quot;los 7&quot; quedan por fuera.
       </p>
       {cargar && (
@@ -60,8 +60,9 @@ export default function PeriodosNomina() {
           </div>
           <div>
             <label className="label">Nómina</label>
-            <select className="input w-56" value={nuevo.nomina} onChange={(e) => setNuevo({ ...nuevo, nomina: e.target.value })}>
-              <option value="quincenal">Quincenal (2.ª quincena)</option>
+            <select className="input w-72" value={nuevo.nomina} onChange={(e) => setNuevo({ ...nuevo, nomina: e.target.value })}>
+              <option value="quincenal-1">Quincenal (1.ª quincena, del 1 al 15)</option>
+              <option value="quincenal-2">Quincenal (2.ª quincena, del 16 al 30)</option>
               <option value="mensual">Mensual (mes completo)</option>
             </select>
           </div>

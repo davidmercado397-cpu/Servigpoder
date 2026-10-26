@@ -177,6 +177,8 @@ class NomParametros(Base):
     horas_dia: Mapped[float] = mapped_column(Numeric(5, 2), default=7)  # horas de salario por día (HORAS_100)
     # Conceptos de cuota que en la nómina quincenal solo se descuentan en la primera quincena
     solo_primera_quincena: Mapped[str] = mapped_column(String(200), default="600,630,631,632")
+    # Conceptos de cuota que en la nómina quincenal solo se pagan en la segunda quincena (135 auxilio de movilidad admin.)
+    solo_segunda_quincena: Mapped[str] = mapped_column(String(200), default="135", server_default="135")
     # Conceptos que no entran en la base del embargo (además del auxilio de transporte 103)
     excluidos_base_embargo: Mapped[str] = mapped_column(String(200), default="103,132,142,143")
     # Embargos que se calculan sobre la base completa, sin restar el salario mínimo

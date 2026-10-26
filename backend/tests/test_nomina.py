@@ -73,6 +73,8 @@ def _cuotas() -> bytes:
         ["1009", "IVAN", "1", "605", "PRESTAMO EMPRESA", "3", 500000, 100000, 0, 50000, 0, "Inactivo"],
         # Rodamiento administrativo: en la nómina se paga con el concepto 129 RODAMIENTO
         ["1006", "FABIO", "1", "152", "RODAMIENTO_ADM", "4", 0, 0, 600000, 0, 0, "En Proceso"],
+        # Auxilio de movilidad administrativo: solo se paga en la 2.ª quincena (la nómina de prueba no lo trae)
+        ["1006", "FABIO", "1", "135", "AUXILIO DE MOVILIDAD ADMIN", "4", 0, 0, 150000, 0, 0, "En Proceso"],
         ["1009", "IVAN", "1", "152", "RODAMIENTO_ADM", "4", 0, 0, 300000, 0, 0, "En Proceso"],
     ])
 
@@ -185,7 +187,8 @@ def test_escenario_completo(admin):
     assert {("AUX_CERO", "103"), ("MODALIDAD_MAYOR", "130"), ("CUOTA_DE_MAS", "605")} <= a["1003"]
     assert {("NOMINA_SIN_PROGRAMACION", ""), ("DESCUENTO_SIN_SUELDO", ""), ("NETO_NEGATIVO", "")} <= a["1004"]
     assert a["1005"] == {("PROGRAMADO_SIN_NOMINA", "")}
-    assert a["1006"] == {("CUOTA_NO_DESCONTADA", "605")}  # administrativo: solo cuotas
+    # administrativo: solo cuotas; en la 2.ª quincena el auxilio de movilidad (135) sí se espera
+    assert a["1006"] == {("CUOTA_NO_DESCONTADA", "605"), ("CUOTA_DEVENGO_DIFERENTE", "135")}
     assert "1007" not in a and "1008" not in a
     # Iván: puesto con modalidad propia (6X1, 30.000/día) aunque la ubicación tenga otra; 15 días (XYZ no descuenta)
     # Préstamo inactivo que se sigue descontando y rodamiento (152) que no se pagó con el 129
@@ -359,6 +362,8 @@ def test_primera_quincena(admin):
     assert p["nombre"] == "Quincenal · 1.ª quincena de septiembre 2026" and p["quincena"] == 1 and p["calculado_en"]
     # La cuota 600 solo se descuenta en la 1.ª quincena: aquí se valida (a Ana no se le descontó)
     assert any(ref == "600" for _, ref in _alertas(admin, q1).get("1001", set()))
+    # El auxilio de movilidad administrativo (135) solo se paga en la 2.ª quincena: en la 1.ª no es alerta
+    assert not any(ref == "135" for _, ref in _alertas(admin, q1).get("1006", set()))
 
     # Pueden convivir la 1.ª, la 2.ª y la mensual del mismo mes; repetir una es un error
     q2 = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal"})

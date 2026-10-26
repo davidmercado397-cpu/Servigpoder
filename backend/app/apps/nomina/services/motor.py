@@ -68,6 +68,7 @@ class Parametros:
     auxilio_transporte: float = 249095
     horas_dia: float = 7
     solo_primera_quincena: set[str] = field(default_factory=lambda: {"600", "630", "631", "632"})
+    solo_segunda_quincena: set[str] = field(default_factory=lambda: {"135"})
     excluidos_base_embargo: set[str] = field(default_factory=lambda: {"103", "132", "142", "143"})
     embargos_sin_minimo: set[str] = field(default_factory=lambda: {"606"})
     # Concepto de cuota → conceptos de la nómina con que se paga (además del mismo código)
@@ -437,6 +438,8 @@ def _alertas_cuotas(per: dict, pago: dict, cuotas: list[dict], conceptos_cuota: 
         lista = activas.get(concepto, [])
         if nomina == QUINCENAL and quincena == 2 and concepto in p.solo_primera_quincena:
             continue  # en la 2.ª quincena estas cuotas no se descuentan (en la 1.ª sí)
+        if nomina == QUINCENAL and quincena == 1 and concepto in p.solo_segunda_quincena:
+            continue  # en la 1.ª quincena estas cuotas no se pagan (en la 2.ª sí)
         if concepto in p.conceptos_ajuste:
             continue  # ajustes por mayor o menor valor pagado: no se validan
         esperado = 0.0

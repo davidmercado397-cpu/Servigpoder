@@ -368,6 +368,7 @@ class ParametrosIn(BaseModel):
     auxilio_transporte: float = Field(ge=0, le=10_000_000)
     horas_dia: float = Field(gt=0, le=24)
     solo_primera_quincena: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
+    solo_segunda_quincena: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
     excluidos_base_embargo: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
     embargos_sin_minimo: str = Field(default="", max_length=200, pattern=r"^[\d,\s]*$")
     equivalencias_cuotas: str = Field(default="", max_length=200, pattern=r"^[\d,=+\s]*$")

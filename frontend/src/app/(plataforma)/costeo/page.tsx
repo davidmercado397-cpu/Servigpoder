@@ -44,7 +44,7 @@ export default function ResumenCosteo() {
         {tile("Pendiente (vigentes)", pesos(r.pendiente_vigentes), `Reembolso si terminaran hoy: ${pesos(r.reembolso_vigentes)}`)}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[2fr_1fr]">
+      <div className="grid gap-5 2xl:grid-cols-[2fr_1fr]">
         <div className="tarjeta overflow-x-auto">
           <h2 className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-700">Por ítem</h2>
           <table className="tabla">

@@ -64,3 +64,9 @@ body {
 .prose-asistente strong { @apply font-semibold text-slate-900; }
 .prose-asistente code { @apply rounded bg-slate-100 px-1 text-[12px]; }
 .prose-asistente h1, .prose-asistente h2, .prose-asistente h3 { @apply mt-2 mb-1 font-semibold text-marca-900; }
+
+/* Desarrollos: contenedores sobrios (borde fino, sin sombra) y títulos en gris oscuro.
+   El portal, la administración y la pantalla de ingreso conservan su estilo. */
+.app-limpia main .tarjeta { box-shadow: none; border-radius: 0.75rem; }
+.app-limpia main h1 { color: #0f172a; letter-spacing: -0.01em; }
+.app-limpia main .tabla th { background: transparent; color: #64748b; font-weight: 500; }

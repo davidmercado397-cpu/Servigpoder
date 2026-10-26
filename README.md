@@ -374,6 +374,10 @@ puesto: lo que se pacta con el cliente a nivel de contrato y el software contabl
   contrato**; lo no usado en el año se pierde). Cada pago, aplicación o solicitud de horas es un movimiento con
   fecha, soporte y quién lo registró. Un movimiento que supera lo pactado (o la bolsa del año) se rechaza; solo
   quien tiene el permiso `costeo.autorizar` lo registra, escribiendo la autorización.
+- **Soporte contable:** cada pago o aplicación de un ítem en pesos lleva el tipo de documento contable (catálogo
+  editable) y su número, y puede llevar hasta 5 archivos de soporte (PDF, PNG o JPG; 10 MB). Es la única parte de
+  la plataforma que guarda archivos: quedan en la base (tabla `cst_soporte`), se validan por su contenido y cada
+  consulta queda en la auditoría. En el resto de desarrollos los archivos se procesan y se descartan.
 - **Reembolso por terminación anticipada:** ejecutado × meses que faltaban ÷ duración, solo en los ítems
   reembolsables (configurable por tipo de ítem); lo pactado sin ejecutar se cancela; nunca es negativo. Se
   calcula a hoy, a una fecha simulada o a la fecha de terminación.

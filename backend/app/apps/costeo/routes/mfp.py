@@ -1,8 +1,11 @@
 """MFP: clientes, MFP, ítems pactados, movimientos (con tope y autorización), terminación, vistas y Excel."""
 
+import hashlib
+import re
 from collections import defaultdict
 from datetime import date
 from io import BytesIO
+from urllib.parse import quote
 
 import xlsxwriter
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
@@ -12,10 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, require
-from app.apps.costeo.models import UNIDADES, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstTipoItem
+from app.apps.costeo.models import UNIDADES, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstSoporte, CstTipoDocumento, CstTipoItem
 from app.apps.costeo.services import importador
 from app.apps.costeo.services.mfp import HORAS, resumen, tope_movimiento
 from app.core.archivos import leer_xlsx
+from app.core.rate_limit import limitar
 from app.core.auditoria import auditar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
@@ -25,7 +29,8 @@ VER, MOVIMIENTOS, GESTIONAR, CONFIGURAR, AUTORIZAR = "costeo.ver", "costeo.movim
 
 
 def _mfps(db: DbSession, ids: list[int] | None = None) -> list[CstMfp]:
-    q = select(CstMfp).options(selectinload(CstMfp.items).selectinload(CstMfpItem.movimientos)).order_by(CstMfp.id.desc())
+    q = select(CstMfp).options(selectinload(CstMfp.items).selectinload(CstMfpItem.movimientos).selectinload(CstMovimiento.soportes)) \
+        .order_by(CstMfp.id.desc())
     if ids is not None:
         q = q.where(CstMfp.id.in_(ids))
     return list(db.scalars(q).unique())
@@ -155,6 +160,8 @@ def _detalle(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
     movimientos = {it.id: it.movimientos for it in m.items}
     for i in r["items"]:
         i["movimientos"] = [{"id": x.id, "fecha": x.fecha.isoformat(), "valor": float(x.valor), "descripcion": x.descripcion,
+                             "tipo_documento": x.tipo_documento, "numero_documento": x.numero_documento,
+                             "soportes": [{"id": s.id, "nombre": s.nombre, "mime": s.mime, "bytes": s.bytes} for s in x.soportes],
                              "soporte": x.soporte, "excede": x.excede, "autorizacion": x.autorizacion,
                              "creado_en": x.creado_en.isoformat() if x.creado_en else ""}
                             for x in sorted(movimientos.get(i["id"], []), key=lambda x: (x.fecha, x.id), reverse=True)]
@@ -310,7 +317,9 @@ class MovimientoIn(BaseModel):
     fecha: date
     valor: float = Field(gt=0, le=1e13)
     descripcion: str = Field(min_length=2, max_length=300)
-    soporte: str = Field(default="", max_length=300)
+    tipo_documento: str = Field(default="", max_length=20)  # obligatorio en los ítems en pesos
+    numero_documento: str = Field(default="", max_length=40)
+    soporte: str = Field(default="", max_length=300)  # observación
     autorizacion: str = Field(default="", max_length=300)  # solo para superar el tope
 
 
@@ -325,6 +334,13 @@ def registrar(item_id: int, data: MovimientoIn, request: Request, db: DbSession,
         raise ApiError(422, "La fecha es anterior al inicio del contrato")
     if it.tipo.unidad == HORAS and m.terminada:
         raise ApiError(422, "La MFP está terminada: la bolsa de horas ya no está disponible")
+    tipo_doc, numero = data.tipo_documento.strip().upper(), data.numero_documento.strip()
+    if it.tipo.unidad != HORAS and (not tipo_doc or not numero):
+        raise ApiError(422, "Indique el tipo y el número del documento contable que respalda el movimiento")
+    if tipo_doc:
+        t = db.get(CstTipoDocumento, tipo_doc)
+        if t is None or not t.activo:
+            raise ApiError(422, f"Tipo de documento contable no válido: {tipo_doc}")
     exceso = tope_movimiento(m, it, data.valor, data.fecha)
     if exceso:
         if AUTORIZAR not in actual.permisos:
@@ -334,14 +350,17 @@ def registrar(item_id: int, data: MovimientoIn, request: Request, db: DbSession,
             raise ApiError(409, f"{exceso}. Escriba la autorización (quién lo aprobó y el soporte) para registrarlo.", "TOPE_EXCEDIDO",
                            details=[{"puede_autorizar": True}])
     mov = CstMovimiento(item_id=it.id, fecha=data.fecha, valor=data.valor, descripcion=data.descripcion.strip(), soporte=data.soporte.strip(),
+                        tipo_documento=tipo_doc, numero_documento=numero,
                         excede=bool(exceso), autorizacion=data.autorizacion.strip() if exceso else "",
                         autorizado_por=actual.id if exceso else None, creado_por=actual.id)
     db.add(mov)
+    db.flush()
+    mov_id = mov.id
     auditar(db, request, "cst_movimiento", actual.id, mfp=m.numero, tipo=it.tipo.codigo, valor=data.valor, fecha=data.fecha.isoformat(),
-            excede=bool(exceso))
+            documento=f"{tipo_doc} {numero}".strip(), excede=bool(exceso))
     db.commit()
     db.expire_all()
-    return ok(_detalle(_mfp(db, m.id), date.today()))
+    return ok(_detalle(_mfp(db, m.id), date.today()), movimiento_id=mov_id)
 
 
 @router.delete("/movimientos/{mov_id}", response_model=ApiResponse[dict])
@@ -356,6 +375,93 @@ def anular(mov_id: int, request: Request, db: DbSession, actual: Usuario = Depen
     db.commit()
     db.expire_all()
     return ok(_detalle(_mfp(db, mfp_id), date.today()))
+
+
+# --- Soportes contables (única excepción a "no guardar archivos": se conservan como evidencia) ---------
+
+MAX_SOPORTE = 10 * 1024 * 1024
+MAX_SOPORTES = 5
+FIRMAS = ((b"%PDF-", "application/pdf", ".pdf"), (b"\x89PNG\r\n\x1a\n", "image/png", ".png"), (b"\xff\xd8\xff", "image/jpeg", ".jpg"))
+
+
+def _tipo_archivo(contenido: bytes) -> tuple[str, str] | None:
+    return next(((mime, ext) for firma, mime, ext in FIRMAS if contenido.startswith(firma)), None)
+
+
+@router.post("/movimientos/{mov_id}/soportes", response_model=ApiResponse[dict], status_code=201,
+             dependencies=[Depends(limitar("cst_soporte", 30, 60))])
+async def adjuntar(mov_id: int, request: Request, db: DbSession, archivo: UploadFile = File(...), actual: Usuario = Depends(require(MOVIMIENTOS))):
+    """Adjunta el soporte contable (PDF, PNG o JPG; máx. 10 MB) a un movimiento. Se valida por su contenido real."""
+    mov = db.get(CstMovimiento, mov_id)
+    if mov is None:
+        raise ApiError(404, "Movimiento no encontrado")
+    if len(mov.soportes) >= MAX_SOPORTES:
+        raise ApiError(409, f"El movimiento ya tiene {MAX_SOPORTES} soportes")
+    try:
+        contenido = await archivo.read(MAX_SOPORTE + 1)
+    finally:
+        await archivo.close()
+    if len(contenido) > MAX_SOPORTE:
+        raise ApiError(413, "El soporte supera los 10 MB")
+    tipo = _tipo_archivo(contenido)
+    if tipo is None:
+        raise ApiError(415, "Solo se aceptan soportes en PDF, PNG o JPG")
+    mime, ext = tipo
+    base = re.sub(r"[^\w.\- ]+", "_", (archivo.filename or "soporte").rsplit(".", 1)[0]).strip()[:150] or "soporte"
+    s = CstSoporte(movimiento_id=mov.id, nombre=base + ext, mime=mime, bytes=len(contenido), sha256=hashlib.sha256(contenido).hexdigest(),
+                   contenido=contenido, cargado_por=actual.id)
+    db.add(s)
+    db.flush()
+    auditar(db, request, "cst_soporte_cargado", actual.id, movimiento_id=mov.id, archivo=s.nombre, bytes=s.bytes, sha256=s.sha256)
+    db.commit()
+    return ok({"id": s.id, "nombre": s.nombre, "mime": s.mime, "bytes": s.bytes})
+
+
+@router.get("/soportes/{soporte_id}")
+def descargar_soporte(soporte_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    s = db.get(CstSoporte, soporte_id)
+    if s is None:
+        raise ApiError(404, "Soporte no encontrado")
+    auditar(db, request, "cst_soporte_consultado", actual.id, soporte_id=s.id, movimiento_id=s.movimiento_id)
+    db.commit()
+    return RespuestaCruda(s.contenido, media_type=s.mime, headers={
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(s.nombre)}",
+        "Cache-Control": "private, no-store",  # nosniff ya lo pone el middleware de seguridad
+    })
+
+
+@router.delete("/soportes/{soporte_id}", response_model=ApiResponse[dict])
+def quitar_soporte(soporte_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    s = db.get(CstSoporte, soporte_id)
+    if s is None:
+        raise ApiError(404, "Soporte no encontrado")
+    auditar(db, request, "cst_soporte_eliminado", actual.id, movimiento_id=s.movimiento_id, archivo=s.nombre, sha256=s.sha256)
+    db.delete(s)
+    db.commit()
+    return ok({"eliminado": soporte_id})
+
+
+class TipoDocumentoIn(BaseModel):
+    codigo: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9_-]+$")
+    nombre: str = Field(min_length=2, max_length=120)
+    activo: bool = True
+
+
+@router.get("/tipos-documento", response_model=ApiResponse[list[dict]])
+def tipos_documento(db: DbSession, _=Depends(require(VER))):
+    return ok([{"codigo": t.codigo, "nombre": t.nombre, "activo": t.activo}
+               for t in db.scalars(select(CstTipoDocumento).order_by(CstTipoDocumento.codigo))])
+
+
+@router.put("/tipos-documento", response_model=ApiResponse[dict])
+def guardar_tipo_documento(data: TipoDocumentoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+    codigo = data.codigo.strip().upper()
+    t = db.get(CstTipoDocumento, codigo) or CstTipoDocumento(codigo=codigo)
+    t.nombre, t.activo = data.nombre.strip(), data.activo
+    db.add(t)
+    auditar(db, request, "cst_tipo_documento", actual.id, codigo=codigo, nombre=t.nombre, activo=t.activo)
+    db.commit()
+    return ok({"codigo": t.codigo, "nombre": t.nombre, "activo": t.activo})
 
 
 # --- Vistas generales ---------------------------------------------------------------------------------

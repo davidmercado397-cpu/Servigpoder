@@ -122,7 +122,8 @@ def test_mfp_topes_horas_y_reembolso(admin):
     hoy = date.today()
     reinv = _item(m, "REINVERSION")
     mov = lambda it, v, f=hoy, **x: admin.post(f"{API}/items/{it['id']}/movimientos",  # noqa: E731
-                                                json={"fecha": f.isoformat(), "valor": v, "descripcion": "Pago", **x})
+                                                json={"fecha": f.isoformat(), "valor": v, "descripcion": "Pago", "tipo_documento": "CE",
+                                                      "numero_documento": "1001", **x})
     assert mov(reinv, 30_000_000).status_code == 201
 
     # Superar lo pactado: sin la autorización escrita no se registra; el administrador puede autorizarlo
@@ -256,3 +257,38 @@ def test_costeo_aprobado_crea_la_mfp(admin):
     v2 = admin.post(f"{API}/costeos/{c['id']}/version").json()["data"]
     assert v2["version"] == 2 and v2["estado"] == "borrador"
     assert admin.post(f"{API}/costeos/calcular", json=PALMASECA).json()["data"]["costos"]["renta"] == 0
+
+
+def test_documento_y_soportes(admin):
+    m = _mfp(admin)
+    reinv = _item(m, "REINVERSION")
+    url = f"{API}/items/{reinv['id']}/movimientos"
+    base = {"fecha": date.today().isoformat(), "valor": 1_000_000, "descripcion": "Pago bono"}
+    # En los ítems en pesos el documento contable es obligatorio y su tipo sale del catálogo
+    assert admin.post(url, json=base).status_code == 422
+    assert admin.post(url, json={**base, "tipo_documento": "XX", "numero_documento": "1"}).status_code == 422
+    r = admin.post(url, json={**base, "tipo_documento": "ce", "numero_documento": "CE-4521"})
+    assert r.status_code == 201
+    mov_id = r.json()["meta"]["extra"]["movimiento_id"]
+    # La solicitud de horas no lleva documento contable
+    horas = _item(m, "BOLSA_HORAS")
+    assert admin.post(f"{API}/items/{horas['id']}/movimientos", json={**base, "valor": 2}).status_code == 201
+
+    pdf = b"%PDF-1.4 1 0 obj<<>>endobj trailer<<>> %%EOF"
+    r = admin.post(f"{API}/movimientos/{mov_id}/soportes", files={"archivo": ("Egreso 4521 ../x.pdf", pdf, "application/pdf")})
+    assert r.status_code == 201, r.text
+    sop = r.json()["data"]
+    assert sop["mime"] == "application/pdf" and sop["nombre"].endswith(".pdf") and "/" not in sop["nombre"]
+    # Solo PDF o imágenes, validados por su contenido
+    assert admin.post(f"{API}/movimientos/{mov_id}/soportes", files={"archivo": ("x.pdf", b"MZ ejecutable", "application/pdf")}).status_code == 415
+    det = admin.get(f"{API}/mfp/{m['id']}").json()["data"]
+    mov = next(x for x in _item(det, "REINVERSION")["movimientos"] if x["id"] == mov_id)
+    assert (mov["tipo_documento"], mov["numero_documento"]) == ("CE", "CE-4521") and mov["soportes"][0]["id"] == sop["id"]
+    d = admin.get(f"{API}/soportes/{sop['id']}")
+    assert d.status_code == 200 and d.content == pdf and d.headers["x-content-type-options"] == "nosniff"
+    assert admin.get("/api/plataforma/auditoria?accion=cst_soporte_consultado").json()["data"]
+    assert admin.delete(f"{API}/soportes/{sop['id']}").status_code == 200
+    assert admin.get(f"{API}/soportes/{sop['id']}").status_code == 404
+    # Catálogo de tipos de documento editable
+    assert admin.put(f"{API}/tipos-documento", json={"codigo": "cxp", "nombre": "Cuenta por pagar"}).json()["data"]["codigo"] == "CXP"
+    assert any(t["codigo"] == "CXP" for t in admin.get(f"{API}/tipos-documento").json()["data"])

@@ -4,7 +4,10 @@ export { pesos } from "@/lib/formato";
 export type Cliente = { id: number; nit: string; nombre: string };
 export type TipoItem = { id: number; codigo: string; nombre: string; unidad: "pesos" | "pesos_mes" | "horas"; reembolsable: boolean; cuenta_en_mfp: boolean; activo: boolean };
 export type AlertaMfp = { tipo: string; severidad: "alta" | "media" | "baja"; mensaje: string };
-export type Movimiento = { id: number; fecha: string; valor: number; descripcion: string; soporte: string; excede: boolean; autorizacion: string; creado_en: string };
+export type Soporte = { id: number; nombre: string; mime: string; bytes: number };
+export type Movimiento = { id: number; fecha: string; valor: number; descripcion: string; tipo_documento: string; numero_documento: string;
+  soportes: Soporte[]; soporte: string; excede: boolean; autorizacion: string; creado_en: string };
+export type TipoDocumento = { codigo: string; nombre: string; activo: boolean };
 export type AnioBolsa = { anio: number; desde: string | null; hasta: string | null; pactado: number; usado: number; saldo: number; vencido: boolean; actual: boolean };
 export type ItemMfp = {
   id: number; tipo: string; tipo_codigo: string; unidad: TipoItem["unidad"]; descripcion: string; reembolsable: boolean; cuenta_en_mfp: boolean;

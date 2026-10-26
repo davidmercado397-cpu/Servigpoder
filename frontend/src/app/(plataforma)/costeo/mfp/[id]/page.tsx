@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Paperclip, Pencil, Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { Modal, ModalMovimiento } from "@/components/costeo";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { ACEPTA_SOPORTE, MAX_SOPORTES, Modal, ModalMovimiento, subirSoportes } from "@/components/costeo";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { ESTADO_MFP, SEVERIDAD, UNIDAD, fecha, hoyISO, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
@@ -133,14 +133,32 @@ export default function DetalleMfp() {
                         )}
                         {(it.movimientos ?? []).length === 0 ? <p className="text-sm text-slate-500">Sin movimientos.</p> : (
                           <table className="w-full text-sm">
-                            <thead><tr className="text-left text-xs text-slate-500"><th className="py-1">Fecha</th><th>Valor</th><th>Descripción</th><th>Soporte</th><th>Autorización</th><th /></tr></thead>
+                            <thead><tr className="text-left text-xs text-slate-500"><th className="py-1">Fecha</th><th>Valor</th><th>Descripción</th><th>Documento</th><th>Soportes</th><th>Autorización</th><th /></tr></thead>
                             <tbody>
                               {it.movimientos!.map((x) => (
                                 <tr key={x.id} className="border-t border-slate-200">
                                   <td className="py-1">{fecha(x.fecha)}</td>
                                   <td className="tabular-nums">{valorItem(x.valor, it.unidad)}</td>
-                                  <td>{x.descripcion}</td>
-                                  <td className="text-slate-500">{x.soporte}</td>
+                                  <td>{x.descripcion}{x.soporte && <p className="text-xs text-slate-500">{x.soporte}</p>}</td>
+                                  <td className="whitespace-nowrap">{x.tipo_documento || x.numero_documento ? `${x.tipo_documento} ${x.numero_documento}`.trim() : <span className="text-slate-400">—</span>}</td>
+                                  <td>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {x.soportes.map((s) => (
+                                        <span key={s.id} className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs">
+                                          <a className="inline-flex items-center gap-1 text-marca-700 hover:underline" href={`/api/costeo/soportes/${s.id}`} target="_blank" rel="noopener noreferrer" title={s.nombre}>
+                                            <Paperclip className="h-3 w-3" /><span className="max-w-[9rem] truncate">{s.nombre}</span>
+                                          </a>
+                                          {gestionar && (
+                                            <button aria-label="Quitar soporte" className="text-slate-400 hover:text-red-600"
+                                              onClick={async () => { if (!confirm(`¿Quitar el soporte «${s.nombre}»?`)) return; try { await api(`/costeo/soportes/${s.id}`, { method: "DELETE" }); cargar(); } catch (e) { setError(mensajeError(e)); } }}>
+                                              <X className="h-3 w-3" />
+                                            </button>
+                                          )}
+                                        </span>
+                                      ))}
+                                      {registrar && x.soportes.length < MAX_SOPORTES && <Adjuntar movimientoId={x.id} onListo={cargar} onError={setError} />}
+                                    </div>
+                                  </td>
                                   <td>{x.excede && <span className="inline-flex items-center gap-1 text-xs text-red-700"><ShieldAlert className="h-3.5 w-3.5" />{x.autorizacion}</span>}</td>
                                   <td className="text-right">{gestionar && (
                                     <button title="Eliminar movimiento" onClick={() => confirm("¿Eliminar este movimiento?") && accion(() => api(`/costeo/movimientos/${x.id}`, { method: "DELETE" }))}>
@@ -182,6 +200,28 @@ export default function DetalleMfp() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function Adjuntar({ movimientoId, onListo, onError }: { movimientoId: number; onListo: () => void; onError: (e: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  return (
+    <>
+      <input ref={input} type="file" multiple accept={ACEPTA_SOPORTE} className="hidden" onChange={async (e) => {
+        const lista = Array.from(e.target.files ?? []);
+        e.target.value = "";
+        if (!lista.length) return;
+        setSubiendo(true);
+        const fallas = await subirSoportes(movimientoId, lista);
+        setSubiendo(false);
+        if (fallas.length) onError(`No se pudieron subir: ${fallas.join(" · ")}`);
+        onListo();
+      }} />
+      <button className="inline-flex items-center gap-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-marca-700" disabled={subiendo} onClick={() => input.current?.click()}>
+        <Paperclip className="h-3 w-3" />{subiendo ? "Subiendo…" : "Adjuntar"}
+      </button>
+    </>
   );
 }
 

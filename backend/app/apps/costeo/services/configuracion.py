@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.apps.costeo.models import (
-    HORAS, PESOS, PESOS_MES, CstCatalogoCosto, CstComisionRango, CstParametro, CstServicio, CstTipoItem,
+    HORAS, PESOS, PESOS_MES, CstCatalogoCosto, CstComisionRango, CstParametro, CstServicio, CstTipoDocumento, CstTipoItem,
 )
 from app.apps.costeo.services.calculo import CARGA_PRESTACIONAL, COMISIONES, PARAMETROS, Rango
 
@@ -65,6 +65,10 @@ OTROS = [
     ("VISITRACK (MENSUAL)", 69020, 1), ("TARJETAS VIP", 2500000, 60), ("BONO TARIFA", 0, None),
     ("DISPENSADOR DE AGUA FRÍA Y CALIENTE", 1106700, None), ("IN HOUSE / AUXILIOS (MENSUAL)", 2500000, 1),
 ]
+# Tipos de documento contable de partida (editables en Configuración)
+TIPOS_DOCUMENTO = [("CE", "Comprobante de egreso"), ("FV", "Factura de venta"), ("FC", "Factura de compra / proveedor"),
+                   ("NC", "Nota crédito"), ("ND", "Nota débito"), ("RC", "Recibo de caja"), ("NCT", "Nota de contabilidad / cruce"),
+                   ("OC", "Orden de compra")]
 POR_HOMBRE_PUESTO = {"CHAQUETAS", "PITOS", "BOTAS PANTANERAS"}
 
 
@@ -93,6 +97,9 @@ def sembrar(db: Session) -> None:
                                     por_hombre=nombre in POR_HOMBRE_PUESTO, fuente=fuente_d))
         for nombre, valor, vida in OTROS:
             db.add(CstCatalogoCosto(grupo="otros", nombre=nombre, valor_unitario=valor, vida_util_meses=vida))
+    if db.scalar(select(CstTipoDocumento).limit(1)) is None:
+        for codigo, nombre in TIPOS_DOCUMENTO:
+            db.add(CstTipoDocumento(codigo=codigo, nombre=nombre))
     db.flush()
 
 

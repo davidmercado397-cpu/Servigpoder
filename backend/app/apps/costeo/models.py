@@ -9,7 +9,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import BaseEmpresa as Base
@@ -104,7 +104,10 @@ class CstMovimiento(Base):
     fecha: Mapped[date] = mapped_column(Date)
     valor: Mapped[float] = mapped_column(Numeric(16, 2))  # pesos u horas, según la unidad del ítem
     descripcion: Mapped[str] = mapped_column(String(300), default="")  # motivo: "2 h de acompañamiento por cumpleaños"
-    soporte: Mapped[str] = mapped_column(String(300), default="")  # factura cruzada, proveedor, orden…
+    # Documento contable que respalda el movimiento (tipo del catálogo y número)
+    tipo_documento: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    numero_documento: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    soporte: Mapped[str] = mapped_column(String(300), default="")  # observación: proveedor, factura cruzada…
     # Si superó lo pactado: quién lo autorizó y con qué soporte
     excede: Mapped[bool] = mapped_column(Boolean, default=False)
     autorizacion: Mapped[str] = mapped_column(String(300), default="")
@@ -113,6 +116,37 @@ class CstMovimiento(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     item: Mapped[CstMfpItem] = relationship(back_populates="movimientos")
+    soportes: Mapped[list["CstSoporte"]] = relationship(back_populates="movimiento", cascade="all, delete-orphan",
+                                                         passive_deletes=True, order_by="CstSoporte.id")
+
+
+class CstTipoDocumento(Base):
+    """Tipos de documento contable (comprobante de egreso, factura, nota crédito…): catálogo editable."""
+
+    __tablename__ = "cst_tipo_documento"
+
+    codigo: Mapped[str] = mapped_column(String(20), primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120))
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CstSoporte(Base):
+    """Archivo del soporte contable de un movimiento (PDF o imagen), guardado en la base para consultarlo luego.
+    Es la excepción a "no guardar archivos": el soporte es evidencia y se pidió conservarlo."""
+
+    __tablename__ = "cst_soporte"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    movimiento_id: Mapped[int] = mapped_column(ForeignKey("cst_movimiento.id", ondelete="CASCADE"), index=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+    mime: Mapped[str] = mapped_column(String(60))
+    bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    contenido: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)  # solo se lee al descargarlo
+    cargado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    movimiento: Mapped[CstMovimiento] = relationship(back_populates="soportes")
 
 
 # ---------------- Costeo ----------------

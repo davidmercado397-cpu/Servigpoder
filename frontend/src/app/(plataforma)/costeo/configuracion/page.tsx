@@ -4,10 +4,10 @@ import { Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Pestanas, Titulo } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
-import { UNIDAD, pesos, type TipoItem } from "@/lib/costeo";
+import { UNIDAD, pesos, type TipoDocumento, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
-type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "dotacion_puesto" | "otros" | "tipos";
+type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "dotacion_puesto" | "otros" | "tipos" | "documentos";
 type Parametro = { clave: string; valor: number; nombre: string; grupo: string; ayuda: string };
 type RangoC = { hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type Servicio = { id?: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
@@ -15,7 +15,7 @@ type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: nu
 
 const PESTANAS: [Pestana, string][] = [
   ["parametros", "Parámetros"], ["comisiones", "Comisiones"], ["servicios", "Servicios y tarifas"], ["dotacion_tarifa", "Dotación de la tarifa"],
-  ["dotacion_puesto", "Dotación del puesto"], ["otros", "Otros costos directos"], ["tipos", "Ítems de MFP"],
+  ["dotacion_puesto", "Dotación del puesto"], ["otros", "Otros costos directos"], ["tipos", "Ítems de MFP"], ["documentos", "Documentos contables"],
 ];
 
 export default function Configuracion() {
@@ -34,6 +34,7 @@ export default function Configuracion() {
       {p === "servicios" && <Servicios puede={puede} />}
       {(p === "dotacion_tarifa" || p === "dotacion_puesto" || p === "otros") && <Catalogo key={p} grupo={p} puede={puede} />}
       {p === "tipos" && <Tipos puede={puede} />}
+      {p === "documentos" && <Documentos puede={puede} />}
     </>
   );
 }
@@ -247,6 +248,44 @@ function Tipos({ puede }: { puede: boolean }) {
         <tbody>{lista.map((t) => (
           <tr key={t.id} className={t.activo ? "" : "opacity-50"}>
             <td className="font-mono text-xs">{t.codigo}</td><td>{t.nombre}</td><td>{UNIDAD[t.unidad]}</td><td>{t.reembolsable ? "Sí" : "No"}</td><td>{t.cuenta_en_mfp ? "Sí" : "No"}</td>
+            <td>{puede && <button onClick={() => setEdicion(t)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function Documentos({ puede }: { puede: boolean }) {
+  const [lista, setLista] = useState<TipoDocumento[]>([]);
+  const [edicion, setEdicion] = useState<TipoDocumento | null>(null);
+  const m = useMensaje();
+  const cargar = useCallback(() => api<TipoDocumento[]>("/costeo/tipos-documento").then(setLista).catch(m.error), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+  return (
+    <div className="tarjeta max-w-3xl overflow-hidden">
+      <div className="p-4">{m.vista}
+        <p className="mb-3 text-sm text-slate-500">Tipos de documento contable con que se respalda cada pago o aplicación de una MFP (comprobante de egreso, factura, nota crédito…).</p>
+        {puede && !edicion && <button className="btn-primario" onClick={() => setEdicion({ codigo: "", nombre: "", activo: true })}><Plus className="h-4 w-4" /> Tipo de documento</button>}
+        {edicion && (
+          <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto_auto] sm:items-end">
+            <div><label className="label">Código</label><input className="input uppercase" value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value.toUpperCase() })} /></div>
+            <div><label className="label">Nombre</label><input className="input" value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} /></div>
+            <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={edicion.activo} onChange={(e) => setEdicion({ ...edicion, activo: e.target.checked })} /> Activo</label>
+            <div className="flex gap-2"><button className="btn-secundario" onClick={() => setEdicion(null)}>Cancelar</button>
+              <button className="btn-primario" onClick={async () => {
+                try { await api("/costeo/tipos-documento", { method: "PUT", json: edicion }); setEdicion(null); m.ok("Tipo de documento guardado."); cargar(); } catch (e) { m.error(e); }
+              }}>Guardar</button></div>
+          </div>
+        )}
+      </div>
+      <table className="tabla">
+        <thead><tr><th>Código</th><th>Nombre</th><th>Estado</th><th /></tr></thead>
+        <tbody>{lista.map((t) => (
+          <tr key={t.codigo} className={t.activo ? "" : "opacity-50"}>
+            <td className="font-mono text-xs">{t.codigo}</td><td>{t.nombre}</td><td>{t.activo ? "Activo" : "Inactivo"}</td>
             <td>{puede && <button onClick={() => setEdicion(t)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}</td>
           </tr>
         ))}</tbody>

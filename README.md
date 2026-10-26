@@ -364,6 +364,32 @@ convierte con una regla o se reporta; nunca se inventa.
 - **Configuración:** alias (texto → código, se crean desde la tabla de errores con un clic), correcciones manuales
   por cédula y columna, catálogos de entidades y salario mínimo por año.
 
+## Costeo y MFP's
+
+Desarrollo de Servigpoder para el costeo de servicios y el control de las **MFP** (matriz de fortalecimiento de
+puesto: lo que se pacta con el cliente a nivel de contrato y el software contable no controla).
+
+- **MFP:** cada MFP tiene sus ítems pactados en pesos (bono, equipos, capacitación, nota crédito), pesos por mes
+  (plan celular, mantenimientos: se causan mes a mes) u horas (bolsa de horas de obsequio **por cada año de
+  contrato**; lo no usado en el año se pierde). Cada pago, aplicación o solicitud de horas es un movimiento con
+  fecha, soporte y quién lo registró. Un movimiento que supera lo pactado (o la bolsa del año) se rechaza; solo
+  quien tiene el permiso `costeo.autorizar` lo registra, escribiendo la autorización.
+- **Reembolso por terminación anticipada:** ejecutado × meses que faltaban ÷ duración, solo en los ítems
+  reembolsables (configurable por tipo de ítem); lo pactado sin ejecutar se cancela; nunca es negativo. Se
+  calcula a hoy, a una fecha simulada o a la fecha de terminación.
+- **Vistas:** resumen general y por ítem, MFP con totales y filtros, clientes con totales, bolsas de horas
+  (para programación y comercial) y Excel. Alertas: ejecutado mayor que lo pactado, % de MFP mayor que el
+  comercial, contratos por vencer con saldo, bolsa agotada, datos incompletos.
+- **Carga inicial:** importa el Excel "MFP GENERAL" (hoja de Servigpoder; la de otras empresas queda fuera) sin
+  duplicar lo ya importado.
+- **Costeo:** por cliente, con versiones y estados (borrador, enviado, aprobado, rechazado). Todos los valores
+  son editables en Configuración (parámetros laborales, impuestos, publicidad, representación, cupo de
+  inversión, tabla de comisiones con la carga prestacional, servicios, catálogos de dotación y otros costos,
+  tipos de ítem). Las horas extras son el valor negociado con el cliente. Un costeo aprobado congela los
+  parámetros con que se aprobó y crea la MFP del contrato (nota crédito, cupo de inversión, otros costos, bolsa
+  de horas y bolsas internas de publicidad y representación). El motor (`services/calculo.py`) está probado
+  contra los valores del Excel de Palmaseca.
+
 ## Empresas
 
 Los desarrollos son por empresa (Servigpoder, SERA…) y **no comparten datos**: cada empresa tiene su propio

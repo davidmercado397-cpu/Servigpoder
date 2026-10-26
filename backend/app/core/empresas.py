@@ -26,7 +26,7 @@ PATRON_CODIGO = re.compile(r"^[a-z][a-z0-9]{1,19}$")
 # Empresas con las que arranca la plataforma: los datos que existían eran de Servigpoder, salvo los del
 # Liquidador de horas, que son de SERA (migración 0014).
 EMPRESAS_INICIALES = (
-    ("servigpoder", "Servigpoder", ("capacidad", "nomina", "reporte", "siesa", "planos")),
+    ("servigpoder", "Servigpoder", ("capacidad", "nomina", "reporte", "siesa", "planos", "costeo")),
     ("sera", "SERA", ("liquidador",)),
 )
 

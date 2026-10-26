@@ -23,7 +23,7 @@ from app.seed import seed
 
 CSRF = {"X-Requested-With": "fetch"}
 # Acceso a todos los desarrollos de las empresas iniciales (lo que puede hacer cada uno lo definen sus roles)
-ACCESOS = {"servigpoder": ["capacidad", "nomina", "reporte", "siesa", "planos"], "sera": ["liquidador"]}
+ACCESOS = {"servigpoder": ["capacidad", "nomina", "reporte", "siesa", "planos", "costeo"], "sera": ["liquidador"]}
 
 
 # Estado de MFA y contraseñas de los usuarios de prueba (se reinicia en cada prueba)

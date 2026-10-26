@@ -9,7 +9,8 @@ import { api } from "@/lib/api";
 import { SelectorEmpresa } from "@/components/selector-empresa";
 import { useSesion } from "@/lib/sesion";
 
-/** Panel lateral claro (el color de la marca solo en el ícono de la app), barra superior y asistente comunes a los desarrollos. */
+/** Panel lateral con el color de la marca en diseño sobrio (plano), contenido sobre gris suave, barra superior y asistente
+    comunes a los desarrollos. */
 
 export type ItemMenu = { href: string; texto: string; icono: LucideIcon; permiso?: string; contador?: string; critico?: boolean };
 export type GrupoMenu = { grupo: string; items: ItemMenu[] };
@@ -79,14 +80,14 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
   const rol = sesion.roles.map((r) => r.nombre).join(", ") || "Sin rol";
   const fecha = new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-  const enlace = "flex items-center gap-3 rounded-lg py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900";
+  const enlace = "flex items-center gap-3 rounded-lg py-2 text-sm text-slate-300 transition hover:bg-white/[0.07] hover:text-white";
 
   return (
-    <div className="app-limpia flex min-h-screen bg-white">
+    <div className="app-limpia flex min-h-screen bg-[#eef1f5]">
       {movilAbierto && <div className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden" onClick={() => setMovilAbierto(false)} />}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-slate-200 bg-slate-50 text-slate-600 transition-all duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-(--barra-desde) text-slate-300 transition-all duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0
           ${movilAbierto ? "translate-x-0" : "-translate-x-full"} ${angosto ? "w-[72px]" : "w-64"}`}
       >
         {/* App: el color de la marca solo en el ícono */}
@@ -96,11 +97,11 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
           </div>
           {!angosto && (
             <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-[15px] font-semibold text-slate-900">{nombre}</p>
-              <p className="truncate text-xs font-medium text-marca-600">{subtitulo}</p>
+              <p className="truncate text-[15px] font-semibold text-white">{nombre}</p>
+              <p className="truncate text-xs font-medium text-acento-300">{subtitulo}</p>
             </div>
           )}
-          <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden" onClick={() => setMovilAbierto(false)} aria-label="Cerrar menú">
+          <button className="rounded-md p-1 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setMovilAbierto(false)} aria-label="Cerrar menú">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -110,9 +111,9 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
           {visibles.map(({ grupo, items }) => (
             <div key={grupo}>
               {angosto ? (
-                <div className="mx-auto mb-2 h-px w-8 bg-slate-200" />
+                <div className="mx-auto mb-2 h-px w-8 bg-white/10" />
               ) : (
-                <p className="mb-1 px-3 text-xs font-medium text-slate-400">{grupo}</p>
+                <p className="mb-1 px-3 text-xs font-medium text-white/45">{grupo}</p>
               )}
               <ul className="space-y-0.5">
                 {items.map((i) => {
@@ -126,9 +127,9 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
                         title={angosto ? `${i.texto}${n ? ` (${n})` : ""}` : undefined}
                         className={`relative flex items-center gap-3 rounded-lg border py-2 text-sm transition
                           ${angosto ? "justify-center px-2" : "px-3"}
-                          ${on ? "border-slate-200 bg-white font-medium text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.05)]" : "border-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
+                          ${on ? "border-white/10 bg-white/[0.10] font-medium text-white" : "border-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white"}`}
                       >
-                        <Icono className={`h-[18px] w-[18px] shrink-0 ${on ? "text-marca-600" : "text-slate-400"}`} strokeWidth={1.9} />
+                        <Icono className={`h-[18px] w-[18px] shrink-0 ${on ? "text-acento-300" : "text-slate-400"}`} strokeWidth={1.9} />
                         {!angosto && <span className="flex-1 truncate">{i.texto}</span>}
                         {n > 0 && (
                           <span
@@ -147,7 +148,7 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
           ))}
         </nav>
 
-        <div className="space-y-0.5 border-t border-slate-200 px-3 py-2">
+        <div className="space-y-0.5 border-t border-white/10 px-3 py-2">
           <Link href="/" title={angosto ? "Portal de aplicaciones" : undefined} className={`${enlace} ${angosto ? "justify-center px-2" : "px-3"}`}>
             <LayoutGrid className="h-[18px] w-[18px] text-slate-400" strokeWidth={1.9} />
             {!angosto && "Portal de aplicaciones"}
@@ -165,21 +166,21 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
         </div>
 
         {/* Usuario */}
-        <div className={`border-t border-slate-200 ${angosto ? "px-2 py-3" : "px-4 py-3"}`}>
+        <div className={`border-t border-white/10 ${angosto ? "px-2 py-3" : "px-4 py-3"}`}>
           <div className={`flex items-center gap-2.5 ${angosto ? "flex-col" : ""}`}>
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700" title={angosto ? `${sesion.nombre} · ${rol}` : undefined}>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-semibold text-white" title={angosto ? `${sesion.nombre} · ${rol}` : undefined}>
               {iniciales(sesion.nombre)}
             </div>
             {!angosto && (
               <div className="min-w-0 flex-1 leading-tight">
-                <p className="truncate text-sm font-medium text-slate-900">{sesion.nombre}</p>
-                <p className="truncate text-[11px] text-slate-500">{rol}</p>
+                <p className="truncate text-sm font-medium text-white">{sesion.nombre}</p>
+                <p className="truncate text-[11px] text-slate-400">{rol}</p>
               </div>
             )}
-            <Link href="/cuenta" className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title="Seguridad de mi cuenta" aria-label="Seguridad de mi cuenta">
+            <Link href="/cuenta" className="rounded-md p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white" title="Seguridad de mi cuenta" aria-label="Seguridad de mi cuenta">
               <KeyRound className="h-4 w-4" />
             </Link>
-            <button onClick={salir} className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title="Cerrar sesión" aria-label="Cerrar sesión">
+            <button onClick={salir} className="rounded-md p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white" title="Cerrar sesión" aria-label="Cerrar sesión">
               <LogOut className="h-4 w-4" />
             </button>
           </div>
@@ -188,7 +189,7 @@ export function ShellApp({ nombre, subtitulo, icono: IconoApp, inicio, menu, con
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Barra superior: sección actual, empresa, fecha y alertas (sin cambios de contenido) */}
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-100 bg-white/90 px-4 backdrop-blur lg:px-10">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[#dfe4eb] bg-[#f6f7f9]/95 px-4 backdrop-blur lg:px-10">
           <button className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setMovilAbierto(true)} aria-label="Abrir menú">
             <Menu className="h-5 w-5" />
           </button>

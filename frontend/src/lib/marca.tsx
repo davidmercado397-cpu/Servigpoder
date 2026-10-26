@@ -51,20 +51,18 @@ export function variables(m: Marca): Record<string, string> {
 function aplicar(m: Marca) {
   const raiz = document.documentElement;
   Object.entries(variables(m)).forEach(([k, v]) => raiz.style.setProperty(k, v));
+  // Un solo ícono, el de la marca: se quita cualquier otro y se deja de último en <head> (el navegador usa el último)
   let icono = document.querySelector<HTMLLinkElement>("link[rel='icon'][data-marca]");
-  if (m.favicon) {
-    if (!icono) {
-      document.querySelectorAll("link[rel~='icon']").forEach((l) => l.remove());
-      icono = document.createElement("link");
-      icono.rel = "icon";
-      icono.dataset.marca = "1";
-      document.head.appendChild(icono);
-    }
-    icono.type = "image/png";
-    icono.href = m.favicon.url;
-  } else if (icono) {
-    icono.href = "/favicon.ico";
+  document.querySelectorAll<HTMLLinkElement>("link[rel~='icon']").forEach((l) => l !== icono && l.remove());
+  if (!icono) {
+    icono = document.createElement("link");
+    icono.rel = "icon";
+    icono.dataset.marca = "1";
   }
+  icono.type = m.favicon ? "image/png" : "image/x-icon";
+  const href = m.favicon ? m.favicon.url : "/favicon.ico";
+  if (icono.getAttribute("href") !== href) icono.setAttribute("href", href);
+  document.head.appendChild(icono);
   if (document.title === MARCA_INICIAL.nombre || !document.title) document.title = m.nombre;
 }
 

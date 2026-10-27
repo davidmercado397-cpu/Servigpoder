@@ -122,7 +122,7 @@ def test_mfp_topes_horas_y_reembolso(admin):
     hoy = date.today()
     reinv = _item(m, "REINVERSION")
     mov = lambda it, v, f=hoy, **x: admin.post(f"{API}/items/{it['id']}/movimientos",  # noqa: E731
-                                                json={"fecha": f.isoformat(), "valor": v, "descripcion": "Pago", "tipo_documento": "CE",
+                                                json={"fecha": f.isoformat(), "valor": v, "descripcion": "Pago", "tipo_documento": "PEL",
                                                       "numero_documento": "1001", **x})
     assert mov(reinv, 30_000_000).status_code == 201
 
@@ -267,7 +267,7 @@ def test_documento_y_soportes(admin):
     # En los ítems en pesos el documento contable es obligatorio y su tipo sale del catálogo
     assert admin.post(url, json=base).status_code == 422
     assert admin.post(url, json={**base, "tipo_documento": "XX", "numero_documento": "1"}).status_code == 422
-    r = admin.post(url, json={**base, "tipo_documento": "ce", "numero_documento": "CE-4521"})
+    r = admin.post(url, json={**base, "tipo_documento": "pel", "numero_documento": "4521"})
     assert r.status_code == 201
     mov_id = r.json()["meta"]["extra"]["movimiento_id"]
     # La solicitud de horas no lleva documento contable
@@ -283,7 +283,7 @@ def test_documento_y_soportes(admin):
     assert admin.post(f"{API}/movimientos/{mov_id}/soportes", files={"archivo": ("x.pdf", b"MZ ejecutable", "application/pdf")}).status_code == 415
     det = admin.get(f"{API}/mfp/{m['id']}").json()["data"]
     mov = next(x for x in _item(det, "REINVERSION")["movimientos"] if x["id"] == mov_id)
-    assert (mov["tipo_documento"], mov["numero_documento"]) == ("CE", "CE-4521") and mov["soportes"][0]["id"] == sop["id"]
+    assert (mov["tipo_documento"], mov["numero_documento"]) == ("PEL", "4521") and mov["soportes"][0]["id"] == sop["id"]
     d = admin.get(f"{API}/soportes/{sop['id']}")
     assert d.status_code == 200 and d.content == pdf and d.headers["x-content-type-options"] == "nosniff"
     assert admin.get("/api/plataforma/auditoria?accion=cst_soporte_consultado").json()["data"]
@@ -292,3 +292,25 @@ def test_documento_y_soportes(admin):
     # Catálogo de tipos de documento editable
     assert admin.put(f"{API}/tipos-documento", json={"codigo": "cxp", "nombre": "Cuenta por pagar"}).json()["data"]["codigo"] == "CXP"
     assert any(t["codigo"] == "CXP" for t in admin.get(f"{API}/tipos-documento").json()["data"])
+
+
+def test_precios_y_horas_sin_documento(admin):
+    m = _mfp(admin)
+    horas = _item(m, "BOLSA_HORAS")
+    r = admin.post(f"{API}/items/{horas['id']}/movimientos", json={"fecha": date.today().isoformat(), "valor": 2, "descripcion": "Cumpleaños",
+                                                                    "tipo_documento": "PEL", "numero_documento": "9"})
+    mov = _item(r.json()["data"], "BOLSA_HORAS")["movimientos"][0]
+    assert r.status_code == 201 and (mov["tipo_documento"], mov["numero_documento"]) == ("", "")  # las horas no llevan documento
+    assert {t["codigo"] for t in admin.get(f"{API}/tipos-documento").json()["data"]} >= {"PEL"} - {"CE"}
+    assert "CE" not in {t["codigo"] for t in admin.get(f"{API}/tipos-documento").json()["data"]}
+
+    # Compras / contabilidad: solo actualizan precios del catálogo
+    roles = {x["nombre"]: x["id"] for x in admin.get("/api/roles").json()["data"]}
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "compras", "nombre": "Compras",
+                                      "password": "clave-segura-1", "roles": [roles["Precios costeo"]]})
+    item = admin.get(f"{API}/catalogo?grupo=dotacion_tarifa").json()["data"][0]
+    admin.post("/api/auth/logout")
+    entrar(admin, "compras", "clave-segura-1")
+    assert admin.put(f"{API}/catalogo", json={**item, "valor_unitario": 99999}).json()["data"]["valor_unitario"] == 99999
+    assert admin.put(f"{API}/parametros", json={"pct_renta": 30}).status_code == 403
+    assert admin.put(f"{API}/servicios", json={"descripcion": "Nuevo servicio", "tarifa": 1, "hombres": 3}).status_code == 403

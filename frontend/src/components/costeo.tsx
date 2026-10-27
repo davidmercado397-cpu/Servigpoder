@@ -86,16 +86,18 @@ export function ModalMovimiento({ item, onCerrar, onGuardado }: { item: ItemMfp;
           <div><label className="label">{horas ? "Horas" : "Valor"}</label><input type="number" className="input" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></div>
           <div className="sm:col-span-2"><label className="label">Descripción</label>
             <input className="input" placeholder={horas ? "Ej. acompañamiento 2 h por cumpleaños" : "Ej. pago bono de libre inversión"} value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
-          <div><label className="label">Tipo de documento contable{horas ? " (opcional)" : ""}</label>
+          {!horas && (<>
+          <div><label className="label">Tipo de documento contable</label>
             <select className="input" value={f.tipo_documento} onChange={(e) => setF({ ...f, tipo_documento: e.target.value })}>
               <option value="">Seleccione…</option>{tipos.map((t) => <option key={t.codigo} value={t.codigo}>{t.codigo} · {t.nombre}</option>)}
             </select></div>
-          <div><label className="label">Número del documento{horas ? " (opcional)" : ""}</label>
+          <div><label className="label">Número del documento</label>
             <input className="input" placeholder="Ej. 4521" value={f.numero_documento} onChange={(e) => setF({ ...f, numero_documento: e.target.value })} /></div>
+          </>)}
           <div className="sm:col-span-2"><label className="label">Observación</label>
             <input className="input" placeholder={horas ? "Quién lo solicitó, orden de servicio…" : "Proveedor, factura cruzada…"} value={f.soporte} onChange={(e) => setF({ ...f, soporte: e.target.value })} /></div>
           <div className="sm:col-span-2">
-            <label className="label">Soporte contable (PDF o foto, hasta 10 MB)</label>
+            <label className="label">{horas ? "Soporte (opcional): PDF o foto, hasta 10 MB" : "Soporte contable (PDF o foto, hasta 10 MB)"}</label>
             <input ref={input} type="file" multiple accept={ACEPTA_SOPORTE} className="hidden"
               onChange={(e) => { setArchivos([...archivos, ...Array.from(e.target.files ?? [])].slice(0, MAX_SOPORTES)); e.target.value = ""; }} />
             <button type="button" className="btn-secundario" disabled={archivos.length >= MAX_SOPORTES} onClick={() => input.current?.click()}>

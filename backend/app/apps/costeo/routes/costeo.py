@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import DbSession, require
+from app.api.deps import CurrentUser, DbSession, require
 from app.apps.costeo.models import (
     APROBADO, BORRADOR, ENVIADO, RECHAZADO, CstCatalogoCosto, CstCliente, CstComisionRango, CstCosteo, CstMfp, CstMfpItem,
     CstParametro, CstServicio, CstTipoItem,
@@ -19,7 +19,18 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 
 router = APIRouter()
-VER, COSTEAR, CONFIGURAR, GESTIONAR = "costeo.ver", "costeo.costear", "costeo.configurar", "costeo.mfp"
+VER, COSTEAR, CONFIGURAR, GESTIONAR, PRECIOS = "costeo.ver", "costeo.costear", "costeo.configurar", "costeo.mfp", "costeo.precios"
+
+
+def require_alguno(*permisos: str):
+    """Basta con uno de los permisos (los precios los actualiza compras/contabilidad o quien configura)."""
+
+    def checker(user: CurrentUser) -> Usuario:
+        if not any(p in user.permisos for p in permisos):
+            raise ApiError(403, "No tiene permiso para realizar esta acción", details=[{"permiso": " o ".join(permisos)}])
+        return user
+
+    return checker
 GRUPOS = ("dotacion_tarifa", "dotacion_puesto", "otros")
 ESTADOS = (BORRADOR, ENVIADO, APROBADO, RECHAZADO)
 
@@ -132,17 +143,18 @@ def catalogo(db: DbSession, grupo: str | None = None, _=Depends(require(VER))):
 
 
 @router.put("/catalogo", response_model=ApiResponse[dict])
-def guardar_catalogo(data: CatalogoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+def guardar_catalogo(data: CatalogoIn, request: Request, db: DbSession, actual: Usuario = Depends(require_alguno(PRECIOS, CONFIGURAR))):
     c = db.get(CstCatalogoCosto, data.id) if data.id else CstCatalogoCosto()
     if c is None:
         raise ApiError(404, "Elemento no encontrado")
     otro = db.scalar(select(CstCatalogoCosto).where(CstCatalogoCosto.grupo == data.grupo, CstCatalogoCosto.nombre == data.nombre.strip()))
     if otro is not None and otro.id != c.id:
         raise ApiError(409, "Ya existe un elemento con ese nombre en el grupo")
+    antes = float(c.valor_unitario) if c.id else None
     for k, v in data.model_dump(exclude={"id"}).items():
         setattr(c, k, v.strip() if isinstance(v, str) else v)
     db.add(c)
-    auditar(db, request, "cst_catalogo", actual.id, grupo=c.grupo, nombre=c.nombre, valor=data.valor_unitario)
+    auditar(db, request, "cst_catalogo", actual.id, grupo=c.grupo, nombre=c.nombre, antes=antes, valor=data.valor_unitario)
     db.commit()
     return ok(_cat_out(c))
 

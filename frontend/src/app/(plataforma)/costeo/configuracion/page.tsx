@@ -11,7 +11,7 @@ type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "
 type Parametro = { clave: string; valor: number; nombre: string; grupo: string; ayuda: string };
 type RangoC = { hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type Servicio = { id?: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
-type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean; activo: boolean; fuente: string };
+type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean; activo: boolean; fuente: string; actualizado_en?: string };
 
 const PESTANAS: [Pestana, string][] = [
   ["parametros", "Parámetros"], ["comisiones", "Comisiones"], ["servicios", "Servicios y tarifas"], ["dotacion_tarifa", "Dotación de la tarifa"],
@@ -20,19 +20,20 @@ const PESTANAS: [Pestana, string][] = [
 
 export default function Configuracion() {
   const puede = usePermiso("costeo.configurar");
+  const precios = usePermiso("costeo.precios");
   const [p, setP] = useState<Pestana>("parametros");
   return (
     <>
       <Titulo>Configuración</Titulo>
       <p className="-mt-4 mb-4 text-sm text-slate-500">
-        Todos los valores del costeo se cambian aquí{puede ? "" : " (solo lectura: se necesita el permiso de configurar)"}. Cada cambio queda en la
+        Todos los valores del costeo se cambian aquí{puede ? "" : precios ? " (con su permiso puede actualizar los precios de dotación y otros costos)" : " (solo lectura: se necesita el permiso de configurar)"}. Cada cambio queda en la
         auditoría; los costeos aprobados conservan los valores con que se aprobaron.
       </p>
       <Pestanas opciones={PESTANAS} valor={p} onChange={setP} />
       {p === "parametros" && <Parametros puede={puede} />}
       {p === "comisiones" && <Comisiones puede={puede} />}
       {p === "servicios" && <Servicios puede={puede} />}
-      {(p === "dotacion_tarifa" || p === "dotacion_puesto" || p === "otros") && <Catalogo key={p} grupo={p} puede={puede} />}
+      {(p === "dotacion_tarifa" || p === "dotacion_puesto" || p === "otros") && <Catalogo key={p} grupo={p} puede={puede || precios} />}
       {p === "tipos" && <Tipos puede={puede} />}
       {p === "documentos" && <Documentos puede={puede} />}
     </>
@@ -177,7 +178,12 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
   return (
     <div className="tarjeta overflow-hidden">
       <div className="p-4">{m.vista}
-        <p className="mb-3 text-sm text-slate-500">Precios de referencia para los costeos. Cada elemento se costea mensual por su vida útil (vacía = los meses del contrato) o anual por sus entregas al año.</p>
+        <p className="mb-3 text-sm text-slate-500">Precios de referencia para los costeos (los actualizan compras y contabilidad, idealmente dos veces al año). Cada elemento
+          se costea mensual por su vida útil (vacía = los meses del contrato) o anual por sus entregas al año. Los costeos ya hechos conservan el precio con que se hicieron.</p>
+        {(() => {
+          const viejos = lista.filter((x) => x.activo && x.actualizado_en && Date.now() - new Date(x.actualizado_en).getTime() > 183 * 864e5).length;
+          return viejos > 0 ? <div className="mb-3"><Alerta tipo="info">{viejos} precios llevan más de 6 meses sin actualizar.</Alerta></div> : null;
+        })()}
         {puede && !edicion && <button className="btn-primario" onClick={() => setEdicion({ grupo, nombre: "", valor_unitario: 0, vida_util_meses: null, entregas_anio: null, por_hombre: false, activo: true, fuente: "" })}><Plus className="h-4 w-4" /> Elemento</button>}
         {edicion && (
           <div className="grid gap-3 sm:grid-cols-4 sm:items-end">
@@ -196,12 +202,13 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
         )}
       </div>
       <table className="tabla">
-        <thead><tr><th>Elemento</th><th className="text-right">Valor</th><th className="text-right">Vida útil</th><th className="text-right">Entregas/año</th><th>Por hombre</th><th>Fuente</th><th /></tr></thead>
+        <thead><tr><th>Elemento</th><th className="text-right">Valor</th><th className="text-right">Vida útil</th><th className="text-right">Entregas/año</th><th>Por hombre</th><th>Fuente</th><th>Actualizado</th><th /></tr></thead>
         <tbody>{lista.map((x) => (
           <tr key={x.id} className={x.activo ? "" : "opacity-50"}>
             <td>{x.nombre}</td><td className="text-right tabular-nums">{pesos(x.valor_unitario)}</td>
             <td className="text-right tabular-nums">{x.vida_util_meses ?? (x.entregas_anio === null ? "contrato" : "—")}</td>
             <td className="text-right tabular-nums">{x.entregas_anio ?? "—"}</td><td>{x.por_hombre ? "Sí" : ""}</td><td className="text-xs text-slate-500">{x.fuente}</td>
+            <td className="whitespace-nowrap text-xs text-slate-500">{x.actualizado_en ? new Date(x.actualizado_en).toLocaleDateString("es-CO") : ""}</td>
             <td>{puede && <button onClick={() => setEdicion(x)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}</td>
           </tr>
         ))}</tbody>

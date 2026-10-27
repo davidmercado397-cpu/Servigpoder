@@ -334,7 +334,8 @@ def registrar(item_id: int, data: MovimientoIn, request: Request, db: DbSession,
         raise ApiError(422, "La fecha es anterior al inicio del contrato")
     if it.tipo.unidad == HORAS and m.terminada:
         raise ApiError(422, "La MFP está terminada: la bolsa de horas ya no está disponible")
-    tipo_doc, numero = data.tipo_documento.strip().upper(), data.numero_documento.strip()
+    # Las solicitudes de horas no llevan documento contable; los ítems en pesos sí
+    tipo_doc, numero = ("", "") if it.tipo.unidad == HORAS else (data.tipo_documento.strip().upper(), data.numero_documento.strip())
     if it.tipo.unidad != HORAS and (not tipo_doc or not numero):
         raise ApiError(422, "Indique el tipo y el número del documento contable que respalda el movimiento")
     if tipo_doc:

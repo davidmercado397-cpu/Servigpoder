@@ -66,7 +66,7 @@ OTROS = [
     ("DISPENSADOR DE AGUA FRÍA Y CALIENTE", 1106700, None), ("IN HOUSE / AUXILIOS (MENSUAL)", 2500000, 1),
 ]
 # Tipos de documento contable de partida (editables en Configuración)
-TIPOS_DOCUMENTO = [("CE", "Comprobante de egreso"), ("FV", "Factura de venta"), ("FC", "Factura de compra / proveedor"),
+TIPOS_DOCUMENTO = [("PEL", "Pago electrónico"), ("FV", "Factura de venta"), ("FC", "Factura de compra / proveedor"),
                    ("NC", "Nota crédito"), ("ND", "Nota débito"), ("RC", "Recibo de caja"), ("NCT", "Nota de contabilidad / cruce"),
                    ("OC", "Orden de compra")]
 POR_HOMBRE_PUESTO = {"CHAQUETAS", "PITOS", "BOTAS PANTANERAS"}

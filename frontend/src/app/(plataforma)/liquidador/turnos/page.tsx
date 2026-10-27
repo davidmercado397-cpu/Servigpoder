@@ -11,9 +11,9 @@ import { usePermiso } from "@/lib/sesion";
 
 type Form = {
   id?: number; codigo: string; nombre: string; hora_inicio: string; hora_fin: string;
-  horas_ordinarias: string; horas_extras: string; remunerado: boolean; incapacidad: boolean;
+  horas_ordinarias: string; horas_extras: string; remunerado: boolean; incapacidad: boolean; justifica_umbral: boolean;
 };
-const VACIO: Form = { codigo: "", nombre: "", hora_inicio: "06:00", hora_fin: "18:00", horas_ordinarias: "0", horas_extras: "0", remunerado: true, incapacidad: false };
+const VACIO: Form = { codigo: "", nombre: "", hora_inicio: "06:00", hora_fin: "18:00", horas_ordinarias: "0", horas_extras: "0", remunerado: true, incapacidad: false, justifica_umbral: false };
 const CLASE = Object.fromEntries(CLASES.map(([k, , color, , uno]) => [k, [uno, color]]));
 
 export default function Turnos() {
@@ -59,7 +59,7 @@ export default function Turnos() {
     if (!t) return setForm({ ...VACIO });
     setForm({
       id: t.id, codigo: t.codigo, nombre: t.nombre, hora_inicio: hora(t.hora_inicio), hora_fin: hora(t.hora_fin),
-      horas_ordinarias: String(t.horas_ordinarias), horas_extras: String(t.horas_extras), remunerado: t.remunerado, incapacidad: t.incapacidad,
+      horas_ordinarias: String(t.horas_ordinarias), horas_extras: String(t.horas_extras), remunerado: t.remunerado, incapacidad: t.incapacidad, justifica_umbral: t.justifica_umbral,
     });
   }
 
@@ -116,7 +116,7 @@ export default function Turnos() {
                     <td className="text-right tabular-nums">{horas(t.horas_ordinarias)}</td>
                     <td className="text-right tabular-nums">{horas(t.horas_extras)}</td>
                     <td><Insignia color={color}>{texto}</Insignia></td>
-                    <td className="text-sm">{t.incapacidad ? "Incapacidad" : t.remunerado ? "Remunerado" : "No remunerado"}</td>
+                    <td className="text-sm">{t.incapacidad ? "Incapacidad" : t.remunerado ? "Remunerado" : "No remunerado"}{t.justifica_umbral && !t.incapacidad ? " · justificada" : ""}</td>
                     <td className="text-sm">{t.activo ? "Activo" : "Inactivo"}</td>
                     <td className="whitespace-nowrap text-right text-sm">
                       <button className="font-medium text-marca-600 hover:underline" onClick={() => abrir(t)}>Abrir</button>
@@ -196,6 +196,10 @@ function EditorTurno({ inicial, soloLectura, onCerrar, onGuardado }: {
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" className="mt-0.5 h-4 w-4" checked={f.incapacidad} onChange={(e) => campo("incapacidad", e.target.checked)} />
               <span>Es incapacidad<span className="block text-xs text-slate-500">Se cuenta como incapacidad (no como día trabajado ni ausencia) y no genera horas.</span></span>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="mt-0.5 h-4 w-4" disabled={f.incapacidad} checked={f.justifica_umbral || f.incapacidad} onChange={(e) => campo("justifica_umbral", e.target.checked)} />
+              <span>Novedad justificada<span className="block text-xs text-slate-500">Con el umbral semanal activo, cada día con este código baja el umbral de la semana (vacaciones, licencias…). La incapacidad siempre lo baja.</span></span>
             </label>
           </fieldset>
 

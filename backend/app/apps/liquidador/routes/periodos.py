@@ -16,7 +16,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado
 from app.apps.liquidador.schemas import (
-    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, PeriodoIn, PeriodoOut, ResultadoOut,
+    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
 )
 from app.apps.liquidador.services import calculo, exportar, importador
 
@@ -46,7 +46,8 @@ def _abierto(p: LiqPeriodo) -> None:
 def _resultado_out(r: LiqResultado, nomina: bool = False, detalle: bool = False) -> ResultadoOut:
     """Los valores de la nómina solo van a quien tiene el permiso liquidador.nomina.ver."""
     out = ResultadoOut(empleado_id=r.empleado_id, documento=r.empleado.documento, nombre=r.empleado.nombre,
-                       cargo=r.empleado.cargo, horas=r.horas, dias=r.dias, total_horas=float(r.total_horas))
+                       cargo=r.empleado.cargo, horas=r.horas, dias=r.dias, total_horas=float(r.total_horas),
+                       umbral_semanas=(r.umbral_semanas or []) if detalle else [])
     if nomina and r.nomina:  # vacía si el periodo se calculó antes de existir la nómina
         out.devengado, out.neto = float(r.devengado), float(r.neto)
         out.nomina = r.nomina if detalle else None
@@ -124,6 +125,23 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
         raise ApiError(409, "El periodo aún no tiene un Excel cargado")
     empleados = calculo.calcular(db, p)
     auditar(db, request, "liq_periodo_recalculado", actual.id, periodo=p.etiqueta, empleados=empleados)
+    db.commit()
+    return ok(_periodo_out(db, p))
+
+
+@router.put("/periodos/{periodo_id}/umbral", response_model=ApiResponse[PeriodoOut])
+def umbral_semanal(periodo_id: int, data: UmbralIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Marca o desmarca el umbral semanal del periodo. Queda guardado para la siguiente carga del Excel y, si el
+    periodo ya tiene Excel, se recalcula de una vez."""
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    antes = {"activo": p.umbral_activo, "horas": float(p.umbral_horas), "horas_novedad": float(p.umbral_horas_novedad)}
+    p.umbral_activo, p.umbral_horas, p.umbral_horas_novedad = data.activo, data.horas, data.horas_novedad
+    if p.cargado_en is not None:
+        calculo.calcular(db, p)
+    auditar(db, request, "liq_umbral_semanal", actual.id, periodo=p.etiqueta, antes=antes,
+            despues={"activo": data.activo, "horas": float(data.horas), "horas_novedad": float(data.horas_novedad)},
+            recalculado=p.cargado_en is not None)
     db.commit()
     return ok(_periodo_out(db, p))
 

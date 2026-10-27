@@ -19,7 +19,7 @@ from app.apps.liquidador.dominio.clasificador import classify
 from app.apps.liquidador.dominio.expansor import expand_workday_to_concepts
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import CALCULADA, LiqDia, LiqPeriodo, LiqResultado, LiqTurno
-from app.apps.liquidador.services import festivos, nomina
+from app.apps.liquidador.services import festivos, nomina, umbral
 
 # Clases de día (columnas de conteo del archivo de liquidación)
 TRABAJADO = "trabajado"
@@ -79,8 +79,11 @@ def calcular(db: Session, periodo: LiqPeriodo) -> int:
         d.tipo_dia = tipo.value
         d.clase = clase_de(d.turno)
         d.horas = {c.value: float(h) for c, h in conceptos.items()}
-        for c, h in conceptos.items():
-            horas_por_empleado[d.empleado_id][c] += h
+    # Umbral semanal (si se marcó al liquidar): ajusta las extras de cada día antes de totalizar
+    semanas = umbral.aplicar(periodo, dias) if periodo.umbral_activo else {}
+    for d in dias:
+        for c, h in (d.horas or {}).items():
+            horas_por_empleado[d.empleado_id][HourConcept(c)] += Decimal(str(h))
         conteo_por_empleado[d.empleado_id][d.clase] += 1
 
     db.execute(delete(LiqResultado).where(LiqResultado.periodo_id == periodo.id))
@@ -91,6 +94,7 @@ def calcular(db: Session, periodo: LiqPeriodo) -> int:
             periodo_id=periodo.id, empleado_id=empleado_id, dias=conteo,
             horas={c.value: float(horas.get(c, Decimal("0"))) for c in HourConcept},
             total_horas=sum((horas.get(c, Decimal("0")) for c in CONCEPTOS_TRABAJADOS), Decimal("0")),
+            umbral_semanas=semanas.get(empleado_id, []),
         )
     nomina.liquidar(db, periodo, dias, resultados)
     db.add_all(resultados.values())

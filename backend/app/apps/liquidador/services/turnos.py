@@ -30,7 +30,8 @@ def aplicar_matriz(turno: LiqTurno, hora_nocturna: int) -> None:
 
 
 def guardar(db: Session, turno: LiqTurno, *, codigo: str, nombre: str, hora_inicio: time, hora_fin: time,
-            horas_ordinarias: Decimal, horas_extras: Decimal, remunerado: bool, incapacidad: bool) -> LiqTurno:
+            horas_ordinarias: Decimal, horas_extras: Decimal, remunerado: bool, incapacidad: bool,
+            justifica_umbral: bool = False) -> LiqTurno:
     """Crea o actualiza un turno. La incapacidad nunca es remunerada ni genera horas."""
     if incapacidad:
         remunerado, horas_ordinarias, horas_extras = False, Decimal("0"), Decimal("0")
@@ -39,6 +40,7 @@ def guardar(db: Session, turno: LiqTurno, *, codigo: str, nombre: str, hora_inic
     turno.hora_inicio, turno.hora_fin = hora_inicio, hora_fin
     turno.horas_ordinarias, turno.horas_extras = horas_ordinarias, horas_extras
     turno.remunerado, turno.incapacidad = remunerado, incapacidad
+    turno.justifica_umbral = justifica_umbral or incapacidad  # la incapacidad siempre justifica
     aplicar_matriz(turno, parametros(db).hora_inicio_nocturna)
     if turno.id is None:
         db.add(turno)

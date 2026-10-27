@@ -5,7 +5,12 @@ export type Periodo = {
   id: number; anio: number; mes: number; quincena: number; tipo: string; etiqueta: string; desde: string; hasta: string;
   estado: "borrador" | "calculada" | "cerrada"; archivo: string | null; advertencias: string[];
   cargado_en: string | null; calculado_en: string | null; cerrado_en: string | null; creado_en: string | null; empleados: number;
+  /** Umbral semanal de horas: se marca al liquidar y vale para cada carga o recálculo del periodo */
+  umbral_activo: boolean; umbral_horas: number; umbral_horas_novedad: number;
 };
+
+export type SemanaUmbral = { desde: string; hasta: string; dias_periodo: number; justificados: number; umbral: number; trabajadas: number;
+  extras: number; pagadas: number; descontadas: number };
 
 /** "Quincena 1", "Quincena 2" o "Mensual" */
 export const nombrePeriodo = (p: Pick<Periodo, "quincena">) => (p.quincena === 0 ? "Mensual" : `Quincena ${p.quincena}`);
@@ -15,6 +20,8 @@ export type Resultado = {
   horas: Record<string, number>; dias: Record<string, number>; total_horas: number;
   /** Solo con el permiso liquidador.nomina.ver */
   devengado?: number | null; neto?: number | null; nomina?: Nomina | null;
+  /** Solo en el detalle, con el umbral semanal activo */
+  umbral_semanas?: SemanaUmbral[];
 };
 
 export type DescuentoAplicado = { id: number; tipo: "prestamo" | "embargo"; descripcion: string; valor: number; calculo: string; observacion: string };
@@ -45,7 +52,7 @@ export type Dia = { fecha: string; codigo: string; turno: string; tipo_dia: stri
 
 export type Turno = {
   id: number; codigo: string; nombre: string; hora_inicio: string; hora_fin: string; horas_ordinarias: number;
-  horas_extras: number; remunerado: boolean; incapacidad: boolean; activo: boolean; clase: string;
+  horas_extras: number; remunerado: boolean; incapacidad: boolean; justifica_umbral: boolean; activo: boolean; clase: string;
 };
 
 export type Matriz = Record<string, Record<string, number>>;

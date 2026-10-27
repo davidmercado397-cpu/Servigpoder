@@ -142,6 +142,8 @@ export default function DetalleQuincena() {
           </div>
         </div>
         {cerrada && <Alerta tipo="info">El periodo está cerrado: para cargar otro archivo o recalcular, primero reábralo.</Alerta>}
+        <UmbralSemanal p={p} editable={gestionar && !cerrada} onGuardado={(x, texto) => { setP(x); setAviso(texto); cargarResultados().catch(() => {}); }}
+          onError={(e) => setError(e)} />
         <details className="text-sm text-slate-600">
           <summary className="cursor-pointer font-medium text-marca-700">Ver formato esperado del Excel</summary>
           <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -293,6 +295,52 @@ export default function DetalleQuincena() {
   );
 }
 
+function UmbralSemanal({ p, editable, onGuardado, onError }: {
+  p: Periodo; editable: boolean; onGuardado: (p: Periodo, texto: string) => void; onError: (e: string) => void;
+}) {
+  const [activo, setActivo] = useState(p.umbral_activo);
+  const [umbral, setUmbral] = useState(String(p.umbral_horas));
+  const [novedad, setNovedad] = useState(String(p.umbral_horas_novedad));
+  const [guardando, setGuardando] = useState(false);
+  const cambios = activo !== p.umbral_activo || Number(umbral) !== p.umbral_horas || Number(novedad) !== p.umbral_horas_novedad;
+  async function guardar() {
+    setGuardando(true);
+    try {
+      const x = await api<Periodo>(`/liquidador/periodos/${p.id}/umbral`, {
+        method: "PUT", json: { activo, horas: Number(umbral), horas_novedad: Number(novedad) },
+      });
+      const recalculo = x.cargado_en ? " Las horas y la nómina ya se recalcularon." : " Se aplicará al subir el Excel.";
+      onGuardado(x, (activo ? `Umbral semanal de ${Number(umbral)} h activo para este periodo.` : "Umbral semanal desactivado: las extras se pagan día a día.") + recalculo);
+    } catch (e) {
+      onError(mensajeError(e));
+    } finally {
+      setGuardando(false);
+    }
+  }
+  return (
+    <div className={`rounded-lg border p-3 ${activo ? "border-marca-200 bg-marca-50/60" : "border-slate-200"}`}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+          <input type="checkbox" className="h-4 w-4" disabled={!editable} checked={activo} onChange={(e) => setActivo(e.target.checked)} />
+          Aplicar umbral semanal de horas
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          Umbral <input className="input w-20" type="number" min={1} max={168} step="0.5" disabled={!editable || !activo} value={umbral} onChange={(e) => setUmbral(e.target.value)} /> h por semana
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          Novedad justificada <input className="input w-16" type="number" min={0} max={24} step="0.5" disabled={!editable || !activo} value={novedad} onChange={(e) => setNovedad(e.target.value)} /> h menos por día
+        </label>
+        {editable && cambios && <button className="btn-primario ml-auto" disabled={guardando} onClick={guardar}>{guardando ? "Guardando…" : "Guardar"}</button>}
+      </div>
+      <p className="mt-1.5 text-xs text-slate-500">
+        Si se activa, por cada semana (lunes a domingo) solo se pagan las extras que pasen del umbral; las demás se pagan como horas ordinarias
+        conservando su recargo nocturno, dominical o festivo. Las semanas partidas usan un umbral proporcional y los días con novedad justificada
+        lo bajan; los descansos Z y L no. Queda guardado para este periodo: aplica a la próxima carga del Excel y, si ya hay uno, se recalcula al guardar.
+      </p>
+    </div>
+  );
+}
+
 function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado; dias: Dia[] }; onCerrar: () => void }) {
   const { empleado: e, dias } = detalle;
   const usados = CONCEPTOS.filter(([k]) => e.horas[k]);
@@ -313,6 +361,30 @@ function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado;
             ))}
           </div>
           {e.nomina && <NominaPersona n={e.nomina} />}
+          {e.umbral_semanas && e.umbral_semanas.length > 0 && (
+            <div className="overflow-auto rounded-lg border border-slate-200">
+              <p className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Umbral semanal</p>
+              <table className="tabla text-xs">
+                <thead><tr><th>Semana</th><th className="text-right">Días del periodo</th><th className="text-right">Novedades justificadas</th>
+                  <th className="text-right">Umbral</th><th className="text-right">Horas trabajadas</th><th className="text-right">Extras generadas</th>
+                  <th className="text-right">Pagadas</th><th className="text-right">Descontadas</th></tr></thead>
+                <tbody>
+                  {e.umbral_semanas.map((s) => (
+                    <tr key={s.desde}>
+                      <td className="whitespace-nowrap">{s.desde.slice(8, 10)}/{s.desde.slice(5, 7)} – {s.hasta.slice(8, 10)}/{s.hasta.slice(5, 7)}</td>
+                      <td className="text-right tabular-nums">{s.dias_periodo}</td>
+                      <td className="text-right tabular-nums">{s.justificados}</td>
+                      <td className="text-right tabular-nums">{horas(s.umbral)}</td>
+                      <td className="text-right tabular-nums">{horas(s.trabajadas)}</td>
+                      <td className="text-right tabular-nums">{horas(s.extras)}</td>
+                      <td className="text-right font-semibold tabular-nums text-green-700">{horas(s.pagadas)}</td>
+                      <td className={`text-right tabular-nums ${s.descontadas ? "font-semibold text-red-700" : ""}`}>{horas(s.descontadas)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <p className="text-xs text-slate-500">
             &quot;Diurnas ordinarias&quot; cuenta todas las horas ordinarias del turno; los recargos marcan cuáles de esas horas llevan recargo y no se suman aparte.
           </p>

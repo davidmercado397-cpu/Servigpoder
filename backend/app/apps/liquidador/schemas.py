@@ -28,6 +28,7 @@ class TurnoIn(BaseModel):
     horas_extras: Decimal = Field(ge=0, le=24, decimal_places=2)
     remunerado: bool = True
     incapacidad: bool = False
+    justifica_umbral: bool = False
 
     @field_validator("codigo")
     @classmethod
@@ -55,6 +56,7 @@ class TurnoOut(Orm):
     horas_extras: float
     remunerado: bool
     incapacidad: bool
+    justifica_umbral: bool = False
     activo: bool
     clase: str = ""
 
@@ -106,6 +108,16 @@ class PeriodoOut(Orm):
     cerrado_en: datetime | None
     creado_en: datetime | None
     empleados: int = 0
+    umbral_activo: bool = False
+    umbral_horas: float = 42
+    umbral_horas_novedad: float = 7
+
+
+class UmbralIn(BaseModel):
+    """Umbral semanal de horas del periodo: se aplica a la carga o el recálculo que siga."""
+    activo: bool
+    horas: Decimal = Field(default=Decimal("42"), gt=0, le=168, decimal_places=2)
+    horas_novedad: Decimal = Field(default=Decimal("7"), ge=0, le=24, decimal_places=2)
 
 
 class ResultadoOut(BaseModel):
@@ -120,6 +132,7 @@ class ResultadoOut(BaseModel):
     devengado: float | None = None
     neto: float | None = None
     nomina: dict | None = None
+    umbral_semanas: list[dict] = []
 
 
 class DiaOut(BaseModel):

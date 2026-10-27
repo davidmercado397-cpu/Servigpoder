@@ -166,6 +166,14 @@ inicio y hora nocturna) con sus pruebas originales. La hora fin de un turno es i
   `tests/test_liq_igualdad_produccion.py` comprueba que su matriz es idéntica a la de producción.
 - **Festivos**: calendario nacional con ajustes manuales (agregar, quitar, restablecer).
 
+- **Umbral semanal de horas (opcional, por periodo):** en el periodo se marca «Aplicar umbral semanal» con su
+  valor (p. ej. 42 h). Queda guardado para la carga o el recálculo que siga y se puede desmarcar. Por persona y
+  semana (lunes a domingo) solo se pagan las extras que pasen del umbral, sin superar las del cálculo diario; las
+  demás pasan a ordinarias conservando el recargo nocturno, dominical o festivo. Semanas partidas: umbral
+  proporcional a sus días en el periodo. Cada día con novedad justificada (marca en Turnos; la incapacidad
+  siempre) baja el umbral 7 h (editable); Z y L no. El detalle por semana sale en la persona y en el Excel de
+  nómina (hoja «Umbral semanal»); el archivo de liquidación no cambia de formato.
+
 ## Reporte de programación
 
 Lee el mismo Excel "ReporteAsignacionResumido" de SIESA que Capacidad Operativa y devuelve un PDF en hoja

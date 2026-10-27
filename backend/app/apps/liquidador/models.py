@@ -47,6 +47,8 @@ class LiqTurno(Base):
     remunerado: Mapped[bool] = mapped_column(Boolean, default=True)
     # Incapacidad: se cuenta aparte, nunca genera horas
     incapacidad: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Novedad justificada: con el umbral semanal activo, cada día con este código baja el umbral de la semana
+    justifica_umbral: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -88,6 +90,10 @@ class LiqPeriodo(Base):
     estado: Mapped[str] = mapped_column(String(20), default=BORRADOR)
     archivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     advertencias: Mapped[list] = mapped_column(JSON, default=list)
+    # Umbral semanal de horas (services/umbral.py): se marca al liquidar y vale para cada carga o recálculo del periodo
+    umbral_activo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    umbral_horas: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("42"), server_default="42")
+    umbral_horas_novedad: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("7"), server_default="7")
     cargado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     calculado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cerrado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -142,6 +148,8 @@ class LiqResultado(Base):
     total_horas: Mapped[Decimal] = mapped_column(Numeric(7, 2), default=Decimal("0"))
     # Nómina del periodo: valor por concepto, aportes, descuentos y la explicación del cálculo
     nomina: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Con el umbral semanal activo: por semana, umbral, horas, extras generadas, pagadas y descontadas
+    umbral_semanas: Mapped[list] = mapped_column(JSON, default=list)
     devengado: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"))
     neto: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"))
 

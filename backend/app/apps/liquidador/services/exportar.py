@@ -195,4 +195,24 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
         celda.number_format = "dd/mm/yyyy"
     _autoajustar(tar, minimo=10, maximo=40)
     tar.row_dimensions[1].height = 42
+
+    if periodo.umbral_activo:
+        um = libro.create_sheet("Umbral semanal")
+        um.append([f"Umbral semanal de {float(periodo.umbral_horas):g} h (semanas partidas en proporción; "
+                   f"{float(periodo.umbral_horas_novedad):g} h menos por día con novedad justificada)"])
+        um.append(["DOCUMENTO", "EMPLEADO", "SEMANA DESDE", "SEMANA HASTA", "DIAS EN EL PERIODO", "NOVEDADES JUSTIFICADAS",
+                   "UMBRAL", "HORAS TRABAJADAS", "EXTRAS GENERADAS", "EXTRAS PAGADAS", "EXTRAS DESCONTADAS"])
+        for r in resultados:
+            for s in r.umbral_semanas or []:
+                um.append([r.empleado.documento, r.empleado.nombre, s["desde"], s["hasta"], s["dias_periodo"], s["justificados"],
+                           s["umbral"], s["trabajadas"], s["extras"], s["pagadas"], s["descontadas"]])
+        for celda in um[2]:
+            celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+        for col in range(7, 12):
+            for (celda,) in um.iter_rows(min_row=3, min_col=col, max_col=col):
+                celda.number_format = "#,##0.00"
+        _autoajustar(um, minimo=10, maximo=22)
+        um.column_dimensions["A"].width = 14
+        um.freeze_panes = "C3"
+        um.row_dimensions[2].height = 32
     return _guardar(libro), XLSX, f"nomina_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"

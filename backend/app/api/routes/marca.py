@@ -13,10 +13,11 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
-from app.core.empresas import COOKIE_EMPRESA
+from app.core.empresas import COOKIE_EMPRESA, empresa_del_dominio
 from app.core.marca import MAX_BYTES, TIPOS, ImagenInvalida, procesar
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
+from app.core.security import SESION
 from app.models import Empresa, Usuario
 from app.models.marca import MARCA_INICIAL, Marca, MarcaImagen
 
@@ -98,7 +99,8 @@ def _out(db: DbSession, m: Marca | None, general: Marca | None, empresa: Empresa
 @router.get("", response_model=ApiResponse[dict])
 def ver(request: Request, db: DbSession, empresa: str | None = PARAM_EMPRESA):
     """Marca vigente (pública: no expone nada sensible)."""
-    codigo = empresa if empresa is not None else request.cookies.get(COOKIE_EMPRESA)
+    elegida, dominio = request.cookies.get(COOKIE_EMPRESA), empresa_del_dominio(request)
+    codigo = empresa if empresa is not None else (elegida or dominio) if request.cookies.get(SESION) else (dominio or elegida)
     e = _empresa(db, codigo, obligatoria=False)
     return ok(_out(db, _de_empresa(db, e), _general(db), e), valores_iniciales=MARCA_INICIAL)
 

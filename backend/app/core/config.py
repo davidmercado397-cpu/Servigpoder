@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     # Hosts aceptados en la cabecera Host (coma separada). "*" = cualquiera.
     allowed_hosts: str = "*"
+    # Enlace propio de una empresa: "sera.nextbyte.com.co=sera" (coma separada). Quien entra por ese enlace ve
+    # el login con la marca de la empresa y trabaja en ella; si tiene acceso a otras, puede cambiarse.
+    dominios_empresa: str = ""
     max_upload_mb: int = 15
 
     # Rate limit (peticiones por ventana en segundos)

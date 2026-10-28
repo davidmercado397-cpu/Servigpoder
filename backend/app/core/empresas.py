@@ -57,11 +57,27 @@ def empresas_del_usuario(db: Session, user: Usuario) -> list[tuple[Empresa, list
     return [(e, sorted(mios[e.codigo])) for e in empresas]
 
 
+def empresa_del_dominio(request: Request) -> str | None:
+    """Empresa del enlace por el que se entra (DOMINIOS_EMPRESA). El host lo pone el proxy de Next.js."""
+    dominios = {}
+    for par in get_settings().dominios_empresa.split(","):
+        host, _, codigo = par.partition("=")
+        if host.strip() and codigo.strip():
+            dominios[host.strip().lower()] = codigo.strip().lower()
+    if not dominios:
+        return None
+    host = request.headers.get("x-plataforma-host") or request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    return dominios.get(host.split(",")[0].strip().lower().split(":")[0])
+
+
 def empresa_elegida(request: Request, db: Session, user: Usuario) -> Empresa | None:
-    """La de la cookie si el usuario tiene acceso a ella; si no, la primera de sus empresas."""
+    """La de la cookie si el usuario tiene acceso a ella; si no, la del enlace por el que entró y, si no, la
+    primera de sus empresas."""
     lista = empresas_del_usuario(db, user)
-    codigo = request.cookies.get(COOKIE_EMPRESA)
-    return next((e for e, _ in lista if e.codigo == codigo), lista[0][0] if lista else None)
+    for codigo in (request.cookies.get(COOKIE_EMPRESA), empresa_del_dominio(request)):
+        if elegida := next((e for e, _ in lista if e.codigo == codigo), None):
+            return elegida
+    return lista[0][0] if lista else None
 
 
 def fijar_cookie(response: Response, codigo: str) -> None:

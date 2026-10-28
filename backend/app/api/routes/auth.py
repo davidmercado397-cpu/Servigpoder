@@ -17,7 +17,7 @@ from app.core.security import (
 )
 from app.core.sesion import COOKIE_PREAUTH, borrar_preauth, borrar_sesion, emitir_preauth, emitir_sesion
 from app.models import Usuario
-from app.core.empresas import COOKIE_EMPRESA, empresa_elegida, empresas_del_usuario, fijar_cookie
+from app.core.empresas import COOKIE_EMPRESA, accesos, empresa_del_dominio, empresa_elegida, empresas_del_usuario, fijar_cookie
 from app.schemas.seguridad import EmpresaSesion, LoginIn, SesionOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -83,6 +83,8 @@ def _completar(response: Response, request: Request, db: DbSession, user: Usuari
     db.commit()
     borrar_preauth(response)
     emitir_sesion(response, user.id, user.sesion_version)
+    if (codigo := empresa_del_dominio(request)) and codigo in accesos(user):
+        fijar_cookie(response, codigo)
 
 
 @router.post(

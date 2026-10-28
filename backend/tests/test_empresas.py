@@ -90,3 +90,28 @@ def test_solo_quien_gestiona_empresas_las_crea(admin):
     assert admin.get("/api/empresas").status_code == 200  # para asignar accesos
     assert admin.post("/api/empresas", json={"codigo": "otra", "nombre": "Otra", "apps": []}).status_code == 403
     assert admin.post("/api/empresas", json={"codigo": "Mal Código", "nombre": "x"}).status_code in (403, 422)
+
+
+def test_enlace_propio_de_una_empresa(client, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "dominios_empresa", "sera.nextbyte.com.co=sera")
+    assert entrar(client, "admin", "admin-clave-123").status_code == 200
+    assert _elegir(client, "servigpoder").status_code == 200
+    client.post("/api/auth/logout")
+
+    # Por el enlace de SERA: el login muestra su marca aunque la última empresa elegida fuera otra
+    client.headers["x-plataforma-host"] = "SERA.nextbyte.com.co:443"
+    assert client.get("/api/marca").json()["data"]["empresa"] == "sera"
+    assert entrar(client, "admin", "admin-clave-123").status_code == 200
+    assert client.get("/api/auth/me").json()["data"]["empresa_actual"] == "sera"
+    # Quien tiene acceso a varias empresas puede cambiarse dentro del mismo enlace
+    assert _elegir(client, "servigpoder").status_code == 200
+    assert client.get("/api/auth/me").json()["data"]["empresa_actual"] == "servigpoder"
+    assert client.get("/api/marca").json()["data"]["empresa"] == "servigpoder"
+
+    # Por el enlace general no cambia nada
+    client.post("/api/auth/logout")
+    client.headers["x-plataforma-host"] = "plataforma.nextbyte.com.co"
+    assert entrar(client, "admin", "admin-clave-123").status_code == 200
+    assert client.get("/api/auth/me").json()["data"]["empresa_actual"] == "servigpoder"

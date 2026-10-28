@@ -13,8 +13,8 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "liquidador.asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre las horas contadas"),
     "liquidador.costeo.ver": ("Costeo de nómina", "Ver los costeos de nómina (costo empresa de un Excel de turnos, sin pagarlo)"),
     "liquidador.costeo.gestionar": ("Costeo de nómina", "Crear, recalcular y eliminar costeos de nómina"),
-    "liquidador.personal.ver": ("Ficha del personal", "Ver los datos personales de la ficha (contacto, identificación, seguridad social, cuenta) y los historiales"),
-    "liquidador.personal.gestionar": ("Ficha del personal", "Editar los datos personales, registrar contratos y vacaciones e importar la base de personal y el libro de vacaciones"),
+    "liquidador.personal.ver": ("Ficha del personal", "Ver la ficha del personal: datos personales, contratos, historial y saldo de vacaciones, cuotas pendientes"),
+    "liquidador.personal.gestionar": ("Ficha del personal", "Modificar la ficha del personal: crear empleados, editar datos personales, contratos y salidas de vacaciones, importar la base de personal y el libro de vacaciones"),
     "liquidador.salud.ver": ("Salud del personal", "Ver incapacidades (con su diagnóstico CIE), restricciones médicas y sus soportes"),
     "liquidador.salud.gestionar": ("Salud del personal", "Registrar incapacidades y restricciones médicas, adjuntar soportes e importar el formato de ausentismo"),
     "liquidador.juridico.ver": ("Tutelas y demandas", "Ver derechos de petición, tutelas, demandas y su seguimiento"),
@@ -23,13 +23,15 @@ PERMISOS: dict[str, tuple[str, str]] = {
 
 # Diagnósticos y casos jurídicos: datos sensibles que solo maneja gestión humana
 SENSIBLES = ("liquidador.salud.ver", "liquidador.salud.gestionar", "liquidador.juridico.ver", "liquidador.juridico.gestionar")
+# Lo que solo hace gestión humana: nómina consulta la ficha pero no la modifica
+SOLO_GESTION_HUMANA = (*SENSIBLES, "liquidador.personal.gestionar")
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
     # Por ahora la misma persona liquida, consulta y aprueba
     "Liquidador": ("Liquidador de horas: carga los turnos, revisa, cierra los periodos, configura turnos y liquida la nómina",
-                   [p for p in PERMISOS if p not in SENSIBLES]),
+                   [p for p in PERMISOS if p not in SOLO_GESTION_HUMANA]),
     "Gestión humana": ("Gestión humana de SERA: ficha del personal, vacaciones, incapacidades, restricciones médicas y tutelas (sin la nómina)",
-                       ["liquidador.periodos.ver", "liquidador.personal.ver", "liquidador.personal.gestionar", *SENSIBLES]),
+                       ["liquidador.periodos.ver", "liquidador.personal.ver", *SOLO_GESTION_HUMANA]),
 }
 
 

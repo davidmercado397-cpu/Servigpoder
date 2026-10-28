@@ -165,6 +165,10 @@ def test_soportes_casos_y_permisos(admin):
         assert cliente.get(f"{API}/incapacidades").status_code == 403
         assert cliente.get(f"{API}/casos").status_code == 403
         assert cliente.post(f"{API}/gestion/importar-ausentismo", files=archivo(_ausentismo())).status_code == 403
+        # Consulta la ficha pero no la modifica: crear empleados e importar la base es de gestión humana
+        assert cliente.get(f"{API}/personal/cuotas-pendientes").status_code == 200
+        assert cliente.post(f"{API}/empleados", json={"documento": "5551", "nombre": "NUEVO"}).status_code == 403
+        assert cliente.post(f"{API}/personal/importar-base", files=archivo(_base(), "base.xlsx")).status_code == 403
     with TestClient(app, headers=CSRF) as cliente:
         entrar(cliente, "gh1", "clave-segura-1")
         assert cliente.get(f"{API}/casos").status_code == 200 and cliente.get(f"{API}/restricciones").status_code == 200

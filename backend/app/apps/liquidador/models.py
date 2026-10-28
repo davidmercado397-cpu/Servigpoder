@@ -85,13 +85,17 @@ class LiqEmpleado(Base):
 
 
 class LiqPeriodo(Base):
+    """Una nómina de un periodo: cada periodo (año, mes, quincena) agrupa varias nóminas con nombre (Cliente 1,
+    Administrativa…), cada una con su Excel, su cálculo y su cierre."""
+
     __tablename__ = "liq_periodo"
-    __table_args__ = (UniqueConstraint("anio", "mes", "quincena"),)
+    __table_args__ = (UniqueConstraint("anio", "mes", "quincena", "nombre", name="uq_liq_periodo_nomina"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     anio: Mapped[int] = mapped_column(Integer, index=True)
     mes: Mapped[int] = mapped_column(Integer)
     quincena: Mapped[int] = mapped_column(Integer)  # 1: días 1-15, 2: 16 a fin de mes, 0: mes completo
+    nombre: Mapped[str] = mapped_column(String(80), default="General", server_default="General")
     desde: Mapped[date] = mapped_column(Date)
     hasta: Mapped[date] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(String(20), default=BORRADOR)
@@ -242,3 +246,37 @@ class LiqVacacionBase(Base):
     empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"))
     promedio: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LiqCosteo(Base):
+    """Costeo de una nómina: lo que costaría a la empresa un Excel de turnos, sin que cuente como pagado. Guarda
+    solo el resultado por persona (el Excel no se guarda) y los % de aportes y prestaciones usados."""
+
+    __tablename__ = "liq_costeo"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120))
+    anio: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    quincena: Mapped[int] = mapped_column(Integer)  # 1, 2 o 0 (mensual), como un periodo
+    desde: Mapped[date] = mapped_column(Date)
+    hasta: Mapped[date] = mapped_column(Date)
+    umbral_activo: Mapped[bool] = mapped_column(Boolean, default=False)
+    umbral_horas: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("42"))
+    umbral_horas_novedad: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("7"))
+    parametros: Mapped[dict] = mapped_column(JSON, default=dict)
+    archivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    advertencias: Mapped[list] = mapped_column(JSON, default=list)
+    resultados: Mapped[list] = mapped_column(JSON, default=list)
+    totales: Mapped[dict] = mapped_column(JSON, default=dict)
+    creado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actualizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def tipo(self) -> str:
+        return "Mensual" if self.quincena == MENSUAL else f"Q{self.quincena}"
+
+    @property
+    def etiqueta(self) -> str:
+        return f"{self.anio}-{self.mes:02d} {self.tipo}"

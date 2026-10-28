@@ -61,7 +61,7 @@ def _rango(desde: date, hasta: date) -> str:
     return f"{desde.day} de {_MESES[desde.month]} de {desde.year} al {hasta.day} de {_MESES[hasta.month]} de {hasta.year}"
 
 
-def _fecha_encabezado(valor: object, periodo: LiqPeriodo) -> date | None:
+def _fecha_encabezado(valor: object, periodo) -> date | None:
     """Número de día (1-31) del mes de la quincena o fecha completa."""
     if valor is None or str(valor).strip() == "":
         return None
@@ -84,7 +84,17 @@ def _fecha_encabezado(valor: object, periodo: LiqPeriodo) -> date | None:
     return None
 
 
-def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
+@dataclass
+class FilaLeida:
+    num: int
+    documento: str
+    nombre: str
+    cargo: str
+    dias: list[tuple[date, object]]  # (fecha, turno)
+
+
+def leer(db: Session, periodo, contenido: bytes) -> tuple[list[FilaLeida], Resumen]:
+    """Lee el Excel sin escribir nada: filas con su turno por fecha, advertencias y conteos."""
     try:
         libro = load_workbook(io.BytesIO(contenido), data_only=True, read_only=True)
     except Exception as e:  # archivo dañado: no se expone el detalle técnico
@@ -126,10 +136,8 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
             f"los encabezados del Excel para que coincidan.")
 
     turnos = por_codigo(db)
-    empleados = {e.documento: e for e in db.scalars(select(LiqEmpleado))}
-    db.execute(delete(LiqDia).where(LiqDia.periodo_id == periodo.id))
-
     res = Resumen(fechas=len(columnas_fecha))
+    leidas: list[FilaLeida] = []
     vistos: set[tuple[str, date]] = set()
     for num, fila in enumerate(filas[1:], start=2):
         if not fila or fila[0] is None or str(fila[0]).strip() == "":
@@ -140,14 +148,8 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
         if col_cargo is not None and col_cargo < len(fila) and fila[col_cargo]:
             cargo = str(fila[col_cargo]).strip() or "Vigilante"
 
-        emp = empleados.get(documento)
-        if emp is None:
-            emp = LiqEmpleado(documento=documento, nombre=nombre[:200], cargo=cargo[:80])
-            db.add(emp)
-            empleados[documento] = emp
-        else:
-            emp.nombre, emp.cargo = nombre[:200], cargo[:80]
-        db.flush()
+        leida = FilaLeida(num, documento, nombre[:200], cargo[:80], [])
+        leidas.append(leida)
         res.empleados += 1
 
         por_turno: dict[str, int] = {}
@@ -163,7 +165,7 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
                 res.advertencias.append(f"Fila {num}, {fecha.isoformat()}: el documento {documento} ya tiene turno ese día — se omitió")
                 continue
             vistos.add((documento, fecha))
-            db.add(LiqDia(periodo_id=periodo.id, empleado_id=emp.id, fecha=fecha, turno_id=turno.id, codigo=turno.codigo))
+            leida.dias.append((fecha, turno))
             res.dias += 1
             por_turno[codigo] = por_turno.get(codigo, 0) + 1
         res.detalle.append(FilaResumen(documento, nombre, sum(por_turno.values()),
@@ -172,6 +174,25 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
     if res.dias == 0:
         raise ErrorImportacion("No se importó ningún día de trabajo. Verifica que las celdas de cada día contengan un "
                                "código de turno válido (D, N, Z, L, AUS, INC…).")
+    return leidas, res
+
+
+def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
+    """Reemplaza los días de la nómina; crea o actualiza los empleados del archivo."""
+    leidas, res = leer(db, periodo, contenido)
+    empleados = {e.documento: e for e in db.scalars(select(LiqEmpleado))}
+    db.execute(delete(LiqDia).where(LiqDia.periodo_id == periodo.id))
+    for f in leidas:
+        emp = empleados.get(f.documento)
+        if emp is None:
+            emp = LiqEmpleado(documento=f.documento, nombre=f.nombre, cargo=f.cargo)
+            db.add(emp)
+            empleados[f.documento] = emp
+        else:
+            emp.nombre, emp.cargo = f.nombre, f.cargo
+        db.flush()
+        for fecha, turno in f.dias:
+            db.add(LiqDia(periodo_id=periodo.id, empleado_id=emp.id, fecha=fecha, turno_id=turno.id, codigo=turno.codigo))
     db.flush()
     return res
 

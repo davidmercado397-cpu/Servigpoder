@@ -3,6 +3,8 @@
 export type Periodo = {
   /** quincena: 1 (días 1-15), 2 (16 a fin de mes) o 0 (mensual: el mes completo) */
   id: number; anio: number; mes: number; quincena: number; tipo: string; etiqueta: string; desde: string; hasta: string;
+  /** Nombre de la nómina dentro del periodo (Cliente 1, Administrativa…); las anteriores quedaron como «General» */
+  nombre: string;
   estado: "borrador" | "calculada" | "cerrada"; archivo: string | null; advertencias: string[];
   cargado_en: string | null; calculado_en: string | null; cerrado_en: string | null; creado_en: string | null; empleados: number;
   /** Umbral semanal de horas: se marca al liquidar y vale para cada carga o recálculo del periodo */
@@ -22,6 +24,8 @@ export type Resultado = {
   devengado?: number | null; neto?: number | null; nomina?: Nomina | null;
   /** Solo en el detalle, con el umbral semanal activo */
   umbral_semanas?: SemanaUmbral[];
+  /** También está en otra nómina de fechas que se cruzan */
+  otras_nominas?: boolean;
 };
 
 export type DescuentoAplicado = { id: number; tipo: "prestamo" | "embargo"; descripcion: string; valor: number; calculo: string; observacion: string };
@@ -140,3 +144,48 @@ export const CONCEPTOS_PAGO = CONCEPTOS.filter(([k]) => k !== "ordinary_day");
 
 /** Recargos (se paga solo el adicional) y extras (la hora completa). */
 export const RECARGOS = ["ordinary_night", "holiday_day_surcharge", "holiday_night_surcharge", "sunday_surcharge", "sunday_night_surcharge"];
+
+/** Pagado por mes: suma de las nóminas cerradas del mes */
+export const CAMPOS_PAGADO: [string, string][] = [
+  ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["recargos", "Recargos"],
+  ["extras", "Horas extras"], ["auxilios_no_prestacionales", "Auxilios no prestacionales"], ["auxilio", "Auxilio de transporte"],
+  ["devengado", "Total devengado"], ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"],
+  ["deducciones", "Total deducciones"], ["neto", "Neto pagado"],
+];
+
+export type NominaDelMes = {
+  id: number; nombre: string; tipo: string; etiqueta: string; estado: string; cerrado_en: string | null; personas: number; incluida: boolean;
+} & Record<string, number | string | boolean | null>;
+
+export type PersonaPagada = { empleado_id: number; documento: string; nombre: string; nominas: string[] } & Record<string, number | string | string[]>;
+
+/** Costeo de nómina: costo empresa de un Excel de turnos, sin que cuente como pagado */
+export type CostoEmpresa = {
+  exonerado: boolean; base_aportes: number; base_arl: number; base_prestaciones: number; base_vacaciones: number;
+  aportes: Record<string, number>; prestaciones: Record<string, number>; total_aportes: number; total_prestaciones: number;
+  devengado: number; costo_total: number;
+};
+
+export type ParametrosCosteo = Record<string, number | boolean> & { exonerado: boolean };
+
+export type CosteoResumen = {
+  id: number; nombre: string; anio: number; mes: number; quincena: number; etiqueta: string; desde: string; hasta: string;
+  archivo: string | null; personas: number; no_registradas: number; devengado: number; costo_total: number;
+  creado_en: string | null; actualizado_en: string | null;
+};
+
+export type CosteoPersona = {
+  documento: string; nombre: string; cargo: string; existe: boolean; dias: Record<string, number>; horas: Record<string, number>;
+  total_horas: number; nomina: Nomina; costo: CostoEmpresa;
+};
+
+export type Costeo = CosteoResumen & {
+  umbral_activo: boolean; umbral_horas: number; umbral_horas_novedad: number; parametros: ParametrosCosteo; advertencias: string[];
+  totales: {
+    personas: number; no_registradas: number; devengado: number; neto: number; total_aportes: number; total_prestaciones: number;
+    costo_total: number; aportes: Record<string, number>; prestaciones: Record<string, number>;
+  };
+  resultados: CosteoPersona[];
+};
+
+export type ParametrosDefecto = { valores: ParametrosCosteo; nombres: Record<string, string>; aportes: string[]; prestaciones: string[] };

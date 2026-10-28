@@ -101,7 +101,7 @@ def _periodo(ctx: Contexto, anio: int | None, mes: int | None, quincena: int | N
 
 
 def _etiqueta(p: LiqPeriodo) -> dict:
-    return {"quincena": p.etiqueta, "desde": p.desde, "hasta": p.hasta, "estado": p.estado,
+    return {"quincena": p.etiqueta, "nomina": p.nombre, "desde": p.desde, "hasta": p.hasta, "estado": p.estado,
             "enlace": f"/liquidador/quincenas/{p.id}"}
 
 

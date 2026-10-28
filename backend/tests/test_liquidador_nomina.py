@@ -267,3 +267,94 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert emp["dias_habiles"] == [0, 1, 2, 3, 4] and emp["vacaciones_liquidador"] == 3 and emp["saldo_vacaciones"]["previos"] == 4
     libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
     assert libro["Vacaciones"].max_row == 2
+
+
+def test_varias_nominas_en_un_periodo(admin):
+    pid = _quincena(admin)  # nómina «General» de sep-2026 Q2
+    _cargar(admin, pid)
+    assert admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "prestamo", "descripcion": "Celular",
+                                                 "valor_mensual": 80000, "desde": "2026-09-01"}).status_code == 201
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "quincena": 2, "nombre": "  Cliente   2 "})
+    assert r.status_code == 201 and r.json()["data"]["nombre"] == "Cliente 2"
+    c2 = r.json()["data"]["id"]
+    assert admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "quincena": 2, "nombre": "cliente 2"}).status_code == 409
+    # 1001 también cubre el 16 y el 17 en el Cliente 2 (repetidos) y el 18 no; 4004 solo está aquí
+    r = _cargar(admin, c2, xlsx([["documento", "SEPTIEMBRE", 16, 17, 18], [1001, "1001", "A", "A", ""], [4004, "4004", "A", "A", "A"]]))
+    assert r.status_code == 200, r.text
+    n2 = _nomina(admin, c2, "1001")
+    assert n2["otras_nominas"] and n2["descuentos"] == [] and n2["prestamos"] == 0
+    assert any("«General»" in a and "2 día(s) están en las dos (16/09, 17/09)" in a for a in n2["alertas"])
+    assert any("se aplican en la nómina «General»" in a for a in n2["alertas"])
+    # En la General (creada primero) sigue el préstamo y avisa que también está en Cliente 2
+    n1 = _nomina(admin, pid, "1001")
+    assert n1["prestamos"] == 40000 and any("«Cliente 2»" in a for a in n1["alertas"])
+    assert not _nomina(admin, c2, "4004")["alertas"]
+    assert "Cliente_2" in admin.get(f"{API}/periodos/{c2}/nomina").headers["content-disposition"]
+    assert admin.put(f"{API}/periodos/{c2}/nombre", json={"nombre": "General"}).status_code == 409
+    assert admin.put(f"{API}/periodos/{c2}/nombre", json={"nombre": "Cliente Norte"}).json()["data"]["nombre"] == "Cliente Norte"
+    # Al eliminar la General, Cliente Norte se recalcula y pasa a aplicar el préstamo
+    assert admin.delete(f"{API}/periodos/{pid}").status_code == 200
+    n2 = _nomina(admin, c2, "1001")
+    assert n2["prestamos"] == 40000 and not n2["otras_nominas"]
+
+
+def test_pagado_por_mes_solo_suma_nominas_cerradas(admin):
+    q1 = _periodo_con(admin, 2026, 11, 1, [[1, "1", *(["A"] * 15)], [2, "2", *(["A"] * 15)]], list(range(1, 16)))
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Administrativa"})
+    adm = r.json()["data"]["id"]
+    _cargar(admin, adm, xlsx([["documento", "NOVIEMBRE", *range(1, 16)], [9, "9", *(["A"] * 15)]]))
+    q2 = _periodo_con(admin, 2026, 11, 2, [[1, "1", *(["A"] * 15)]], list(range(16, 31)))
+    for pid in (q1, q2):
+        assert admin.post(f"{API}/periodos/{pid}/cerrar").status_code == 200
+    r = admin.get(f"{API}/reportes/pagado?anio=2026&mes=11").json()
+    extra = r["meta"]["extra"]
+    assert [(n["nombre"], n["tipo"], n["incluida"]) for n in extra["nominas"]] == [
+        ("General", "Q1", True), ("Administrativa", "Q1", False), ("General", "Q2", True)]
+    assert extra["abiertas"] == 1
+    netos = {n["id"]: n["neto"] for n in extra["nominas"]}
+    assert extra["totales"]["neto"] == netos[q1] + netos[q2]
+    personas = {x["documento"]: x for x in r["data"]}
+    assert set(personas) == {"1", "2"} and personas["1"]["nominas"] == ["General (Q1)", "General (Q2)"]
+    from openpyxl import load_workbook as _lw
+    libro = _lw(BytesIO(admin.get(f"{API}/reportes/pagado/excel?anio=2026&mes=11").content))
+    assert libro.sheetnames == ["Por nomina", "Por persona"] and libro["Por persona"].max_row == 3
+
+
+def test_costeo_de_nomina_no_paga_ni_crea_empleados(admin):
+    from tests.conftest import archivo
+
+    pid = _periodo_con(admin, 2026, 8, 2, [[1001, "1001", *(["A"] * 16)]], list(range(16, 32)))
+    eid = _resultados(admin, pid)["1001"]["empleado_id"]
+    assert admin.put(f"{API}/empleados/{eid}/salario", json={"salario": 3000000}).status_code == 200
+    assert admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "prestamo", "descripcion": "Celular",
+                                                 "valor_mensual": 80000, "monto_total": 160000, "desde": "2026-09-01"}).status_code == 201
+    contenido = xlsx([["documento", "SEPTIEMBRE", *range(16, 31)], [1001, "1001", *(["A"] * 15)], [7777, "Aspirante", *(["A"] * 15)]])
+    r = admin.post(f"{API}/costeos", files=archivo(contenido, "costeo.xlsx"),
+                   data={"nombre": "Cliente nuevo", "anio": "2026", "mes": "9", "quincena": "2"})
+    assert r.status_code == 201, r.text
+    c = r.json()["data"]
+    por_doc = {x["documento"]: x for x in c["resultados"]}
+    assert por_doc["7777"]["existe"] is False and por_doc["7777"]["nomina"]["salario"] == 1750905
+    assert por_doc["1001"]["existe"] and por_doc["1001"]["nomina"]["salario"] == 3000000 and por_doc["1001"]["nomina"]["prestamos"] == 0
+    x = por_doc["7777"]["costo"]
+    n = por_doc["7777"]["nomina"]
+    assert x["exonerado"] and x["aportes"]["salud"] == 0 and x["aportes"]["icbf"] == 0 and x["aportes"]["sena"] == 0
+    assert x["aportes"]["pension"] == round(n["ibc"] * 0.12) and x["aportes"]["caja"] == round(n["ibc"] * 0.04)
+    assert x["base_prestaciones"] == n["devengado"] and x["prestaciones"]["prima"] == round(n["devengado"] * 0.0833)
+    assert x["costo_total"] == n["devengado"] + x["total_aportes"] + x["total_prestaciones"]
+    assert c["totales"]["personas"] == 2 and c["totales"]["no_registradas"] == 1
+    assert c["totales"]["costo_total"] == sum(y["costo"]["costo_total"] for y in c["resultados"])
+    # No crea al aspirante ni descuenta el préstamo
+    assert admin.get(f"{API}/empleados?q=7777").json()["data"] == []
+    assert admin.get(f"{API}/descuentos?q=1001").json()["data"][0]["descontado"] == 0
+    assert admin.get(f"{API}/costeos").json()["data"][0]["nombre"] == "Cliente nuevo"
+    # Sin exoneración se suman salud, ICBF y SENA
+    par = {**c["parametros"], "exonerado": False}
+    c2 = admin.put(f"{API}/costeos/{c['id']}", json={"nombre": "Cliente nuevo", "parametros": par}).json()["data"]
+    y = {z["documento"]: z for z in c2["resultados"]}["7777"]["costo"]
+    assert y["aportes"]["salud"] == round(n["ibc"] * 0.085) and c2["totales"]["costo_total"] > c["totales"]["costo_total"]
+    libro = load_workbook(BytesIO(admin.get(f"{API}/costeos/{c['id']}/excel").content))
+    assert libro.sheetnames == ["Costo empresa", "Nomina", "Parametros"] and libro["Costo empresa"].max_row == 4
+    assert admin.post(f"{API}/costeos", files=archivo(contenido, "costeo.xlsx"),
+                      data={"nombre": "x", "anio": "2026", "mes": "10", "quincena": "1"}).status_code == 422  # fechas de otro periodo
+    assert admin.delete(f"{API}/costeos/{c['id']}").status_code == 200

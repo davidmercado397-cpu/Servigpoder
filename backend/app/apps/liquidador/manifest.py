@@ -11,6 +11,8 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "liquidador.nomina.ver": ("Nómina", "Ver la nómina calculada (devengado, deducciones y neto), salarios, recargos y descuentos"),
     "liquidador.nomina.gestionar": ("Nómina", "Editar los % de recargos, el salario mínimo, el salario de cada empleado, préstamos y embargos"),
     "liquidador.asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre las horas contadas"),
+    "liquidador.costeo.ver": ("Costeo de nómina", "Ver los costeos de nómina (costo empresa de un Excel de turnos, sin pagarlo)"),
+    "liquidador.costeo.gestionar": ("Costeo de nómina", "Crear, recalcular y eliminar costeos de nómina"),
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
@@ -20,10 +22,10 @@ ROLES_BASE: dict[str, tuple[str, list[str]]] = {
 
 
 def _router() -> APIRouter:
-    from app.apps.liquidador.routes import asistente, configuracion, nomina, periodos
+    from app.apps.liquidador.routes import asistente, configuracion, costeo, nomina, periodos
 
     router = APIRouter(prefix="/liquidador")
-    for modulo in (configuracion, periodos, nomina, asistente):
+    for modulo in (configuracion, periodos, nomina, costeo, asistente):
         router.include_router(modulo.router)
     return router
 

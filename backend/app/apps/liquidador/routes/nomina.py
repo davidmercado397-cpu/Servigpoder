@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 
 from app.api.deps import DbSession, require
 from app.core.auditoria import auditar
-from app.core.paginacion import Paginacion, paginar_consulta
+from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
@@ -16,7 +16,7 @@ from app.apps.liquidador.models import CERRADA, LiqAuxilio, LiqDescuento, LiqEmp
 from app.apps.liquidador.schemas import (
     AuxilioIn, AuxilioOut, DescuentoIn, DescuentoOut, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut, VacacionesEmpleadoIn,
 )
-from app.apps.liquidador.services import calculo, exportar
+from app.apps.liquidador.services import calculo, exportar, reportes
 from app.apps.liquidador.services.nomina import descontado, porcentajes_de_ley
 
 router = APIRouter(tags=["liquidador: nómina"])
@@ -344,5 +344,31 @@ def descargar_nomina(periodo_id: int, request: Request, db: DbSession, actual: U
         raise ApiError(409, "El periodo se calculó antes de existir la nómina: recalcúlelo para descargarla")
     contenido, tipo, nombre = exportar.nomina(db, p)
     auditar(db, request, "liq_nomina_descargada", actual.id, periodo=p.etiqueta)
+    db.commit()
+    return _archivo(contenido, tipo, nombre)
+
+
+# --- Pagado por mes ---
+
+@router.get("/reportes/pagado", response_model=ApiResponse[list[dict]])
+def pagado_por_mes(db: DbSession, p: Paginacion, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                   q: str = Query("", max_length=100), _=Depends(require(VER))):
+    """Lo pagado en el mes: suma de las nóminas cerradas (1.ª y 2.ª quincena o mensual), por nómina y por persona."""
+    datos = reportes.pagado(db, anio, mes)
+    personas = datos["personas"]
+    if q.strip():
+        t = q.strip().lower()
+        personas = [x for x in personas if t in x["documento"].lower() or t in x["nombre"].lower()]
+    pagina, meta = paginar_lista(personas, p)
+    return ok(pagina, **meta, nominas=datos["nominas"], totales=datos["totales"], abiertas=datos["abiertas"])
+
+
+@router.get("/reportes/pagado/excel", dependencies=[Depends(limitar("exportar", 10, 60))])
+def pagado_por_mes_excel(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                         actual: Usuario = Depends(require(VER))):
+    from app.apps.liquidador.routes.periodos import _archivo
+
+    contenido, tipo, nombre = reportes.excel(db, anio, mes)
+    auditar(db, request, "liq_pagado_mes_descargado", actual.id, mes=f"{anio}-{mes:02d}")
     db.commit()
     return _archivo(contenido, tipo, nombre)

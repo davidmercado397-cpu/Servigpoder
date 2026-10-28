@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgePercent, CalendarDays, CalendarRange, Calculator, Clock3, Gift, HandCoins, TreePalm, Users } from "lucide-react";
+import { BadgePercent, CalendarCheck, CalendarDays, CalendarRange, Calculator, Clock3, Gift, HandCoins, PiggyBank, TreePalm, Users } from "lucide-react";
 import { ShellApp, type GrupoMenu } from "@/components/shell-app";
 
 const MENU: GrupoMenu[] = [
@@ -9,6 +9,13 @@ const MENU: GrupoMenu[] = [
     items: [
       { href: "/liquidador", texto: "Periodos", icono: CalendarRange, permiso: "liquidador.periodos.ver" },
       { href: "/liquidador/empleados", texto: "Empleados", icono: Users, permiso: "liquidador.periodos.ver" },
+      { href: "/liquidador/pagado", texto: "Pagado por mes", icono: CalendarCheck, permiso: "liquidador.nomina.ver" },
+    ],
+  },
+  {
+    grupo: "Costeo",
+    items: [
+      { href: "/liquidador/costeos", texto: "Costeo de nómina", icono: PiggyBank, permiso: "liquidador.costeo.ver" },
     ],
   },
   {

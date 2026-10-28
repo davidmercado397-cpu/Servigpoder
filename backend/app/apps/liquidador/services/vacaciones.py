@@ -66,7 +66,8 @@ def promedios_sugeridos(db: Session, empleado_ids: list[int], periodo: LiqPeriod
     por_mes: dict[tuple[int, int, int], dict[int, Decimal]] = defaultdict(dict)
     for eid, nomina, anio, mes, quincena in filas:
         valor = sum((Decimal(str((nomina or {}).get("valores", {}).get(c, 0))) for c in CONCEPTOS_PROMEDIO), Decimal("0"))
-        por_mes[(eid, anio, mes)][quincena] = valor
+        q = por_mes[(eid, anio, mes)]
+        q[quincena] = q.get(quincena, Decimal("0")) + valor  # varias nóminas del mismo periodo se suman
     total: dict[int, Decimal] = defaultdict(Decimal)
     meses: dict[int, Decimal] = defaultdict(Decimal)
     for (eid, _, _), q in por_mes.items():

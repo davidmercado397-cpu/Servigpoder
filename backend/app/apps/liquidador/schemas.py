@@ -91,6 +91,27 @@ class PeriodoIn(BaseModel):
     anio: int = Field(ge=2020, le=2100)
     mes: int = Field(ge=1, le=12)
     quincena: int = Field(ge=0, le=2, description="1: días 1-15 · 2: del 16 al fin de mes · 0: mensual (mes completo)")
+    nombre: str = Field("General", min_length=1, max_length=80)  # nómina dentro del periodo: Cliente 1, Administrativa…
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Escriba el nombre de la nómina")
+        return v
+
+
+class NombreNominaIn(BaseModel):
+    nombre: str = Field(min_length=1, max_length=80)
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Escriba el nombre de la nómina")
+        return v
 
 
 class PeriodoOut(Orm):
@@ -98,6 +119,7 @@ class PeriodoOut(Orm):
     anio: int
     mes: int
     quincena: int
+    nombre: str = "General"
     tipo: str  # Q1, Q2 o Mensual
     etiqueta: str
     desde: date
@@ -135,6 +157,7 @@ class ResultadoOut(BaseModel):
     neto: float | None = None
     nomina: dict | None = None
     umbral_semanas: list[dict] = []
+    otras_nominas: bool = False  # también está en otra nómina de fechas que se cruzan
 
 
 class DiaOut(BaseModel):

@@ -1,16 +1,17 @@
 "use client";
 
-import { ArrowLeft, Banknote, Download, FileDown, Lock, LockOpen, RefreshCw, Search, Trash2, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, Banknote, Download, FileDown, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
+import { NominaPersona } from "@/components/nomina-persona";
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
 import {
-  CLASES, CONCEPTOS, CONCEPTOS_PAGO, ESTADO_PERIODO, TIPOS_DIA, nombrePeriodo, horas,
-  type Dia, type Nomina, type Periodo, type Resultado, type TotalesNomina,
+  CLASES, CONCEPTOS, ESTADO_PERIODO, TIPOS_DIA, nombrePeriodo, horas,
+  type Dia, type Periodo, type Resultado, type TotalesNomina,
 } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
@@ -29,6 +30,7 @@ export default function DetalleQuincena() {
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [totales, setTotales] = useState<Totales | null>(null);
   const [nominaPendiente, setNominaPendiente] = useState(false);
+  const [enOtras, setEnOtras] = useState(0);
   const [q, setQ] = useState("");
   const [orden, setOrden] = useState("documento");
   const [carga, setCarga] = useState<Carga | null>(null);
@@ -46,6 +48,7 @@ export default function DetalleQuincena() {
     setMeta(metaDe(r));
     setTotales((r.meta.extra?.totales as Totales) ?? null);
     setNominaPendiente(!!r.meta.extra?.nomina_pendiente);
+    setEnOtras(Number(r.meta.extra?.en_otras_nominas ?? 0));
   }, [id, q, orden, pag.query]);
 
   useEffect(() => {
@@ -87,8 +90,21 @@ export default function DetalleQuincena() {
     }
   }
 
+  async function renombrar() {
+    if (!p) return;
+    const nombre = window.prompt("Nombre de la nómina (Cliente 1, Administrativa…)", p.nombre)?.trim();
+    if (!nombre || nombre === p.nombre) return;
+    setError("");
+    try {
+      setP(await api<Periodo>(`/liquidador/periodos/${id}/nombre`, { method: "PUT", json: { nombre } }));
+      setAviso(`La nómina ahora se llama «${nombre}».`);
+    } catch (e) {
+      setError(mensajeError(e));
+    }
+  }
+
   async function eliminar() {
-    if (!window.confirm("¿Eliminar este periodo y todo lo cargado? No se puede deshacer.")) return;
+    if (!window.confirm("¿Eliminar esta nómina y todo lo cargado? No se puede deshacer.")) return;
     try {
       await api(`/liquidador/periodos/${id}`, { method: "DELETE" });
       router.push("/liquidador");
@@ -115,13 +131,22 @@ export default function DetalleQuincena() {
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/liquidador" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Volver"><ArrowLeft className="h-5 w-5" /></Link>
         <div>
-          <h1 className="text-2xl font-bold text-marca-900">{MESES[p.mes - 1]} {p.anio} — {nombrePeriodo(p)}</h1>
-          <p className="text-sm text-slate-500">Del {p.desde} al {p.hasta}{p.archivo ? ` · Archivo: ${p.archivo}` : ""}</p>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-marca-900">
+            Nómina {p.nombre}
+            {gestionar && !cerrada && (
+              <button onClick={renombrar} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cambiar el nombre de la nómina">
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
+          </h1>
+          <p className="text-sm text-slate-500">
+            {MESES[p.mes - 1]} {p.anio} — {nombrePeriodo(p)} · del {p.desde} al {p.hasta}{p.archivo ? ` · Archivo: ${p.archivo}` : ""}
+          </p>
         </div>
         <Insignia color={estadoColor}>{estadoTexto}</Insignia>
         {gestionar && !cerrada && (
           <button onClick={eliminar} className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-red-50 hover:text-red-700">
-            <Trash2 className="h-4 w-4" /> Eliminar periodo
+            <Trash2 className="h-4 w-4" /> Eliminar nómina
           </button>
         )}
       </div>
@@ -205,6 +230,14 @@ export default function DetalleQuincena() {
             </div>
           </div>
 
+          {enOtras > 0 && (
+            <div className="border-b border-slate-200 p-4">
+              <Alerta tipo="info">
+                {enOtras === 1 ? "1 persona también está" : `${enOtras} personas también están`} en otra nómina de estas fechas (marcadas con{" "}
+                <Users className="inline h-3.5 w-3.5" />). Revise su detalle: los préstamos, embargos y auxilios se aplican solo en la nómina creada primero.
+              </Alerta>
+            </div>
+          )}
           {nominaPendiente && (
             <div className="border-b border-slate-200 p-4">
               <Alerta tipo="info">Este periodo se calculó antes de existir la nómina. {cerrada ? "Reábralo y recalcúlelo" : "Recalcúlelo"} para ver el devengado y el neto.</Alerta>
@@ -265,7 +298,10 @@ export default function DetalleQuincena() {
                 {filas.map((r) => (
                   <tr key={r.empleado_id} className="cursor-pointer hover:bg-marca-50" onClick={() => verPersona(r)}>
                     <td className="sticky left-0 bg-white font-mono">{r.documento}</td>
-                    <td className="max-w-[180px] truncate" title={r.nombre}>{r.nombre}</td>
+                    <td className="max-w-[180px] truncate" title={r.otras_nominas ? `${r.nombre} · también está en otra nómina` : r.nombre}>
+                      {r.otras_nominas && <Users className="mr-1 inline h-3.5 w-3.5 text-amber-600" aria-label="También está en otra nómina" />}
+                      {r.nombre}
+                    </td>
                     {CONCEPTOS.map(([k]) => <td key={k} className="text-right tabular-nums">{horas(r.horas[k])}</td>)}
                     {CLASES.map(([k]) => <td key={k} className="text-right tabular-nums">{r.dias[k] || "–"}</td>)}
                     {verNomina && <td className="whitespace-nowrap text-right tabular-nums">{pesos(r.devengado)}</td>}
@@ -431,72 +467,5 @@ function Cifra({ titulo, valor, fuerte, detalle }: { titulo: string; valor: numb
       <p className="text-xs text-slate-500">{titulo}</p>
       <p className={`tabular-nums ${fuerte ? "text-lg font-bold text-marca-900" : "font-semibold text-slate-800"}`}>{pesos(valor)}</p>
     </div>
-  );
-}
-
-function NominaPersona({ n }: { n: Nomina }) {
-  const fila = (concepto: React.ReactNode, detalle: React.ReactNode, valor: number, clase = "") => (
-    <tr className={clase}><td>{concepto}</td><td className="text-xs text-slate-500">{detalle}</td><td className="whitespace-nowrap text-right tabular-nums">{pesos(valor)}</td></tr>
-  );
-  const usados = CONCEPTOS_PAGO.filter(([k]) => n.valores[k]);
-  return (
-    <section className="rounded-lg border border-slate-200">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <h3 className="font-semibold text-slate-900">Nómina del periodo</h3>
-        <span className="text-xs text-slate-500">
-          Salario {pesos(n.salario)}{n.salario_minimo ? " (mínimo)" : ""} · día {pesos(n.valor_dia)} · hora {pesos(n.valor_hora)} ({n.horas_mes} h/mes)
-        </span>
-        <span className="ml-auto text-sm">Devengado <b className="tabular-nums">{pesos(n.devengado)}</b> · Neto <b className="tabular-nums text-marca-800">{pesos(n.neto)}</b></span>
-      </header>
-      <div className="grid md:grid-cols-2 md:divide-x md:divide-slate-200">
-        <table className="tabla text-xs">
-          <thead><tr><th>Devengado</th><th /><th className="text-right">Valor</th></tr></thead>
-          <tbody>
-            {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
-            {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
-            {n.vacaciones && (
-              <>
-                {fila("Vacaciones días hábiles", `${n.vacaciones.dias_habiles} días × ${pesos(n.vacaciones.valor_dia)} (hábiles: ${n.vacaciones.dias_habiles_empleado})`, n.vacaciones.valor_habiles)}
-                {n.vacaciones.dias_no_habiles > 0 && fila("Vacaciones días no hábiles", `${n.vacaciones.dias_no_habiles} días × ${pesos(n.vacaciones.valor_dia)}`, n.vacaciones.valor_no_habiles)}
-              </>
-            )}
-            {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
-            {(n.auxilios ?? []).map((x) => (
-              <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
-            ))}
-            {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
-            {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
-          </tbody>
-        </table>
-        <table className="tabla text-xs">
-          <thead><tr><th>Deducciones</th><th /><th className="text-right">Valor</th></tr></thead>
-          <tbody>
-            {fila("Salud", `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
-            {fila("Pensión", `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
-            {n.descuentos.map((x) => (
-              <Fragment key={x.id}>
-                {fila(`${x.tipo === "embargo" ? "Embargo" : "Préstamo"}: ${x.descripcion}`,
-                  <>{x.calculo}{x.observacion && <span className="block text-amber-700">{x.observacion}</span>}</>, x.valor)}
-              </Fragment>
-            ))}
-            {fila(<b>Total deducciones</b>, "", n.deducciones, "bg-slate-50")}
-            {fila(<b>Neto a pagar</b>, "", n.neto, "bg-marca-50 font-bold text-marca-900")}
-          </tbody>
-        </table>
-      </div>
-      {n.vacaciones && (
-        <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-          Base de vacaciones {pesos(n.vacaciones.base)}: salario {pesos(n.vacaciones.salario)} + promedio variable {pesos(n.vacaciones.promedio)}{" "}
-          ({n.vacaciones.promedio_manual ? "fijado por nómina" : `sugerido con ${n.vacaciones.meses_promedio} meses de recargo nocturno`}).
-          {n.vacaciones.saldo ? ` Saldo pendiente: ${n.vacaciones.saldo.pendientes.toLocaleString("es-CO")} días hábiles.` : " Sin fecha de ingreso: no se controla el saldo."}
-        </p>
-      )}
-      {(n.alertas ?? []).map((a) => <p key={a} className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{a}</p>)}
-      {n.dias_sin_pago > 0 && (
-        <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (licencias…, que se pagan en otro proceso).
-        </p>
-      )}
-    </section>
   );
 }

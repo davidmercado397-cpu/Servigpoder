@@ -340,9 +340,17 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
             auxilios[x.empleado_id].append(x)
     ya = descontado(db, {x.id for lista in descuentos.values() for x in lista if x.monto_total is not None}, periodo.id)
     contexto_vac = _contexto_vacaciones(db, periodo, por_empleado, empleados)
+    otras = _otras_nominas(db, periodo, por_empleado)
     for empleado_id, r in resultados.items():
-        n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas, descuentos[empleado_id], ya,
-                              auxilios[empleado_id], contexto_vac.get(empleado_id))
+        avisos, aplica = [], True
+        if empleado_id in otras:
+            avisos, duenia = otras[empleado_id]
+            aplica = duenia is None
+        n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas,
+                              descuentos[empleado_id] if aplica else [], ya, auxilios[empleado_id] if aplica else [],
+                              contexto_vac.get(empleado_id))
+        n["alertas"] = avisos + n["alertas"]
+        n["otras_nominas"] = bool(avisos)
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
 
 
@@ -359,3 +367,39 @@ def _contexto_vacaciones(db: Session, periodo: LiqPeriodo, por_empleado: dict[in
     return {eid: {"festivos": fest, "sugerido": sugeridos.get(eid, (Decimal("0"), Decimal("0")))[0],
                   "meses": sugeridos.get(eid, (Decimal("0"), Decimal("0")))[1], "manual": manuales.get(eid),
                   "antes": antes.get(eid, 0)} for eid in con_vac}
+
+
+def _otras_nominas(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]]) -> dict[int, tuple[list[str], str | None]]:
+    """Quienes también están en otra nómina de fechas que se cruzan: {empleado: (alertas, nómina que aplica sus
+    préstamos, embargos y auxilios o None si es esta)}. Los aplica la nómina creada primero."""
+    from app.apps.liquidador.services.calculo import hermanas
+
+    otras = hermanas(db, periodo)
+    if not otras or not por_empleado:
+        return {}
+    por_id = {h.id: h for h in otras}
+    fechas_otras: dict[tuple[int, int], set[date]] = defaultdict(set)
+    for pid, eid, fecha in db.execute(select(LiqDia.periodo_id, LiqDia.empleado_id, LiqDia.fecha)
+                                      .where(LiqDia.periodo_id.in_(list(por_id)), LiqDia.empleado_id.in_(list(por_empleado)))):
+        fechas_otras[(eid, pid)].add(fecha)
+    salida: dict[int, tuple[list[str], str | None]] = {}
+    for eid, dias in por_empleado.items():
+        ids = sorted(pid for (e, pid) in fechas_otras if e == eid)
+        if not ids:
+            continue
+        propias = {d.fecha for d in dias}
+        alertas = []
+        for pid in ids:
+            h = por_id[pid]
+            repetidas = sorted(propias & fechas_otras[(eid, pid)])
+            texto = f"También está en la nómina «{h.nombre}» ({h.etiqueta})"
+            if repetidas:
+                texto += (f": {len(repetidas)} día(s) están en las dos ({', '.join(f.strftime('%d/%m') for f in repetidas[:6])}"
+                          f"{'…' if len(repetidas) > 6 else ''}) y se pagarían dos veces")
+            alertas.append(texto)
+        primera = min([*ids, periodo.id])
+        duenia = None if primera == periodo.id else por_id[primera]
+        if duenia is not None:
+            alertas.append(f"Sus préstamos, embargos y auxilios no prestacionales se aplican en la nómina «{duenia.nombre}» ({duenia.etiqueta})")
+        salida[eid] = (alertas, duenia.nombre if duenia else None)
+    return salida

@@ -49,6 +49,15 @@ def _titulo(p: LiqPeriodo) -> str:
     return f"{p.anio}-{p.mes:02d}-{p.tipo}"
 
 
+def sufijo(p) -> str:
+    """Nombre de la nómina para el archivo (vacío para la nómina General)."""
+    nombre = getattr(p, "nombre", "General") or "General"
+    if nombre == "General":
+        return ""
+    limpio = "".join(c if c.isalnum() else "_" for c in nombre).strip("_")
+    return f"_{limpio[:40]}" if limpio else ""
+
+
 def fila_liquidacion(r: LiqResultado) -> list:
     return ([r.empleado.documento, r.empleado.nombre]
             + [float(r.horas.get(c.value, 0)) for c in ORDEN_CONCEPTOS]
@@ -76,7 +85,7 @@ def liquidacion(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     _autoajustar(hoja, minimo=10, maximo=22)
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 32
-    return _guardar(libro), XLSX, f"liquidacion_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"
+    return _guardar(libro), XLSX, f"liquidacion_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}{sufijo(periodo)}.xlsx"
 
 
 def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
@@ -99,7 +108,7 @@ def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
         hoja.column_dimensions[get_column_letter(3 + i)].width = 5
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 26
-    return _guardar(libro), XLSX, f"plantilla_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"
+    return _guardar(libro), XLSX, f"plantilla_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}{sufijo(periodo)}.xlsx"
 
 
 def _autoajustar(hoja, *, minimo: int, maximo: int, margen: int = 2) -> None:
@@ -250,4 +259,4 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
         um.column_dimensions["A"].width = 14
         um.freeze_panes = "C3"
         um.row_dimensions[2].height = 32
-    return _guardar(libro), XLSX, f"nomina_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}.xlsx"
+    return _guardar(libro), XLSX, f"nomina_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}{sufijo(periodo)}.xlsx"

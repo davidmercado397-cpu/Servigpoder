@@ -16,7 +16,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado
 from app.apps.liquidador.schemas import (
-    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
+    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
 )
 from app.apps.liquidador.services import calculo, exportar, importador, vacaciones
 
@@ -47,7 +47,8 @@ def _resultado_out(r: LiqResultado, nomina: bool = False, detalle: bool = False)
     """Los valores de la nómina solo van a quien tiene el permiso liquidador.nomina.ver."""
     out = ResultadoOut(empleado_id=r.empleado_id, documento=r.empleado.documento, nombre=r.empleado.nombre,
                        cargo=r.empleado.cargo, horas=r.horas, dias=r.dias, total_horas=float(r.total_horas),
-                       umbral_semanas=(r.umbral_semanas or []) if detalle else [])
+                       umbral_semanas=(r.umbral_semanas or []) if detalle else [],
+                       otras_nominas=bool((r.nomina or {}).get("otras_nominas")))
     if nomina and r.nomina:  # vacía si el periodo se calculó antes de existir la nómina
         out.devengado, out.neto = float(r.devengado), float(r.neto)
         out.nomina = r.nomina if detalle else None
@@ -56,7 +57,7 @@ def _resultado_out(r: LiqResultado, nomina: bool = False, detalle: bool = False)
 
 @router.get("/periodos", response_model=ApiResponse[list[PeriodoOut]])
 def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
-    consulta = select(LiqPeriodo).order_by(LiqPeriodo.anio.desc(), LiqPeriodo.mes.desc(), LiqPeriodo.quincena.desc())
+    consulta = select(LiqPeriodo).order_by(LiqPeriodo.anio.desc(), LiqPeriodo.mes.desc(), LiqPeriodo.quincena.desc(), LiqPeriodo.id)
     periodos, meta = paginar_consulta(db, consulta, p)
     return ok([_periodo_out(db, x) for x in periodos], **meta)
 
@@ -64,13 +65,30 @@ def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
 @router.post("/periodos", response_model=ApiResponse[PeriodoOut], status_code=201)
 def crear(data: PeriodoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     desde, hasta = calculo.rango_quincena(data.anio, data.mes, data.quincena)
-    p = LiqPeriodo(anio=data.anio, mes=data.mes, quincena=data.quincena, desde=desde, hasta=hasta, advertencias=[])
-    if db.scalar(select(LiqPeriodo).where(LiqPeriodo.anio == data.anio, LiqPeriodo.mes == data.mes,
-                                          LiqPeriodo.quincena == data.quincena)):
-        raise ApiError(409, f"El periodo {p.etiqueta} ya existe")
+    p = LiqPeriodo(anio=data.anio, mes=data.mes, quincena=data.quincena, nombre=data.nombre, desde=desde, hasta=hasta,
+                   advertencias=[])
+    _nombre_libre(db, p, data.nombre)
     db.add(p)
     db.flush()
-    auditar(db, request, "liq_periodo_creado", actual.id, periodo=p.etiqueta)
+    auditar(db, request, "liq_periodo_creado", actual.id, periodo=p.etiqueta, nomina=p.nombre)
+    db.commit()
+    return ok(_periodo_out(db, p))
+
+
+def _nombre_libre(db: DbSession, p: LiqPeriodo, nombre: str) -> None:
+    otra = db.scalar(select(LiqPeriodo).where(LiqPeriodo.anio == p.anio, LiqPeriodo.mes == p.mes, LiqPeriodo.quincena == p.quincena,
+                                              func.lower(LiqPeriodo.nombre) == nombre.lower()))
+    if otra is not None and otra.id != p.id:
+        raise ApiError(409, f"El periodo {p.etiqueta} ya tiene una nómina «{otra.nombre}»")
+
+
+@router.put("/periodos/{periodo_id}/nombre", response_model=ApiResponse[PeriodoOut])
+def renombrar(periodo_id: int, data: NombreNominaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    _nombre_libre(db, p, data.nombre)
+    antes, p.nombre = p.nombre, data.nombre
+    auditar(db, request, "liq_nomina_renombrada", actual.id, periodo=p.etiqueta, antes=antes, despues=p.nombre)
     db.commit()
     return ok(_periodo_out(db, p))
 
@@ -84,8 +102,13 @@ def ver(periodo_id: int, db: DbSession, _=Depends(require(VER))):
 def eliminar(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     p = _periodo(db, periodo_id)
     _abierto(p)
-    auditar(db, request, "liq_periodo_eliminado", actual.id, periodo=p.etiqueta)
+    auditar(db, request, "liq_periodo_eliminado", actual.id, periodo=p.etiqueta, nomina=p.nombre)
+    otras = calculo.hermanas(db, p)
     db.delete(p)
+    db.flush()
+    for h in otras:  # quienes estaban también en esta nómina pueden pasar a aplicar sus descuentos en otra
+        if h.estado == CALCULADA and h.cargado_en is not None:
+            calculo.calcular(db, h, con_hermanas=False)
     db.commit()
     return ok({"eliminado": periodo_id})
 
@@ -196,7 +219,8 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
         claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
                          "embargos", "prestamos", "deducciones", "neto")
         totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}
-    return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente)
+    return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente,
+              en_otras_nominas=sum(1 for r in lista if (r.nomina or {}).get("otras_nominas")))
 
 
 @router.get("/periodos/{periodo_id}/empleados/{empleado_id}", response_model=ApiResponse[DetalleEmpleado])

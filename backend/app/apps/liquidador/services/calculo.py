@@ -66,11 +66,10 @@ def clase_de(turno: LiqTurno) -> str:
     return NOVEDAD
 
 
-def calcular(db: Session, periodo: LiqPeriodo) -> int:
-    """Recalcula cada día y los totales por empleado con los turnos y festivos vigentes."""
-    dias = list(db.scalars(select(LiqDia).where(LiqDia.periodo_id == periodo.id).order_by(LiqDia.empleado_id, LiqDia.fecha)))
+def contar(db: Session, periodo, dias: list) -> tuple[dict, dict, dict]:
+    """Horas por concepto y clase de cada día (también para el costeo, con días que no se guardan).
+    Devuelve horas y conteo de días por empleado, y el detalle del umbral semanal."""
     fest = festivos.conjunto(db, periodo.desde, periodo.hasta + timedelta(days=1))
-
     horas_por_empleado: dict[int, dict[HourConcept, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
     conteo_por_empleado: dict[int, dict[str, int]] = defaultdict(lambda: dict.fromkeys(CLASES, 0))
     for d in dias:
@@ -85,6 +84,15 @@ def calcular(db: Session, periodo: LiqPeriodo) -> int:
         for c, h in (d.horas or {}).items():
             horas_por_empleado[d.empleado_id][HourConcept(c)] += Decimal(str(h))
         conteo_por_empleado[d.empleado_id][d.clase] += 1
+    return horas_por_empleado, conteo_por_empleado, semanas
+
+
+def calcular(db: Session, periodo: LiqPeriodo, con_hermanas: bool = True) -> int:
+    """Recalcula cada día y los totales por empleado con los turnos y festivos vigentes. Después recalcula las
+    otras nóminas abiertas de fechas que se cruzan, porque una persona en dos nóminas paga sus préstamos, embargos
+    y auxilios en una sola."""
+    dias = list(db.scalars(select(LiqDia).where(LiqDia.periodo_id == periodo.id).order_by(LiqDia.empleado_id, LiqDia.fecha)))
+    horas_por_empleado, conteo_por_empleado, semanas = contar(db, periodo, dias)
 
     db.execute(delete(LiqResultado).where(LiqResultado.periodo_id == periodo.id))
     resultados: dict[int, LiqResultado] = {}
@@ -101,4 +109,18 @@ def calcular(db: Session, periodo: LiqPeriodo) -> int:
     periodo.estado = CALCULADA
     periodo.calculado_en = datetime.now(timezone.utc)
     db.flush()
+    if con_hermanas:
+        recalcular_hermanas(db, periodo)
     return len(conteo_por_empleado)
+
+
+def hermanas(db: Session, periodo: LiqPeriodo) -> list[LiqPeriodo]:
+    """Otras nóminas con fechas que se cruzan (las del mismo periodo y la mensual o quincenas del mismo mes)."""
+    return list(db.scalars(select(LiqPeriodo).where(LiqPeriodo.id != periodo.id, LiqPeriodo.desde <= periodo.hasta,
+                                                    LiqPeriodo.hasta >= periodo.desde).order_by(LiqPeriodo.id)))
+
+
+def recalcular_hermanas(db: Session, periodo: LiqPeriodo) -> None:
+    for h in hermanas(db, periodo):
+        if h.estado == CALCULADA and h.cargado_en is not None:
+            calcular(db, h, con_hermanas=False)

@@ -2,6 +2,7 @@
 
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
@@ -20,7 +21,7 @@ export default function Auxilios() {
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("activos");
-  const [edicion, setEdicion] = useState<{ id: number | null; f: Formulario } | null>(null);
+  const [edicion, setEdicion] = useState<{ id: number | null; nombre?: string; f: Formulario } | null>(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const pag = usePaginacion([q, estado]);
@@ -38,7 +39,7 @@ export default function Auxilios() {
 
   function editar(a: Auxilio) {
     setAviso("");
-    setEdicion({ id: a.id, f: { documento: a.documento, descripcion: a.descripcion, valor_mensual: String(a.valor_mensual), desde: a.desde,
+    setEdicion({ id: a.id, nombre: a.nombre, f: { documento: a.documento, descripcion: a.descripcion, valor_mensual: String(a.valor_mensual), desde: a.desde,
       hasta: a.hasta ?? "", quincena: a.quincena, activo: a.activo } });
   }
 
@@ -96,7 +97,7 @@ export default function Auxilios() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="label">Cédula del empleado</label>
-              <input className="input font-mono" required value={f.documento} onChange={(e) => cambiar({ documento: e.target.value })} />
+              <BuscarEmpleado key={edicion.id ?? "nuevo"} valor={f.documento} nombreInicial={edicion.nombre} onCambio={(documento) => cambiar({ documento })} />
             </div>
             <div className="sm:col-span-2">
               <label className="label">Descripción</label>

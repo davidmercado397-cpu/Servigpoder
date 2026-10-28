@@ -2,6 +2,7 @@
 
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
@@ -30,7 +31,7 @@ export default function Descuentos() {
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("activos");
-  const [edicion, setEdicion] = useState<{ id: number | null; f: Formulario } | null>(null);
+  const [edicion, setEdicion] = useState<{ id: number | null; nombre?: string; f: Formulario } | null>(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const pag = usePaginacion([q, estado]);
@@ -50,6 +51,7 @@ export default function Descuentos() {
     setAviso("");
     setEdicion({
       id: d.id,
+      nombre: d.nombre,
       f: {
         documento: d.documento, tipo: d.tipo, descripcion: d.descripcion, forma: d.porcentaje !== null ? "porcentaje" : "valor",
         valor_mensual: d.valor_mensual?.toString() ?? "", porcentaje: d.porcentaje?.toString() ?? "", monto_total: d.monto_total?.toString() ?? "",
@@ -116,7 +118,7 @@ export default function Descuentos() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="label">Cédula del empleado</label>
-              <input className="input font-mono" required value={f.documento} onChange={(e) => cambiar({ documento: e.target.value })} />
+              <BuscarEmpleado key={edicion.id ?? "nuevo"} valor={f.documento} nombreInicial={edicion.nombre} onCambio={(documento) => cambiar({ documento })} />
             </div>
             <div>
               <label className="label">Tipo</label>

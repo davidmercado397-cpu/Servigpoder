@@ -14,7 +14,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.liquidador.models import CERRADA, LiqAuxilio, LiqDescuento, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa, LiqVacacionBase
 from app.apps.liquidador.schemas import (
-    AuxilioIn, AuxilioOut, ConfiguracionEmpleadoIn, DescuentoIn, DescuentoOut, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut,
+    AuxilioIn, AuxilioOut, ConfiguracionEmpleadoIn, DescuentoIn, DescuentoOut, FichaEmpleadoIn, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut,
     VacacionesEmpleadoIn,
 )
 from app.apps.liquidador.services import calculo, exportar, reportes
@@ -119,7 +119,7 @@ def _descuento_out(x: LiqDescuento, ya: dict) -> DescuentoOut:
 
 
 @router.get("/descuentos", response_model=ApiResponse[list[DescuentoOut]])
-def listar_descuentos(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
+def listar_descuentos(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), empleado_id: int | None = None,
                       estado: str = Query("todos", pattern="^(todos|activos|inactivos)$"), _=Depends(require(VER))):
     consulta = select(LiqDescuento).join(LiqEmpleado).order_by(LiqEmpleado.nombre, LiqDescuento.desde)
     if q.strip():
@@ -128,6 +128,8 @@ def listar_descuentos(db: DbSession, p: Paginacion, q: str = Query("", max_lengt
                                       LiqDescuento.descripcion.ilike(patron)))
     if estado != "todos":
         consulta = consulta.where(LiqDescuento.activo.is_(estado == "activos"))
+    if empleado_id is not None:
+        consulta = consulta.where(LiqDescuento.empleado_id == empleado_id)
     lista, meta = paginar_consulta(db, consulta, p)
     ya = descontado(db, {x.id for x in lista})
     return ok([_descuento_out(x, ya) for x in lista], **meta)
@@ -207,7 +209,7 @@ def _auxilio_out(x: LiqAuxilio, pagado: dict) -> AuxilioOut:
 
 
 @router.get("/auxilios", response_model=ApiResponse[list[AuxilioOut]])
-def listar_auxilios(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
+def listar_auxilios(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), empleado_id: int | None = None,
                     estado: str = Query("todos", pattern="^(todos|activos|inactivos)$"), _=Depends(require(VER))):
     consulta = select(LiqAuxilio).join(LiqEmpleado).order_by(LiqEmpleado.nombre, LiqAuxilio.desde)
     if q.strip():
@@ -216,6 +218,8 @@ def listar_auxilios(db: DbSession, p: Paginacion, q: str = Query("", max_length=
                                       LiqAuxilio.descripcion.ilike(patron)))
     if estado != "todos":
         consulta = consulta.where(LiqAuxilio.activo.is_(estado == "activos"))
+    if empleado_id is not None:
+        consulta = consulta.where(LiqAuxilio.empleado_id == empleado_id)
     lista, meta = paginar_consulta(db, consulta, p)
     pagado = pagado_auxilios(db, {x.id for x in lista})
     return ok([_auxilio_out(x, pagado) for x in lista], **meta)
@@ -297,6 +301,25 @@ def configuracion_empleado(empleado_id: int, data: ConfiguracionEmpleadoIn, requ
     e.arl_clase = data.arl_clase
     auditar(db, request, "liq_arl_empleado", actual.id, documento=e.documento, antes=antes, despues=data.arl_clase)
     return vacaciones_empleado(empleado_id, data, request, db, actual)
+
+
+@router.put("/empleados/{empleado_id}/ficha", response_model=ApiResponse[dict])
+def guardar_ficha(empleado_id: int, data: FichaEmpleadoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Guarda de una vez los datos editables de la ficha: salario, clase de riesgo ARL y vacaciones."""
+    e = db.get(LiqEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    antes = {"salario": float(e.salario) if e.salario is not None else None, "arl_clase": e.arl_clase, "dias_habiles": e.dias_habiles,
+             "fecha_ingreso": e.fecha_ingreso.isoformat() if e.fecha_ingreso else None, "vacaciones_previas": float(e.vacaciones_previas or 0)}
+    e.salario, e.arl_clase = data.salario, data.arl_clase
+    e.dias_habiles = "".join(str(d) for d in data.dias_habiles)
+    e.fecha_ingreso, e.vacaciones_previas = data.fecha_ingreso, data.vacaciones_previas
+    despues = {"salario": float(e.salario) if e.salario is not None else None, "arl_clase": e.arl_clase, "dias_habiles": e.dias_habiles,
+               "fecha_ingreso": e.fecha_ingreso.isoformat() if e.fecha_ingreso else None, "vacaciones_previas": float(e.vacaciones_previas or 0)}
+    cambios = {k: {"antes": antes[k], "despues": despues[k]} for k in antes if antes[k] != despues[k]}
+    auditar(db, request, "liq_ficha_empleado", actual.id, documento=e.documento, cambios=cambios)
+    db.commit()
+    return ok({"id": e.id, "cambios": list(cambios)}, aviso=AVISO)
 
 
 def _vacacion_out(r: LiqResultado, editable: bool) -> dict:

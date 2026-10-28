@@ -327,6 +327,10 @@ class ConfiguracionEmpleadoIn(VacacionesEmpleadoIn):
     arl_clase: int | None = Field(None, ge=1, le=5)
 
 
+class FichaEmpleadoIn(ConfiguracionEmpleadoIn):
+    salario: Decimal | None = Field(None, gt=0, le=100_000_000)  # vacío = salario mínimo
+
+
 class PromedioVacacionesIn(BaseModel):
     promedio: Decimal | None = Field(None, ge=0, le=100_000_000)  # vacío = volver al sugerido
 

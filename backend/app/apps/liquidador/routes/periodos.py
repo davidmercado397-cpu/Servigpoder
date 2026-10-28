@@ -272,12 +272,39 @@ def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), 
             if eid not in ultimas or clave > ultimas[eid][0]:
                 ultimas[eid] = (clave, f"{anio}-{mes:02d} {'Mensual' if qn == 0 else f'Q{qn}'}")
     disfrutados = vacaciones.habiles_disfrutados(db, {e.id: e for e in lista})
-    hoy = date.today()
-    return ok([EmpleadoOut(id=e.id, documento=e.documento, nombre=e.nombre, cargo=e.cargo,
-                           quincenas=conteo.get(e.id, 0), ultima=ultimas[e.id][1] if e.id in ultimas else None,
-                           salario=float(e.salario) if e.salario is not None and VER_NOMINA in actual.permisos else None,
-                           dias_habiles=[int(c) for c in (e.dias_habiles or vacaciones.HABILES_DEFECTO)],
-                           fecha_ingreso=e.fecha_ingreso, vacaciones_previas=float(e.vacaciones_previas or 0),
-                           vacaciones_liquidador=disfrutados.get(e.id, 0),
-                           saldo_vacaciones=vacaciones.saldo(e, disfrutados.get(e.id, 0), hoy), arl_clase=e.arl_clase)
+    return ok([_empleado_out(e, conteo.get(e.id, 0), ultimas[e.id][1] if e.id in ultimas else None, disfrutados.get(e.id, 0), actual)
                for e in lista], **meta)
+
+
+def _empleado_out(e: LiqEmpleado, quincenas: int, ultima: str | None, disfrutados: int, actual: Usuario) -> EmpleadoOut:
+    return EmpleadoOut(id=e.id, documento=e.documento, nombre=e.nombre, cargo=e.cargo, quincenas=quincenas, ultima=ultima,
+                       salario=float(e.salario) if e.salario is not None and VER_NOMINA in actual.permisos else None,
+                       dias_habiles=[int(c) for c in (e.dias_habiles or vacaciones.HABILES_DEFECTO)],
+                       fecha_ingreso=e.fecha_ingreso, vacaciones_previas=float(e.vacaciones_previas or 0),
+                       vacaciones_liquidador=disfrutados, saldo_vacaciones=vacaciones.saldo(e, disfrutados, date.today()),
+                       arl_clase=e.arl_clase)
+
+
+@router.get("/empleados/{empleado_id}", response_model=ApiResponse[dict])
+def ficha(empleado_id: int, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Ficha del empleado: sus datos y las nóminas en que aparece (con valores solo para quien ve la nómina)."""
+    e = db.get(LiqEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    ve_nomina = VER_NOMINA in actual.permisos
+    filas = db.execute(select(LiqResultado, LiqPeriodo).join(LiqPeriodo, LiqPeriodo.id == LiqResultado.periodo_id)
+                       .where(LiqResultado.empleado_id == e.id)
+                       .order_by(LiqPeriodo.anio.desc(), LiqPeriodo.mes.desc(), LiqPeriodo.quincena.desc(), LiqPeriodo.id)).all()
+    nominas = []
+    for r, p in filas:
+        n = r.nomina or {}
+        x = {"periodo_id": p.id, "etiqueta": p.etiqueta, "anio": p.anio, "mes": p.mes, "quincena": p.quincena, "nombre": p.nombre,
+             "estado": p.estado, "total_horas": float(r.total_horas), "dias": r.dias, "alertas": len(n.get("alertas", []))}
+        if ve_nomina and n:
+            x.update(devengado=float(r.devengado), neto=float(r.neto), vacaciones=n.get("vacaciones_valor", 0),
+                     auxilios_no_prestacionales=n.get("auxilios_no_prestacionales", 0), prestamos=n.get("prestamos", 0),
+                     embargos=n.get("embargos", 0))
+        nominas.append(x)
+    ultima = nominas[0]["etiqueta"] if nominas else None
+    disfrutados = vacaciones.habiles_disfrutados(db, {e.id: e}).get(e.id, 0)
+    return ok({**_empleado_out(e, len(nominas), ultima, disfrutados, actual).model_dump(mode="json"), "nominas": nominas})

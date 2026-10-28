@@ -404,3 +404,29 @@ def test_arl_por_empleado_y_auxilio_del_costeo(admin):
     assert load_workbook(BytesIO(admin.get(f"{API}/costeos/{c['id']}/excel").content))["Costo empresa"]["D4"].value == "1 (por defecto)"
     hoja = load_workbook(BytesIO(admin.get(f"{API}/costeos/plantilla?anio=2026&mes=9&quincena=2").content)).active
     assert next(hoja.iter_rows(values_only=True))[:4] == ("documento", "SEPTIEMBRE 2026", "arl", 16)
+
+
+def test_ficha_del_empleado(admin):
+    pid = _quincena(admin)
+    _cargar(admin, pid)
+    eid = _resultados(admin, pid)["3003"]["empleado_id"]
+    assert admin.post(f"{API}/descuentos", json={"documento": "3003", "tipo": "prestamo", "descripcion": "Celular",
+                                                 "valor_mensual": 80000, "desde": "2026-09-01"}).status_code == 201
+    assert admin.post(f"{API}/auxilios", json={"documento": "3003", "descripcion": "Rodamiento", "valor_mensual": 100000,
+                                               "desde": "2026-09-01"}).status_code == 201
+    assert admin.post(f"{API}/auxilios", json={"documento": "1001", "descripcion": "Otro", "valor_mensual": 100000,
+                                               "desde": "2026-09-01"}).status_code == 201
+    f = admin.get(f"{API}/empleados/{eid}").json()["data"]
+    assert f["documento"] == "3003" and f["quincenas"] == 1 and f["nominas"][0]["nombre"] == "General" and "devengado" in f["nominas"][0]
+    # Todo se guarda de una vez y queda auditado con lo que cambió
+    datos = {"salario": 2500000, "arl_clase": 4, "dias_habiles": [0, 1, 2, 3, 4], "fecha_ingreso": "2025-01-15", "vacaciones_previas": 2}
+    r = admin.put(f"{API}/empleados/{eid}/ficha", json=datos)
+    assert r.status_code == 200 and set(r.json()["data"]["cambios"]) == {"salario", "arl_clase", "dias_habiles", "fecha_ingreso", "vacaciones_previas"}
+    f = admin.get(f"{API}/empleados/{eid}").json()["data"]
+    assert (f["salario"], f["arl_clase"], f["dias_habiles"], f["fecha_ingreso"]) == (2500000, 4, [0, 1, 2, 3, 4], "2025-01-15")
+    assert f["saldo_vacaciones"]["previos"] == 2
+    assert admin.put(f"{API}/empleados/{eid}/ficha", json={**datos, "salario": None}).json()["data"]["cambios"] == ["salario"]
+    # Préstamos y auxilios de esa persona
+    assert [x["descripcion"] for x in admin.get(f"{API}/descuentos?empleado_id={eid}").json()["data"]] == ["Celular"]
+    assert [x["descripcion"] for x in admin.get(f"{API}/auxilios?empleado_id={eid}").json()["data"]] == ["Rodamiento"]
+    assert admin.get(f"{API}/empleados/999999").status_code == 404

@@ -6,18 +6,18 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
-import type { Descuento } from "@/lib/liquidador";
+import { QUINCENAS, type Descuento, type Quincena } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
 type Formulario = {
   documento: string; tipo: "prestamo" | "embargo"; descripcion: string; forma: "valor" | "porcentaje";
-  valor_mensual: string; porcentaje: string; monto_total: string; desde: string; hasta: string; activo: boolean;
+  valor_mensual: string; porcentaje: string; monto_total: string; desde: string; hasta: string; quincena: Quincena; activo: boolean;
 };
 
 const hoy = () => new Date().toISOString().slice(0, 10);
 const VACIO: Formulario = {
   documento: "", tipo: "prestamo", descripcion: "", forma: "valor", valor_mensual: "", porcentaje: "", monto_total: "",
-  desde: hoy(), hasta: "", activo: true,
+  desde: hoy(), hasta: "", quincena: "ambas", activo: true,
 };
 const TIPO: Record<string, [string, string]> = {
   prestamo: ["Préstamo", "bg-sky-100 text-sky-800"],
@@ -53,7 +53,7 @@ export default function Descuentos() {
       f: {
         documento: d.documento, tipo: d.tipo, descripcion: d.descripcion, forma: d.porcentaje !== null ? "porcentaje" : "valor",
         valor_mensual: d.valor_mensual?.toString() ?? "", porcentaje: d.porcentaje?.toString() ?? "", monto_total: d.monto_total?.toString() ?? "",
-        desde: d.desde, hasta: d.hasta ?? "", activo: d.activo,
+        desde: d.desde, hasta: d.hasta ?? "", quincena: d.quincena ?? "ambas", activo: d.activo,
       },
     });
   }
@@ -67,7 +67,7 @@ export default function Descuentos() {
       documento: f.documento.trim(), tipo: f.tipo, descripcion: f.descripcion.trim(),
       valor_mensual: f.forma === "valor" ? Number(f.valor_mensual) : null,
       porcentaje: f.forma === "porcentaje" ? Number(f.porcentaje) : null,
-      monto_total: f.monto_total ? Number(f.monto_total) : null, desde: f.desde, hasta: f.hasta || null, activo: f.activo,
+      monto_total: f.monto_total ? Number(f.monto_total) : null, desde: f.desde, hasta: f.hasta || null, quincena: f.quincena, activo: f.activo,
     };
     try {
       await api(id ? `/liquidador/descuentos/${id}` : "/liquidador/descuentos", { method: id ? "PUT" : "POST", json: datos });
@@ -100,8 +100,8 @@ export default function Descuentos() {
         </button>
       )}>Préstamos y embargos</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Se descuentan después de salud y pensión: primero los embargos, luego los préstamos. Con un valor mensual, la quincena descuenta la mitad
-        y el periodo mensual la cuota completa; con un %, se aplica sobre el devengado sin auxilio de transporte. Si tiene monto total, deja de
+        Se descuentan después de salud y pensión: primero los embargos, luego los préstamos. Con un valor mensual y «ambas quincenas», cada
+        quincena descuenta la mitad; si es solo de una quincena, la cuota completa va en esa; el periodo mensual descuenta la cuota completa; con un %, se aplica sobre el devengado sin auxilio de transporte. Si tiene monto total, deja de
         descontar al completarlo. Nunca se descuenta más que el neto disponible.
       </p>
       {error && <Alerta>{error}</Alerta>}
@@ -141,7 +141,8 @@ export default function Descuentos() {
               <div>
                 <label className="label">Cuota mensual</label>
                 <input className="input" type="number" min={1} required value={f.valor_mensual} onChange={(e) => cambiar({ valor_mensual: e.target.value })} />
-                {f.valor_mensual && <p className="mt-1 text-xs text-slate-500">Por quincena: {pesos(Number(f.valor_mensual) / 2)}</p>}
+                {f.valor_mensual && <p className="mt-1 text-xs text-slate-500">
+                  {f.quincena === "ambas" ? `Por quincena: ${pesos(Number(f.valor_mensual) / 2)}` : `Completa en la ${f.quincena === "primera" ? "1.ª" : "2.ª"} quincena`}</p>}
               </div>
             ) : (
               <div>
@@ -149,6 +150,12 @@ export default function Descuentos() {
                 <input className="input" type="number" min={0.01} max={100} step="0.01" required value={f.porcentaje} onChange={(e) => cambiar({ porcentaje: e.target.value })} />
               </div>
             )}
+            <div>
+              <label className="label">Quincena en que se descuenta</label>
+              <select className="input" value={f.quincena} onChange={(e) => cambiar({ quincena: e.target.value as Quincena })}>
+                {QUINCENAS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+              </select>
+            </div>
             <div>
               <label className="label">Monto total (opcional)</label>
               <input className="input" type="number" min={1} value={f.monto_total} onChange={(e) => cambiar({ monto_total: e.target.value })} />
@@ -191,7 +198,7 @@ export default function Descuentos() {
           <table className="tabla text-sm">
             <thead>
               <tr>
-                <th>Empleado</th><th>Tipo</th><th>Descripción</th><th className="text-right">Cuota</th><th className="text-right">Monto total</th>
+                <th>Empleado</th><th>Tipo</th><th>Descripción</th><th className="text-right">Cuota</th><th>Quincena</th><th className="text-right">Monto total</th>
                 <th className="text-right">Descontado</th><th className="text-right">Saldo</th><th>Vigencia</th><th />
               </tr>
             </thead>
@@ -202,6 +209,7 @@ export default function Descuentos() {
                   <td><Insignia color={TIPO[d.tipo][1]}>{TIPO[d.tipo][0]}</Insignia>{!d.activo && <Insignia color="ml-1">Inactivo</Insignia>}</td>
                   <td>{d.descripcion}</td>
                   <td className="whitespace-nowrap text-right tabular-nums">{d.porcentaje !== null ? `${d.porcentaje} %` : `${pesos(d.valor_mensual)}/mes`}</td>
+                  <td className="whitespace-nowrap text-xs">{QUINCENAS.find(([v]) => v === d.quincena)?.[1] ?? "Ambas quincenas"}</td>
                   <td className="text-right tabular-nums">{pesos(d.monto_total)}</td>
                   <td className="text-right tabular-nums">{pesos(d.descontado)}</td>
                   <td className="text-right tabular-nums">{d.saldo === null ? "—" : pesos(d.saldo)}</td>

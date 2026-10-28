@@ -166,6 +166,11 @@ inicio y hora nocturna) con sus pruebas originales. La hora fin de un turno es i
   `tests/test_liq_igualdad_produccion.py` comprueba que su matriz es idéntica a la de producción.
 - **Festivos**: calendario nacional con ajustes manuales (agregar, quitar, restablecer).
 
+- **Auxilios no prestacionales:** módulo por persona (valor mensual, vigencia, quincena). Suman al devengado y al
+  neto pero no a la base de salud y pensión ni a la de embargos por %, salvo lo que pase del 40 % de la
+  remuneración (Ley 1393 de 2010), que sí entra en la base con una alerta. Cada día de ausencia descuenta 1/30.
+- **Quincena en que aplica** cada préstamo, embargo o auxilio: ambas (la mitad en cada una), solo la 1.ª o solo la
+  2.ª (el valor completo en esa). El periodo mensual aplica el valor completo.
 - **Umbral semanal de horas (opcional, por periodo):** en el periodo se marca «Aplicar umbral semanal» con su
   valor (p. ej. 42 h). Queda guardado para la carga o el recálculo que siga y se puede desmarcar. Por persona y
   semana (lunes a domingo) solo se pagan las extras que pasen del umbral, sin superar las del cálculo diario; las

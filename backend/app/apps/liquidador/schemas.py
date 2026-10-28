@@ -212,6 +212,7 @@ class DescuentoIn(BaseModel):
     monto_total: Decimal | None = Field(None, gt=0, le=1_000_000_000)
     desde: date
     hasta: date | None = None
+    quincena: Literal["ambas", "primera", "segunda"] = "ambas"
     activo: bool = True
 
     @model_validator(mode="after")
@@ -235,9 +236,40 @@ class DescuentoOut(BaseModel):
     monto_total: float | None
     desde: date
     hasta: date | None
+    quincena: str = "ambas"
     activo: bool
     descontado: float
     saldo: float | None
+
+
+class AuxilioIn(BaseModel):
+    documento: str = Field(min_length=1, max_length=32)
+    descripcion: str = Field(min_length=1, max_length=200)
+    valor_mensual: Decimal = Field(gt=0, le=100_000_000)
+    desde: date
+    hasta: date | None = None
+    quincena: Literal["ambas", "primera", "segunda"] = "ambas"
+    activo: bool = True
+
+    @model_validator(mode="after")
+    def _fechas(self):
+        if self.hasta and self.hasta < self.desde:
+            raise ValueError("La fecha final no puede ser anterior a la inicial")
+        return self
+
+
+class AuxilioOut(BaseModel):
+    id: int
+    empleado_id: int
+    documento: str
+    nombre: str
+    descripcion: str
+    valor_mensual: float
+    desde: date
+    hasta: date | None
+    quincena: str
+    activo: bool
+    pagado: float
 
 
 class SalarioIn(BaseModel):

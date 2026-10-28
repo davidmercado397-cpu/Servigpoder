@@ -196,6 +196,28 @@ class LiqDescuento(Base):
     monto_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     desde: Mapped[date] = mapped_column(Date)
     hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # En qué quincena aplica: ambas (la mitad en cada una), primera o segunda (el valor completo en esa)
+    quincena: Mapped[str] = mapped_column(String(10), default="ambas", server_default="ambas")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
+
+
+class LiqAuxilio(Base):
+    """Auxilio no prestacional de un empleado (rodamiento, alimentación…): suma al devengado pero no a la base de
+    salud y pensión (salvo lo que pase del 40 % de la remuneración, Ley 1393 de 2010). Valor mensual; se descuenta
+    en proporción a los días de ausencia del periodo."""
+
+    __tablename__ = "liq_auxilio"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
+    descripcion: Mapped[str] = mapped_column(String(200))
+    valor_mensual: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    desde: Mapped[date] = mapped_column(Date)
+    hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    quincena: Mapped[str] = mapped_column(String(10), default="ambas", server_default="ambas")
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

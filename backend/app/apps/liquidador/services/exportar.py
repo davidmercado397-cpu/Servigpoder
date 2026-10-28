@@ -119,7 +119,7 @@ def _guardar(libro: Workbook) -> bytes:
 _CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
 ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
-    "SUELDO BASICO", "INCAPACIDAD", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIO DE TRANSPORTE",
+    "SUELDO BASICO", "INCAPACIDAD", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
     "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
 )
 _PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
@@ -130,7 +130,7 @@ def fila_nomina(r: LiqResultado) -> list:
     v = n.get("valores", {})
     return [r.empleado.documento, r.empleado.nombre, n.get("salario", 0), n.get("dias_salario", 0), n.get("dias_incapacidad", 0),
             n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0), *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
-            n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
+            n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
             n.get("prestamos", 0), n.get("deducciones", 0), n.get("neto", 0)]
 
 
@@ -180,6 +180,20 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     for (celda,) in desc.iter_rows(min_row=2, min_col=6, max_col=6):
         celda.number_format = "$ #,##0"
     _autoajustar(desc, minimo=10, maximo=50)
+
+    aux = libro.create_sheet("Auxilios no prestacionales")
+    aux.append(["DOCUMENTO", "EMPLEADO", "DESCRIPCION", "CALCULO", "VALOR PAGADO", "EXCESO DEL 40 % EN LA BASE DE APORTES"])
+    for r in resultados:
+        n = r.nomina or {}
+        for i, x in enumerate(n.get("auxilios", [])):
+            aux.append([r.empleado.documento, r.empleado.nombre, x["descripcion"], x["calculo"], x["valor"],
+                        n.get("exceso_no_salarial", 0) if i == 0 else None])
+    for celda in aux[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for col in (5, 6):
+        for (celda,) in aux.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda.number_format = "$ #,##0"
+    _autoajustar(aux, minimo=10, maximo=50)
 
     usadas = sorted({f for r in resultados for f in (r.nomina or {}).get("tarifas", [])})
     tar = libro.create_sheet("Tarifas usadas")

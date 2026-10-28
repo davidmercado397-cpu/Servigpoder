@@ -143,7 +143,7 @@ def test_prestamo_con_saldo_y_embargo(admin):
     r = admin.get(f"{API}/periodos/{p1}/nomina")
     assert r.headers["content-disposition"] == 'attachment; filename="nomina_2026_11_Q1.xlsx"'
     libro = load_workbook(BytesIO(r.content))
-    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos y embargos", "Tarifas usadas"]
+    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos y embargos", "Auxilios no prestacionales", "Tarifas usadas"]
     filas_x = list(libro.worksheets[0].iter_rows(values_only=True))
     enc = filas_x[0]
     fila = dict(zip(enc, filas_x[1]))
@@ -166,3 +166,55 @@ def test_permisos_de_nomina(admin):
     assert admin.get(f"{API}/tarifas").status_code == 403
     assert admin.get(f"{API}/descuentos").status_code == 403
     assert admin.get(f"{API}/periodos/{pid}/nomina").status_code == 403
+
+
+def test_auxilios_no_prestacionales_y_quincena(admin):
+    dias = list(range(1, 16))
+    # 1001: 15 días A (7 + 1 extra diurna); 2002: 13 días A y 2 ausencias
+    filas = [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 13), "AUS", "AUS"], [3003, "3003", *(["A"] * 15)]]
+    p1 = _periodo_con(admin, 2026, 12, 1, filas, dias)
+    base = {"valor_mensual": 300000, "desde": "2026-12-01"}
+    for doc in ("1001", "2002"):
+        r = admin.post(f"{API}/auxilios", json={**base, "documento": doc, "descripcion": "Auxilio de rodamiento"})
+        assert r.status_code == 201, r.text
+    assert admin.post(f"{API}/auxilios", json={**base, "documento": "3003", "descripcion": "Bonificación", "valor_mensual": 2000000}).status_code == 201
+    # Préstamo solo en la 2.ª quincena (valor completo en esa) y auxilio solo en la 1.ª
+    assert admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "prestamo", "descripcion": "Celular",
+                                                 "valor_mensual": 80000, "desde": "2026-12-01", "quincena": "segunda"}).status_code == 201
+    assert admin.post(f"{API}/auxilios", json={**base, "documento": "1001", "descripcion": "Alimentación", "valor_mensual": 100000,
+                                               "quincena": "primera"}).status_code == 201
+    assert admin.post(f"{API}/auxilios", json={**base, "documento": "1001", "descripcion": "x", "quincena": "tercera"}).status_code == 422
+    admin.post(f"{API}/periodos/{p1}/recalcular")
+
+    n = _nomina(admin, p1, "1001")
+    # Rodamiento: mitad del mes en cada quincena (150.000); alimentación: completa en la 1.ª (100.000)
+    assert sorted(x["valor"] for x in n["auxilios"]) == [100000, 150000] and n["auxilios_no_prestacionales"] == 250000
+    horas = sum(n["valores"].values())  # extras y recargos (hay domingos y el festivo del 8)
+    assert n["devengado"] == n["basico"] + horas + 250000 + n["auxilio"]
+    # 250.000 no pasa del 40 % de la remuneración: la base de salud y pensión es solo lo salarial
+    salarial = n["basico"] + horas
+    assert n["exceso_no_salarial"] == 0 and n["ibc"] == salarial and not n["alertas"]
+    # 1.000.000 (la mitad de 2.000.000) sí pasa del 40 %: el exceso entra en la base
+    n3 = _nomina(admin, p1, "3003")
+    sal3 = n3["basico"] + sum(n3["valores"].values())
+    exceso = round(1000000 - 0.4 * (sal3 + 1000000))
+    assert exceso > 0 and n3["exceso_no_salarial"] == exceso and n3["ibc"] == sal3 + exceso and n3["alertas"]
+    assert n["prestamos"] == 0  # el préstamo es solo de la 2.ª quincena
+
+    # Ausencias: 2 días × 300.000 / 30 = 20.000 menos
+    n2 = _nomina(admin, p1, "2002")
+    assert n2["dias_ausencia"] == 2 and n2["auxilios"][0]["valor"] == 150000 - 20000 and "ausencia" in n2["auxilios"][0]["calculo"]
+
+    p2 = _periodo_con(admin, 2026, 12, 2, [[1001, "1001", *(["A"] * 16)]], list(range(16, 32)))
+    n = _nomina(admin, p2, "1001")
+    assert n["prestamos"] == 80000 and "solo 2.ª quincena" in n["descuentos"][0]["calculo"]
+    assert [x["valor"] for x in n["auxilios"]] == [150000]  # la alimentación es solo de la 1.ª
+
+    lista = admin.get(f"{API}/auxilios?q=1001").json()["data"]
+    rodamiento = next(x for x in lista if x["descripcion"] == "Auxilio de rodamiento")
+    assert rodamiento["pagado"] == 300000 and rodamiento["quincena"] == "ambas"
+    assert admin.delete(f"{API}/auxilios/{rodamiento['id']}").status_code == 409  # ya se pagó: se desactiva
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{p1}/nomina").content))
+    assert "Auxilios no prestacionales" in libro.sheetnames
+    enc = [c.value for c in libro.worksheets[0][1]]
+    assert "AUXILIOS NO PRESTACIONALES" in enc

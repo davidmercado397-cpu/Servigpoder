@@ -455,6 +455,9 @@ function NominaPersona({ n }: { n: Nomina }) {
             {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
             {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
             {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
+            {(n.auxilios ?? []).map((x) => (
+              <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
+            ))}
             {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
             {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
           </tbody>
@@ -475,6 +478,7 @@ function NominaPersona({ n }: { n: Nomina }) {
           </tbody>
         </table>
       </div>
+      {(n.alertas ?? []).map((a) => <p key={a} className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{a}</p>)}
       {n.dias_sin_pago > 0 && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
           {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (vacaciones, licencias…, que se pagan en otro proceso).

@@ -33,6 +33,9 @@ export type Nomina = {
   basico: number; incapacidad: number; auxilio: number; horas: Record<string, number>; valores: Record<string, number>;
   recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
   descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; deducciones: number; neto: number; tarifas: string[];
+  /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
+  auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
+  dias_ausencia?: number; exceso_no_salarial?: number; alertas?: string[];
 };
 
 export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "deducciones" | "neto", number>;
@@ -45,7 +48,16 @@ export type Tarifa = {
 export type Descuento = {
   id: number; empleado_id: number; documento: string; nombre: string; tipo: "prestamo" | "embargo"; descripcion: string;
   valor_mensual: number | null; porcentaje: number | null; monto_total: number | null; desde: string; hasta: string | null;
-  activo: boolean; descontado: number; saldo: number | null;
+  quincena: Quincena; activo: boolean; descontado: number; saldo: number | null;
+};
+
+/** En qué quincena aplica un préstamo, embargo o auxilio: la mitad en cada una, o completo en una sola */
+export type Quincena = "ambas" | "primera" | "segunda";
+export const QUINCENAS: [Quincena, string][] = [["ambas", "Ambas quincenas"], ["primera", "Solo 1.ª quincena"], ["segunda", "Solo 2.ª quincena"]];
+
+export type Auxilio = {
+  id: number; empleado_id: number; documento: string; nombre: string; descripcion: string; valor_mensual: number;
+  desde: string; hasta: string | null; quincena: Quincena; activo: boolean; pagado: number;
 };
 
 export type Dia = { fecha: string; codigo: string; turno: string; tipo_dia: string; clase: string; horas: Record<string, number> };

@@ -1,5 +1,5 @@
 """Nómina del liquidador: tarifas (% de recargos y valores de ley por vigencia), salario de cada
-empleado, préstamos y embargos, y la descarga del archivo de nómina de un periodo."""
+empleado, préstamos y embargos, auxilios no prestacionales y la descarga del archivo de nómina de un periodo."""
 
 from datetime import date
 
@@ -12,8 +12,8 @@ from app.core.paginacion import Paginacion, paginar_consulta
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
-from app.apps.liquidador.models import LiqDescuento, LiqEmpleado, LiqPeriodo, LiqTarifa
-from app.apps.liquidador.schemas import DescuentoIn, DescuentoOut, SalarioIn, TarifaIn, TarifaOut
+from app.apps.liquidador.models import LiqAuxilio, LiqDescuento, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa
+from app.apps.liquidador.schemas import AuxilioIn, AuxilioOut, DescuentoIn, DescuentoOut, SalarioIn, TarifaIn, TarifaOut
 from app.apps.liquidador.services import exportar
 from app.apps.liquidador.services.nomina import descontado, porcentajes_de_ley
 
@@ -111,6 +111,7 @@ def _descuento_out(x: LiqDescuento, ya: dict) -> DescuentoOut:
         descripcion=x.descripcion, valor_mensual=float(x.valor_mensual) if x.valor_mensual is not None else None,
         porcentaje=float(x.porcentaje) if x.porcentaje is not None else None,
         monto_total=float(x.monto_total) if x.monto_total is not None else None, desde=x.desde, hasta=x.hasta,
+        quincena=x.quincena or "ambas",
         activo=x.activo, descontado=hecho, saldo=max(float(x.monto_total) - hecho, 0) if x.monto_total is not None else None)
 
 
@@ -139,7 +140,7 @@ def _empleado_por_documento(db: DbSession, documento: str) -> LiqEmpleado:
 def _guardar_descuento(x: LiqDescuento, data: DescuentoIn, empleado: LiqEmpleado) -> None:
     x.empleado_id, x.tipo, x.descripcion = empleado.id, data.tipo, data.descripcion.strip()
     x.valor_mensual, x.porcentaje, x.monto_total = data.valor_mensual, data.porcentaje, data.monto_total
-    x.desde, x.hasta, x.activo = data.desde, data.hasta, data.activo
+    x.desde, x.hasta, x.activo, x.quincena = data.desde, data.hasta, data.activo, data.quincena
 
 
 @router.post("/descuentos", response_model=ApiResponse[DescuentoOut], status_code=201)
@@ -180,6 +181,88 @@ def eliminar_descuento(descuento_id: int, request: Request, db: DbSession, actua
     db.delete(x)
     db.commit()
     return ok({"eliminado": descuento_id})
+
+
+# --- Auxilios no prestacionales ---
+
+def pagado_auxilios(db: DbSession, ids: set[int]) -> dict[int, float]:
+    """Lo que ya se pagó de cada auxilio en los periodos calculados."""
+    total: dict[int, float] = {}
+    if not ids:
+        return total
+    for nomina in db.scalars(select(LiqResultado.nomina)):
+        for x in (nomina or {}).get("auxilios", []):
+            if x.get("id") in ids:
+                total[x["id"]] = total.get(x["id"], 0.0) + float(x.get("valor", 0))
+    return total
+
+
+def _auxilio_out(x: LiqAuxilio, pagado: dict) -> AuxilioOut:
+    return AuxilioOut(id=x.id, empleado_id=x.empleado_id, documento=x.empleado.documento, nombre=x.empleado.nombre,
+                      descripcion=x.descripcion, valor_mensual=float(x.valor_mensual), desde=x.desde, hasta=x.hasta,
+                      quincena=x.quincena or "ambas", activo=x.activo, pagado=float(pagado.get(x.id, 0)))
+
+
+@router.get("/auxilios", response_model=ApiResponse[list[AuxilioOut]])
+def listar_auxilios(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
+                    estado: str = Query("todos", pattern="^(todos|activos|inactivos)$"), _=Depends(require(VER))):
+    consulta = select(LiqAuxilio).join(LiqEmpleado).order_by(LiqEmpleado.nombre, LiqAuxilio.desde)
+    if q.strip():
+        patron = f"%{q.strip()}%"
+        consulta = consulta.where(or_(LiqEmpleado.documento.ilike(patron), LiqEmpleado.nombre.ilike(patron),
+                                      LiqAuxilio.descripcion.ilike(patron)))
+    if estado != "todos":
+        consulta = consulta.where(LiqAuxilio.activo.is_(estado == "activos"))
+    lista, meta = paginar_consulta(db, consulta, p)
+    pagado = pagado_auxilios(db, {x.id for x in lista})
+    return ok([_auxilio_out(x, pagado) for x in lista], **meta)
+
+
+def _guardar_auxilio(x: LiqAuxilio, data: AuxilioIn, empleado: LiqEmpleado) -> None:
+    x.empleado_id, x.descripcion, x.valor_mensual = empleado.id, data.descripcion.strip(), data.valor_mensual
+    x.desde, x.hasta, x.quincena, x.activo = data.desde, data.hasta, data.quincena, data.activo
+
+
+@router.post("/auxilios", response_model=ApiResponse[AuxilioOut], status_code=201)
+def crear_auxilio(data: AuxilioIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    e = _empleado_por_documento(db, data.documento)
+    x = LiqAuxilio()
+    _guardar_auxilio(x, data, e)
+    db.add(x)
+    db.flush()
+    db.refresh(x)
+    auditar(db, request, "liq_auxilio_creado", actual.id, documento=e.documento, descripcion=x.descripcion,
+            valor_mensual=float(x.valor_mensual), quincena=x.quincena)
+    db.commit()
+    return ok(_auxilio_out(x, {}), aviso=AVISO)
+
+
+@router.put("/auxilios/{auxilio_id}", response_model=ApiResponse[AuxilioOut])
+def editar_auxilio(auxilio_id: int, data: AuxilioIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    x = db.get(LiqAuxilio, auxilio_id)
+    if x is None:
+        raise ApiError(404, "Auxilio no encontrado")
+    e = _empleado_por_documento(db, data.documento)
+    _guardar_auxilio(x, data, e)
+    db.flush()
+    db.refresh(x)
+    auditar(db, request, "liq_auxilio_editado", actual.id, documento=e.documento, descripcion=x.descripcion,
+            valor_mensual=float(x.valor_mensual), quincena=x.quincena, activo=x.activo)
+    db.commit()
+    return ok(_auxilio_out(x, pagado_auxilios(db, {x.id})), aviso=AVISO)
+
+
+@router.delete("/auxilios/{auxilio_id}", response_model=ApiResponse[dict])
+def eliminar_auxilio(auxilio_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    x = db.get(LiqAuxilio, auxilio_id)
+    if x is None:
+        raise ApiError(404, "Auxilio no encontrado")
+    if pagado_auxilios(db, {x.id}).get(x.id):
+        raise ApiError(409, "Este auxilio ya se pagó en algún periodo: desactívelo en lugar de eliminarlo")
+    auditar(db, request, "liq_auxilio_eliminado", actual.id, documento=x.empleado.documento, descripcion=x.descripcion)
+    db.delete(x)
+    db.commit()
+    return ok({"eliminado": auxilio_id})
 
 
 # --- Archivo de nómina del periodo ---

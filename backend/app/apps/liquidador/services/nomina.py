@@ -23,13 +23,14 @@ from sqlalchemy.orm import Session
 
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import (
-    EMBARGO, MENSUAL, LiqDescuento, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa,
+    EMBARGO, MENSUAL, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa,
 )
 
 # Clases de día (mismos valores que calculo.py)
 PAGAN_SALARIO = ("trabajado", "descanso_pago", "libre")
 PAGAN_AUXILIO = ("trabajado", "descanso_pago")
 INCAPACIDAD = "incapacidad"
+AUSENCIA = "ausencia"
 DIAS_EMPRESA_INCAPACIDAD = 2
 
 # Conceptos que se pagan aparte del salario (las horas ordinarias diurnas ya están en el salario)
@@ -94,12 +95,33 @@ def dias_base_30(fecha: date) -> int:
     return 1
 
 
-def _fraccion_mensual(periodo: LiqPeriodo) -> Decimal:
-    return Decimal("1") if periodo.quincena == MENSUAL else Decimal("0.5")
+AMBAS, PRIMERA, SEGUNDA = "ambas", "primera", "segunda"
+TOPE_NO_SALARIAL = Decimal("0.40")  # Ley 1393 de 2010, art. 30: lo que pase del 40 % entra en la base de aportes
+_NOMBRE_QUINCENA = {PRIMERA: "solo 1.ª quincena", SEGUNDA: "solo 2.ª quincena"}
 
 
-def _vigente(d: LiqDescuento, periodo: LiqPeriodo) -> bool:
-    return d.activo and d.desde <= periodo.hasta and (d.hasta is None or d.hasta >= periodo.desde)
+def _aplica_quincena(quincena: str, periodo: LiqPeriodo) -> bool:
+    """El periodo mensual liquida todo; en quincenas, "primera"/"segunda" solo aplican en la suya."""
+    if periodo.quincena == MENSUAL or quincena == AMBAS:
+        return True
+    return (quincena == PRIMERA and periodo.quincena == 1) or (quincena == SEGUNDA and periodo.quincena == 2)
+
+
+def _fraccion_mensual(periodo: LiqPeriodo, quincena: str = AMBAS) -> Decimal:
+    """Parte del valor mensual que va en el periodo: la mitad por quincena si aplica en ambas; completo si es mensual
+    o si solo aplica en una quincena."""
+    return Decimal("1") if periodo.quincena == MENSUAL or quincena != AMBAS else Decimal("0.5")
+
+
+def _txt_fraccion(periodo: LiqPeriodo, quincena: str) -> str:
+    if periodo.quincena == MENSUAL:
+        return ""
+    return " ÷ 2 (quincena)" if quincena == AMBAS else f" ({_NOMBRE_QUINCENA[quincena]})"
+
+
+def _vigente(d, periodo: LiqPeriodo) -> bool:
+    return (d.activo and d.desde <= periodo.hasta and (d.hasta is None or d.hasta >= periodo.desde)
+            and _aplica_quincena(getattr(d, "quincena", AMBAS) or AMBAS, periodo))
 
 
 def descontado(db: Session, ids: set[int], excepto_periodo: int | None = None) -> dict[int, Decimal]:
@@ -134,7 +156,7 @@ class Acumulado:
 
 
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
-                      descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal]) -> dict:
+                      descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None) -> dict:
     a = Acumulado()
     racha_inc, anterior_inc = 0, None
     for d in sorted(dias, key=lambda x: x.fecha):
@@ -172,8 +194,29 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     basico, incapacidad, auxilio = _pesos(a.basico), _pesos(a.incapacidad), _pesos(a.auxilio)
     recargos = sum((v for c, v in valores.items() if c in RECARGOS), Decimal("0"))
     extras = sum((v for c, v in valores.items() if c not in RECARGOS), Decimal("0"))
-    devengado = basico + incapacidad + recargos + extras + auxilio
-    ibc = devengado - auxilio
+
+    # Auxilios no prestacionales: se descuentan en proporción a los días de ausencia del periodo
+    dias_ausencia = sum(1 for d in dias if d.clase == AUSENCIA)
+    aux_aplicados = []
+    for x in sorted((x for x in auxilios or [] if _vigente(x, periodo)), key=lambda x: (x.desde, x.id)):
+        q = x.quincena or AMBAS
+        base = x.valor_mensual * _fraccion_mensual(periodo, q)
+        menos = x.valor_mensual / 30 * dias_ausencia
+        valor = _pesos(max(base - menos, Decimal("0")))
+        calculo = f"valor mensual {x.valor_mensual:,.0f}{_txt_fraccion(periodo, q)}"
+        if dias_ausencia:
+            calculo += f" − {dias_ausencia} día(s) de ausencia × {x.valor_mensual / 30:,.0f}"
+        aux_aplicados.append({"id": x.id, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo})
+    no_prestacional = sum((Decimal(str(x["valor"])) for x in aux_aplicados), Decimal("0"))
+
+    salarial = basico + incapacidad + recargos + extras
+    devengado = salarial + no_prestacional + auxilio
+    # Lo no salarial que pase del 40 % de la remuneración total sí entra en la base de salud y pensión
+    exceso = _pesos(max(no_prestacional - TOPE_NO_SALARIAL * (salarial + no_prestacional), Decimal("0")))
+    ibc = salarial + exceso
+    alertas = []
+    if exceso:
+        alertas.append(f"Los auxilios no prestacionales superan el 40 % de la remuneración: {exceso:,.0f} entran en la base de salud y pensión")
 
     t_cierre = tarifas.en(periodo.hasta)
     salud = _pesos(ibc * t_cierre.salud_pct / 100)
@@ -184,11 +227,12 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     # Primero los embargos (orden judicial), luego los préstamos
     for x in sorted((x for x in descuentos if _vigente(x, periodo)), key=lambda x: (x.tipo != EMBARGO, x.desde, x.id)):
         if x.valor_mensual:
-            valor = _pesos(x.valor_mensual * _fraccion_mensual(periodo))
-            base_txt = f"cuota mensual {x.valor_mensual:,.0f}" + (" ÷ 2 (quincena)" if periodo.quincena != MENSUAL else "")
+            q = x.quincena or AMBAS
+            valor = _pesos(x.valor_mensual * _fraccion_mensual(periodo, q))
+            base_txt = f"cuota mensual {x.valor_mensual:,.0f}{_txt_fraccion(periodo, q)}"
         else:
-            valor = _pesos(ibc * (x.porcentaje or 0) / 100)
-            base_txt = f"{x.porcentaje} % de {ibc:,.0f} (devengado sin auxilio)"
+            valor = _pesos(salarial * (x.porcentaje or 0) / 100)
+            base_txt = f"{x.porcentaje} % de {salarial:,.0f} (devengado sin auxilios)"
         observacion = ""
         if x.monto_total is not None:
             saldo = max(x.monto_total - ya_descontado.get(x.id, Decimal("0")), Decimal("0"))
@@ -213,6 +257,8 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "incapacidad_empresa": a.incapacidad_empresa, "incapacidad_eps": a.incapacidad_eps,
         "dias_auxilio": a.dias_auxilio, "dias_sin_pago": a.dias_sin_pago,
         "basico": float(basico), "incapacidad": float(incapacidad), "auxilio": float(auxilio),
+        "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia,
+        "exceso_no_salarial": float(exceso), "alertas": alertas,
         "horas": {c: float(h) for c, h in a.horas.items() if h},
         "valores": {c: float(v) for c, v in valores.items()},
         "recargos": float(recargos), "extras": float(extras),
@@ -239,7 +285,12 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
     if resultados:
         for x in db.scalars(select(LiqDescuento).where(LiqDescuento.empleado_id.in_(list(resultados)))):
             descuentos[x.empleado_id].append(x)
+    auxilios: dict[int, list[LiqAuxilio]] = defaultdict(list)
+    if resultados:
+        for x in db.scalars(select(LiqAuxilio).where(LiqAuxilio.empleado_id.in_(list(resultados)))):
+            auxilios[x.empleado_id].append(x)
     ya = descontado(db, {x.id for lista in descuentos.values() for x in lista if x.monto_total is not None}, periodo.id)
     for empleado_id, r in resultados.items():
-        n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas, descuentos[empleado_id], ya)
+        n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas, descuentos[empleado_id], ya,
+                              auxilios[empleado_id])
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))

@@ -3,6 +3,7 @@ import os
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["ADMIN_USERNAME"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "admin-clave-123"
+os.environ["MFA_OBLIGATORIO"] = "true"  # las pruebas cubren el flujo con verificación en dos pasos
 
 from io import BytesIO
 

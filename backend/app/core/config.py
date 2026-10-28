@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     cookie_name: str = "sesion"
 
     # Autenticación (OWASP ASVS V2/V3)
-    mfa_obligatorio: bool = True  # verificación en dos pasos con app Authenticator
+    # Verificación en dos pasos con app Authenticator: desactivada por decisión del usuario (2026-10-28);
+    # para volver a exigirla, MFA_OBLIGATORIO=true
+    mfa_obligatorio: bool = False
     # true: solo se exige a quienes tienen el rol Administrador; false: a todos los usuarios
     mfa_solo_administradores: bool = True
     mfa_emisor: str = "Servigpoder"  # nombre que aparece en la app Authenticator

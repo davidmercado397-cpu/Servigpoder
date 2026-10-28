@@ -133,3 +133,12 @@ def test_doble_factor_solo_para_administradores(admin):
         assert c.get("/api/auth/me").status_code == 401
         assert _login(c, "prog2", "clave-segura-2").json()["data"]["paso"] == "enrolar_mfa"
         assert c.get("/api/auth/me").status_code == 401  # sin terminar el segundo paso no hay sesión
+
+
+def test_sin_doble_factor_el_administrador_entra_con_contrasena(client, monkeypatch):
+    """Con MFA_OBLIGATORIO=false nadie pasa por el segundo paso, ni siquiera el administrador."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "mfa_obligatorio", False)
+    r = _login(client)
+    assert r.json()["data"]["paso"] == "listo" and r.json()["data"]["sesion"] is not None
+    assert client.get("/api/auth/me").status_code == 200

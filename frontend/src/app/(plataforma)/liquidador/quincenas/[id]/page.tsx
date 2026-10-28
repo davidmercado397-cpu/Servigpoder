@@ -454,6 +454,12 @@ function NominaPersona({ n }: { n: Nomina }) {
           <tbody>
             {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
             {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
+            {n.vacaciones && (
+              <>
+                {fila("Vacaciones días hábiles", `${n.vacaciones.dias_habiles} días × ${pesos(n.vacaciones.valor_dia)} (hábiles: ${n.vacaciones.dias_habiles_empleado})`, n.vacaciones.valor_habiles)}
+                {n.vacaciones.dias_no_habiles > 0 && fila("Vacaciones días no hábiles", `${n.vacaciones.dias_no_habiles} días × ${pesos(n.vacaciones.valor_dia)}`, n.vacaciones.valor_no_habiles)}
+              </>
+            )}
             {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
             {(n.auxilios ?? []).map((x) => (
               <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
@@ -478,10 +484,17 @@ function NominaPersona({ n }: { n: Nomina }) {
           </tbody>
         </table>
       </div>
+      {n.vacaciones && (
+        <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+          Base de vacaciones {pesos(n.vacaciones.base)}: salario {pesos(n.vacaciones.salario)} + promedio variable {pesos(n.vacaciones.promedio)}{" "}
+          ({n.vacaciones.promedio_manual ? "fijado por nómina" : `sugerido con ${n.vacaciones.meses_promedio} meses de recargo nocturno`}).
+          {n.vacaciones.saldo ? ` Saldo pendiente: ${n.vacaciones.saldo.pendientes.toLocaleString("es-CO")} días hábiles.` : " Sin fecha de ingreso: no se controla el saldo."}
+        </p>
+      )}
       {(n.alertas ?? []).map((a) => <p key={a} className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{a}</p>)}
       {n.dias_sin_pago > 0 && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (vacaciones, licencias…, que se pagan en otro proceso).
+          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (licencias…, que se pagan en otro proceso).
         </p>
       )}
     </section>

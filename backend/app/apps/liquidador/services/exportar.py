@@ -119,7 +119,7 @@ def _guardar(libro: Workbook) -> bytes:
 _CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
 ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
-    "SUELDO BASICO", "INCAPACIDAD", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
+    "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
     "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
 )
 _PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
@@ -129,7 +129,9 @@ def fila_nomina(r: LiqResultado) -> list:
     n = r.nomina or {}
     v = n.get("valores", {})
     return [r.empleado.documento, r.empleado.nombre, n.get("salario", 0), n.get("dias_salario", 0), n.get("dias_incapacidad", 0),
-            n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0), *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
+            n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0),
+            (n.get("vacaciones") or {}).get("valor_habiles", 0), (n.get("vacaciones") or {}).get("valor_no_habiles", 0),
+            *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
             n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
             n.get("prestamos", 0), n.get("deducciones", 0), n.get("neto", 0)]
 
@@ -180,6 +182,25 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     for (celda,) in desc.iter_rows(min_row=2, min_col=6, max_col=6):
         celda.number_format = "$ #,##0"
     _autoajustar(desc, minimo=10, maximo=50)
+
+    vac = libro.create_sheet("Vacaciones")
+    vac.append(["DOCUMENTO", "EMPLEADO", "DIAS HABILES DEL EMPLEADO", "DIAS HABILES", "DIAS NO HABILES", "SALARIO",
+                "PROMEDIO VARIABLE", "ORIGEN DEL PROMEDIO", "BASE MENSUAL", "VALOR DIA", "VALOR DIAS HABILES",
+                "VALOR DIAS NO HABILES", "TOTAL VACACIONES", "SALDO PENDIENTE"])
+    for r in resultados:
+        x = (r.nomina or {}).get("vacaciones")
+        if not x:
+            continue
+        origen = "Fijado por nómina" if x["promedio_manual"] else f"Sugerido ({x['meses_promedio']:g} meses de recargo nocturno)"
+        vac.append([r.empleado.documento, r.empleado.nombre, x["dias_habiles_empleado"], x["dias_habiles"], x["dias_no_habiles"],
+                    x["salario"], x["promedio"], origen, x["base"], x["valor_dia"], x["valor_habiles"], x["valor_no_habiles"],
+                    x["valor"], x["saldo"]["pendientes"] if x.get("saldo") else "Sin fecha de ingreso"])
+    for celda in vac[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for col in (6, 7, 9, 10, 11, 12, 13):
+        for (celda,) in vac.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda.number_format = "$ #,##0"
+    _autoajustar(vac, minimo=10, maximo=40)
 
     aux = libro.create_sheet("Auxilios no prestacionales")
     aux.append(["DOCUMENTO", "EMPLEADO", "DESCRIPCION", "CALCULO", "VALOR PAGADO", "EXCESO DEL 40 % EN LA BASE DE APORTES"])

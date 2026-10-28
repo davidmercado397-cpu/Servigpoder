@@ -31,7 +31,7 @@ def aplicar_matriz(turno: LiqTurno, hora_nocturna: int) -> None:
 
 def guardar(db: Session, turno: LiqTurno, *, codigo: str, nombre: str, hora_inicio: time, hora_fin: time,
             horas_ordinarias: Decimal, horas_extras: Decimal, remunerado: bool, incapacidad: bool,
-            justifica_umbral: bool = False) -> LiqTurno:
+            justifica_umbral: bool = False, vacaciones: bool = False) -> LiqTurno:
     """Crea o actualiza un turno. La incapacidad nunca es remunerada ni genera horas."""
     if incapacidad:
         remunerado, horas_ordinarias, horas_extras = False, Decimal("0"), Decimal("0")
@@ -41,6 +41,7 @@ def guardar(db: Session, turno: LiqTurno, *, codigo: str, nombre: str, hora_inic
     turno.horas_ordinarias, turno.horas_extras = horas_ordinarias, horas_extras
     turno.remunerado, turno.incapacidad = remunerado, incapacidad
     turno.justifica_umbral = justifica_umbral or incapacidad  # la incapacidad siempre justifica
+    turno.vacaciones = vacaciones and not incapacidad
     aplicar_matriz(turno, parametros(db).hora_inicio_nocturna)
     if turno.id is None:
         db.add(turno)
@@ -74,5 +75,5 @@ def sembrar(db: Session) -> None:
         codigo, nombre, inicio, fin, ordinarias, extras, remunerado, incapacidad = linea.split("|")
         guardar(db, LiqTurno(), codigo=codigo, nombre=nombre, hora_inicio=time.fromisoformat(inicio),
                 hora_fin=time.fromisoformat(fin), horas_ordinarias=Decimal(ordinarias), horas_extras=Decimal(extras),
-                remunerado=remunerado == "1", incapacidad=incapacidad == "1")
+                remunerado=remunerado == "1", incapacidad=incapacidad == "1", vacaciones=codigo.upper() in ("V", "VAC"))
     db.flush()

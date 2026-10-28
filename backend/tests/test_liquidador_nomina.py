@@ -49,9 +49,10 @@ def test_nomina_de_una_quincena(admin):
     assert n["ibc"] == 1010940 and n["salud"] == 40438 and n["pension"] == 40438
     assert n["neto"] == 1135488 - 80876 == 1054612
 
-    # 3003: V×5 y LR (otro proceso) y AUS no se pagan; L sí; INC al 100 %; el auxilio solo por los 4 días A
+    # 3003: LR (otro proceso) y AUS no se pagan; V×5 como vacaciones; L sí; INC al 100 %; el auxilio solo por los 4 días A
     n = _nomina(admin, pid, "3003")
-    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 7 and n["dias_auxilio"] == 4
+    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 2 and n["dias_auxilio"] == 4
+    assert n["vacaciones"]["dias_habiles"] == 4 and n["vacaciones"]["dias_no_habiles"] == 1 and n["vacaciones_valor"] == 291818
     assert n["basico"] == 291818 and n["incapacidad"] == 116727 and n["auxilio"] == 33213
     assert (n["incapacidad_empresa"], n["incapacidad_eps"]) == (2, 0)
 
@@ -143,7 +144,7 @@ def test_prestamo_con_saldo_y_embargo(admin):
     r = admin.get(f"{API}/periodos/{p1}/nomina")
     assert r.headers["content-disposition"] == 'attachment; filename="nomina_2026_11_Q1.xlsx"'
     libro = load_workbook(BytesIO(r.content))
-    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos y embargos", "Auxilios no prestacionales", "Tarifas usadas"]
+    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos y embargos", "Vacaciones", "Auxilios no prestacionales", "Tarifas usadas"]
     filas_x = list(libro.worksheets[0].iter_rows(values_only=True))
     enc = filas_x[0]
     fila = dict(zip(enc, filas_x[1]))
@@ -218,3 +219,51 @@ def test_auxilios_no_prestacionales_y_quincena(admin):
     assert "Auxilios no prestacionales" in libro.sheetnames
     enc = [c.value for c in libro.worksheets[0][1]]
     assert "AUXILIOS NO PRESTACIONALES" in enc
+
+
+def test_vacaciones_habiles_promedio_y_saldo(admin):
+    # Septiembre Q1 previa: 3003 hace 3 turnos N → recargo nocturno que alimenta el promedio sugerido (medio mes)
+    p1 = _periodo_con(admin, 2026, 9, 1, [["3003", "3003", *(["N"] * 3)]], [1, 2, 3])
+    nocturno = _nomina(admin, p1, "3003")["valores"]["ordinary_night"]
+    assert nocturno > 0
+    pid = _quincena(admin)
+    assert admin.post(f"{API}/auxilios", json={"documento": "3003", "descripcion": "Rodamiento", "valor_mensual": 300000,
+                                               "desde": "2026-09-01"}).status_code == 201
+    _cargar(admin, pid, _excel_sep_q2())
+    # V del miércoles 16 al domingo 20: lunes a sábado → 4 hábiles y el domingo no hábil
+    n = _nomina(admin, pid, "3003")
+    v = n["vacaciones"]
+    sugerido = round(nocturno / 0.5)
+    assert (v["dias_habiles"], v["dias_no_habiles"], v["meses_promedio"], v["promedio_sugerido"]) == (4, 1, 0.5, sugerido)
+    assert not v["promedio_manual"] and v["saldo"] is None and v["base"] == 1750905 + sugerido
+    assert v["valor_habiles"] == round(4 * (1750905 + sugerido) / 30) and n["ibc"] >= v["valor"]
+    # El auxilio no prestacional se descuenta por la ausencia y los 5 días de vacaciones: 150.000 − 6 × 10.000
+    assert n["auxilios"][0]["valor"] == 90000 and n["dias_sin_pago"] == 2
+
+    # Lunes a viernes, ingreso 1-jun-2026 (5 días causados al 30-sep) → 3 hábiles y 2 no hábiles, sin alerta
+    eid = _resultados(admin, pid)["3003"]["empleado_id"]
+    cambio = {"dias_habiles": [0, 1, 2, 3, 4], "fecha_ingreso": "2026-06-01", "vacaciones_previas": 0}
+    assert admin.put(f"{API}/empleados/{eid}/vacaciones", json=cambio).status_code == 200
+    assert admin.post(f"{API}/periodos/{pid}/recalcular").status_code == 200
+    v = _nomina(admin, pid, "3003")["vacaciones"]
+    assert (v["dias_habiles"], v["dias_no_habiles"]) == (3, 2) and v["saldo"]["causados"] == 5 and v["saldo"]["pendientes"] == 2
+    assert not [x for x in _nomina(admin, pid, "3003")["alertas"] if "vacaciones" in x]
+    # Con 4 días ya disfrutados antes del liquidador solo le queda 1: se avisa
+    assert admin.put(f"{API}/empleados/{eid}/vacaciones", json={**cambio, "vacaciones_previas": 4}).status_code == 200
+    admin.post(f"{API}/periodos/{pid}/recalcular")
+    alertas = [x for x in _nomina(admin, pid, "3003")["alertas"] if "vacaciones" in x]
+    assert len(alertas) == 1 and "solo tenía 1.00 pendientes" in alertas[0]
+
+    # Nómina fija el promedio y se recalcula; vacío vuelve al sugerido
+    r = admin.put(f"{API}/periodos/{pid}/vacaciones/{eid}", json={"promedio": 100000})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["promedio"] == 100000 and r.json()["data"]["promedio_manual"]
+    assert r.json()["data"]["valor_habiles"] == 185091  # 3 × 1.850.905 / 30 redondeado hacia arriba
+    lista = admin.get(f"{API}/periodos/{pid}/vacaciones").json()["data"]
+    assert [x["documento"] for x in lista] == ["3003"] and lista[0]["alertas"]
+    assert admin.put(f"{API}/periodos/{pid}/vacaciones/{eid}", json={"promedio": None}).json()["data"]["promedio"] == sugerido
+
+    emp = admin.get(f"{API}/empleados?q=3003").json()["data"][0]
+    assert emp["dias_habiles"] == [0, 1, 2, 3, 4] and emp["vacaciones_liquidador"] == 3 and emp["saldo_vacaciones"]["previos"] == 4
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
+    assert libro["Vacaciones"].max_row == 2

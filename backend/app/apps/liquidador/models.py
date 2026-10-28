@@ -49,6 +49,8 @@ class LiqTurno(Base):
     incapacidad: Mapped[bool] = mapped_column(Boolean, default=False)
     # Novedad justificada: con el umbral semanal activo, cada día con este código baja el umbral de la semana
     justifica_umbral: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Código de vacaciones (V): sus días se liquidan como vacaciones en días hábiles y no hábiles
+    vacaciones: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -75,6 +77,11 @@ class LiqEmpleado(Base):
     cargo: Mapped[str] = mapped_column(String(80), default="Vigilante")
     # Salario mensual propio; vacío = el salario mínimo vigente en cada fecha (así se crean todos)
     salario: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # Días hábiles para vacaciones (0 = lunes … 6 = domingo); los festivos nunca son hábiles
+    dias_habiles: Mapped[str] = mapped_column(String(7), default="012345", server_default="012345")
+    # Saldo de vacaciones (15 días hábiles por año): fecha de ingreso y días hábiles disfrutados antes del liquidador
+    fecha_ingreso: Mapped[date | None] = mapped_column(Date, nullable=True)
+    vacaciones_previas: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), server_default="0")
 
 
 class LiqPeriodo(Base):
@@ -222,3 +229,16 @@ class LiqAuxilio(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
+
+
+class LiqVacacionBase(Base):
+    """Promedio variable que nómina fija para las vacaciones de un empleado en un periodo (reemplaza el sugerido)."""
+
+    __tablename__ = "liq_vacacion_base"
+    __table_args__ = (UniqueConstraint("periodo_id", "empleado_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    periodo_id: Mapped[int] = mapped_column(ForeignKey("liq_periodo.id", ondelete="CASCADE"), index=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"))
+    promedio: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

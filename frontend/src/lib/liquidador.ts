@@ -36,7 +36,21 @@ export type Nomina = {
   /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
   auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
   dias_ausencia?: number; exceso_no_salarial?: number; alertas?: string[];
+  vacaciones?: VacacionesNomina | null; vacaciones_valor?: number;
 };
+
+export type SaldoVacaciones = { fecha_ingreso: string; corte: string; causados: number; previos: number; liquidador: number; pendientes: number };
+
+/** Vacaciones liquidadas en el periodo: los días hábiles descuentan del saldo; los no hábiles también se pagan */
+export type VacacionesNomina = {
+  dias_habiles: number; dias_no_habiles: number; habiles_calendario: number; valor_habiles: number; valor_no_habiles: number; valor: number;
+  salario: number; promedio: number; promedio_sugerido: number; meses_promedio: number; promedio_manual: boolean;
+  base: number; valor_dia: number; dias_habiles_empleado: string; saldo: SaldoVacaciones | null;
+};
+
+export type VacacionPeriodo = VacacionesNomina & { empleado_id: number; documento: string; nombre: string; editable: boolean; alertas: string[] };
+
+export const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
 export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "deducciones" | "neto", number>;
 
@@ -64,14 +78,19 @@ export type Dia = { fecha: string; codigo: string; turno: string; tipo_dia: stri
 
 export type Turno = {
   id: number; codigo: string; nombre: string; hora_inicio: string; hora_fin: string; horas_ordinarias: number;
-  horas_extras: number; remunerado: boolean; incapacidad: boolean; justifica_umbral: boolean; activo: boolean; clase: string;
+  horas_extras: number; remunerado: boolean; incapacidad: boolean; justifica_umbral: boolean; vacaciones: boolean; activo: boolean; clase: string;
 };
 
 export type Matriz = Record<string, Record<string, number>>;
 
 export type Festivo = { fecha: string; descripcion: string; origen: "nacional" | "quitado" | "manual"; ajuste_id: number | null; vigente: boolean };
 
-export type Empleado = { id: number; documento: string; nombre: string; cargo: string; quincenas: number; ultima: string | null; salario?: number | null };
+export type Empleado = {
+  id: number; documento: string; nombre: string; cargo: string; quincenas: number; ultima: string | null; salario?: number | null;
+  /** Días hábiles para vacaciones: 0 = lunes … 6 = domingo */
+  dias_habiles: number[]; fecha_ingreso: string | null; vacaciones_previas: number; vacaciones_liquidador: number;
+  saldo_vacaciones: SaldoVacaciones | null;
+};
 
 /** Los 12 conceptos, en el orden de las columnas del archivo de liquidación. */
 export const CONCEPTOS: [string, string, string][] = [

@@ -1,5 +1,5 @@
 """Nómina del liquidador: tarifas (% de recargos y valores de ley por vigencia), salario de cada
-empleado, préstamos y embargos, auxilios no prestacionales y la descarga del archivo de nómina de un periodo."""
+empleado, préstamos y embargos, auxilios no prestacionales, vacaciones y la descarga del archivo de nómina de un periodo."""
 
 from datetime import date
 
@@ -12,9 +12,11 @@ from app.core.paginacion import Paginacion, paginar_consulta
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
-from app.apps.liquidador.models import LiqAuxilio, LiqDescuento, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa
-from app.apps.liquidador.schemas import AuxilioIn, AuxilioOut, DescuentoIn, DescuentoOut, SalarioIn, TarifaIn, TarifaOut
-from app.apps.liquidador.services import exportar
+from app.apps.liquidador.models import CERRADA, LiqAuxilio, LiqDescuento, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa, LiqVacacionBase
+from app.apps.liquidador.schemas import (
+    AuxilioIn, AuxilioOut, DescuentoIn, DescuentoOut, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut, VacacionesEmpleadoIn,
+)
+from app.apps.liquidador.services import calculo, exportar
 from app.apps.liquidador.services.nomina import descontado, porcentajes_de_ley
 
 router = APIRouter(tags=["liquidador: nómina"])
@@ -263,6 +265,70 @@ def eliminar_auxilio(auxilio_id: int, request: Request, db: DbSession, actual: U
     db.delete(x)
     db.commit()
     return ok({"eliminado": auxilio_id})
+
+
+# --- Vacaciones ---
+
+@router.put("/empleados/{empleado_id}/vacaciones", response_model=ApiResponse[dict])
+def vacaciones_empleado(empleado_id: int, data: VacacionesEmpleadoIn, request: Request, db: DbSession,
+                        actual: Usuario = Depends(require(GESTIONAR))):
+    """Días hábiles para vacaciones, fecha de ingreso y días hábiles disfrutados antes del liquidador."""
+    e = db.get(LiqEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    e.dias_habiles = "".join(str(d) for d in data.dias_habiles)
+    e.fecha_ingreso, e.vacaciones_previas = data.fecha_ingreso, data.vacaciones_previas
+    auditar(db, request, "liq_vacaciones_empleado", actual.id, documento=e.documento, dias_habiles=e.dias_habiles,
+            fecha_ingreso=data.fecha_ingreso.isoformat() if data.fecha_ingreso else None,
+            vacaciones_previas=float(data.vacaciones_previas))
+    db.commit()
+    return ok({"id": e.id}, aviso=AVISO)
+
+
+def _vacacion_out(r: LiqResultado, editable: bool) -> dict:
+    return {"empleado_id": r.empleado_id, "documento": r.empleado.documento, "nombre": r.empleado.nombre,
+            "editable": editable, **(r.nomina or {}).get("vacaciones", {}),
+            "alertas": [x for x in (r.nomina or {}).get("alertas", []) if "vacaciones" in x]}
+
+
+@router.get("/periodos/{periodo_id}/vacaciones", response_model=ApiResponse[list[dict]])
+def vacaciones_periodo(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+    """Quienes tienen vacaciones en el periodo, con su base (salario + promedio) y lo liquidado."""
+    p = db.get(LiqPeriodo, periodo_id)
+    if p is None:
+        raise ApiError(404, "Periodo no encontrado")
+    filas = [r for r in db.scalars(select(LiqResultado).where(LiqResultado.periodo_id == p.id))
+             if (r.nomina or {}).get("vacaciones")]
+    return ok([_vacacion_out(r, p.estado != CERRADA) for r in sorted(filas, key=lambda r: r.empleado.nombre)])
+
+
+@router.put("/periodos/{periodo_id}/vacaciones/{empleado_id}", response_model=ApiResponse[dict])
+def promedio_vacaciones(periodo_id: int, empleado_id: int, data: PromedioVacacionesIn, request: Request, db: DbSession,
+                        actual: Usuario = Depends(require(GESTIONAR))):
+    """Fija el promedio variable de las vacaciones (vacío = el sugerido) y recalcula el periodo."""
+    p = db.get(LiqPeriodo, periodo_id)
+    if p is None:
+        raise ApiError(404, "Periodo no encontrado")
+    if p.estado == CERRADA:
+        raise ApiError(409, "El periodo está cerrado. Reábralo para hacer cambios.", "PERIODO_CERRADO")
+    r = db.scalar(select(LiqResultado).where(LiqResultado.periodo_id == p.id, LiqResultado.empleado_id == empleado_id))
+    if r is None or not (r.nomina or {}).get("vacaciones"):
+        raise ApiError(404, "El empleado no tiene vacaciones en este periodo")
+    x = db.scalar(select(LiqVacacionBase).where(LiqVacacionBase.periodo_id == p.id, LiqVacacionBase.empleado_id == empleado_id))
+    if data.promedio is None:
+        if x is not None:
+            db.delete(x)
+    elif x is None:
+        db.add(LiqVacacionBase(periodo_id=p.id, empleado_id=empleado_id, promedio=data.promedio))
+    else:
+        x.promedio = data.promedio
+    db.flush()
+    calculo.calcular(db, p)
+    auditar(db, request, "liq_vacaciones_promedio", actual.id, periodo=p.id, documento=r.empleado.documento,
+            promedio=float(data.promedio) if data.promedio is not None else None)
+    db.commit()
+    r = db.scalar(select(LiqResultado).where(LiqResultado.periodo_id == p.id, LiqResultado.empleado_id == empleado_id))
+    return ok(_vacacion_out(r, True), aviso="Se recalculó la nómina del periodo con el nuevo promedio.")
 
 
 # --- Archivo de nómina del periodo ---

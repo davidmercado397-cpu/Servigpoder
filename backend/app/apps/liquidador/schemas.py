@@ -29,6 +29,7 @@ class TurnoIn(BaseModel):
     remunerado: bool = True
     incapacidad: bool = False
     justifica_umbral: bool = False
+    vacaciones: bool = False
 
     @field_validator("codigo")
     @classmethod
@@ -57,6 +58,7 @@ class TurnoOut(Orm):
     remunerado: bool
     incapacidad: bool
     justifica_umbral: bool = False
+    vacaciones: bool = False
     activo: bool
     clase: str = ""
 
@@ -165,6 +167,11 @@ class EmpleadoOut(BaseModel):
     quincenas: int
     ultima: str | None
     salario: float | None = None  # vacío = salario mínimo (solo con el permiso liquidador.nomina.ver)
+    dias_habiles: list[int] = [0, 1, 2, 3, 4, 5]
+    fecha_ingreso: date | None = None
+    vacaciones_previas: float = 0
+    vacaciones_liquidador: int = 0  # días hábiles de vacaciones liquidados en el liquidador
+    saldo_vacaciones: dict | None = None  # causados, previos, liquidador y pendientes a hoy (con fecha de ingreso)
 
 
 class TarifaIn(BaseModel):
@@ -270,6 +277,30 @@ class AuxilioOut(BaseModel):
     quincena: str
     activo: bool
     pagado: float
+
+
+class VacacionesEmpleadoIn(BaseModel):
+    dias_habiles: list[int] = Field(min_length=1, max_length=7)
+    fecha_ingreso: date | None = None
+    vacaciones_previas: Decimal = Field(Decimal("0"), ge=0, le=1000, decimal_places=2)
+
+    @field_validator("dias_habiles")
+    @classmethod
+    def _dias(cls, v: list[int]) -> list[int]:
+        if any(d < 0 or d > 6 for d in v):
+            raise ValueError("Los días hábiles van de 0 (lunes) a 6 (domingo)")
+        return sorted(set(v))
+
+    @field_validator("fecha_ingreso")
+    @classmethod
+    def _ingreso(cls, v: date | None) -> date | None:
+        if v is not None and (v > date.today() or v.year < 1950):
+            raise ValueError("La fecha de ingreso no es válida")
+        return v
+
+
+class PromedioVacacionesIn(BaseModel):
+    promedio: Decimal | None = Field(None, ge=0, le=100_000_000)  # vacío = volver al sugerido
 
 
 class SalarioIn(BaseModel):

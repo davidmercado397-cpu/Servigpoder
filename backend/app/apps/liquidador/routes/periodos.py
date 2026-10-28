@@ -1,6 +1,6 @@
 """Quincenas: carga del Excel, conteo de horas, cierre y descargas."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
@@ -18,7 +18,7 @@ from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, 
 from app.apps.liquidador.schemas import (
     CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
 )
-from app.apps.liquidador.services import calculo, exportar, importador
+from app.apps.liquidador.services import calculo, exportar, importador, vacaciones
 
 router = APIRouter(tags=["liquidador: quincenas"])
 VER = "liquidador.periodos.ver"
@@ -193,7 +193,7 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
             totales["dias"][k] = totales["dias"].get(k, 0) + v
     pendiente = any(not r.nomina for r in lista)
     if ve_nomina and not pendiente:
-        claves_nomina = ("basico", "incapacidad", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
+        claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
                          "embargos", "prestamos", "deducciones", "neto")
         totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}
     return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente)
@@ -247,7 +247,13 @@ def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), 
             clave = (anio, mes, 3 if qn == 0 else qn)
             if eid not in ultimas or clave > ultimas[eid][0]:
                 ultimas[eid] = (clave, f"{anio}-{mes:02d} {'Mensual' if qn == 0 else f'Q{qn}'}")
+    disfrutados = vacaciones.habiles_disfrutados(db, {e.id: e for e in lista})
+    hoy = date.today()
     return ok([EmpleadoOut(id=e.id, documento=e.documento, nombre=e.nombre, cargo=e.cargo,
                            quincenas=conteo.get(e.id, 0), ultima=ultimas[e.id][1] if e.id in ultimas else None,
-                           salario=float(e.salario) if e.salario is not None and VER_NOMINA in actual.permisos else None)
+                           salario=float(e.salario) if e.salario is not None and VER_NOMINA in actual.permisos else None,
+                           dias_habiles=[int(c) for c in (e.dias_habiles or vacaciones.HABILES_DEFECTO)],
+                           fecha_ingreso=e.fecha_ingreso, vacaciones_previas=float(e.vacaciones_previas or 0),
+                           vacaciones_liquidador=disfrutados.get(e.id, 0),
+                           saldo_vacaciones=vacaciones.saldo(e, disfrutados.get(e.id, 0), hoy))
                for e in lista], **meta)

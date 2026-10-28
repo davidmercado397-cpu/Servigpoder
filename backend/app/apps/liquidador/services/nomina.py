@@ -1,12 +1,14 @@
 """Nómina de cada empleado a partir de los días y las horas contadas del periodo.
 
 - Salario básico: salario mensual ÷ 30 por cada día trabajado, de descanso (Z) o libre (L). Las ausencias
-  y las novedades (vacaciones, licencias…, que se pagan en otro proceso) no se pagan aquí.
+  y las demás novedades (licencias…, que se pagan en otro proceso) no se pagan aquí.
 - Base de 30 días: el día 31 no suma salario; si se paga el último día de febrero, se completan los 30.
 - Incapacidad: se paga al 100 %. Los 2 primeros días de cada incapacidad los paga la empresa y del 3.º en
   adelante la EPS (que reconoce el 66,67 %); la división es informativa.
 - Recargos y extras: horas del concepto × valor de la hora (salario ÷ horas del mes) × su %. Los recargos
   llevan solo el adicional (la hora ya está en el salario); las extras, la hora completa.
+- Vacaciones (códigos marcados "Es vacaciones"): (salario + promedio variable) ÷ 30 por cada día, separando
+  hábiles y no hábiles; ver services/vacaciones.py.
 - Auxilio de transporte: ÷ 30 por día trabajado o de descanso, si el salario no supera 2 mínimos.
 - Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos y préstamos.
 Cada día se paga con la tarifa vigente ese día (salario mínimo, horas del mes y %).
@@ -25,6 +27,7 @@ from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import (
     EMBARGO, MENSUAL, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa,
 )
+from app.apps.liquidador.services import festivos, vacaciones as vac
 
 # Clases de día (mismos valores que calculo.py)
 PAGAN_SALARIO = ("trabajado", "descanso_pago", "libre")
@@ -150,14 +153,26 @@ class Acumulado:
     dias_auxilio: int = 0
     auxilio: Decimal = Decimal("0")
     dias_sin_pago: int = 0
+    vac_habiles: int = 0  # días en base 30 (los que se pagan)
+    vac_no_habiles: int = 0
+    vac_habiles_reales: int = 0  # días calendario hábiles (los que descuentan del saldo)
+    vac_dias: int = 0  # días calendario de vacaciones
+    vac_valor_habiles: Decimal = Decimal("0")
+    vac_valor_no_habiles: Decimal = Decimal("0")
     horas: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
     valores: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
     tarifas: set[date] = field(default_factory=set)
 
 
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
-                      descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None) -> dict:
+                      descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None,
+                      vacaciones: dict | None = None) -> dict:
+    """`vacaciones` (solo si tiene días de vacaciones): festivos, promedio sugerido y meses, promedio manual y
+    días hábiles ya disfrutados antes del periodo."""
     a = Acumulado()
+    ctx = vacaciones or {}
+    fest = ctx.get("festivos", set())
+    promedio = ctx.get("manual") if ctx.get("manual") is not None else ctx.get("sugerido", Decimal("0"))
     racha_inc, anterior_inc = 0, None
     for d in sorted(dias, key=lambda x: x.fecha):
         t = tarifas.en(d.fecha)
@@ -178,6 +193,16 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
                 a.incapacidad_empresa += base
             else:
                 a.incapacidad_eps += base
+        elif vac.es_vacaciones(d):
+            valor_vac = (salario + promedio) / 30 * base
+            a.vac_dias += 1
+            if vac.es_habil(d.fecha, empleado.dias_habiles, fest):
+                a.vac_habiles += base
+                a.vac_habiles_reales += 1
+                a.vac_valor_habiles += valor_vac
+            else:
+                a.vac_no_habiles += base
+                a.vac_valor_no_habiles += valor_vac
         else:
             a.dias_sin_pago += 1
         if d.clase in PAGAN_AUXILIO and salario <= 2 * t.smlmv:
@@ -195,26 +220,49 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     recargos = sum((v for c, v in valores.items() if c in RECARGOS), Decimal("0"))
     extras = sum((v for c, v in valores.items() if c not in RECARGOS), Decimal("0"))
 
-    # Auxilios no prestacionales: se descuentan en proporción a los días de ausencia del periodo
+    vac_habiles, vac_no_habiles = _pesos(a.vac_valor_habiles), _pesos(a.vac_valor_no_habiles)
+    vacaciones_valor = vac_habiles + vac_no_habiles
+    alertas = []
+    detalle_vac = None
+    if a.vac_dias:
+        t_vac = tarifas.en(periodo.hasta)
+        salario_vac = empleado.salario or t_vac.smlmv
+        saldo = vac.saldo(empleado, ctx.get("antes", 0) + a.vac_habiles_reales, periodo.hasta)
+        detalle_vac = {
+            "dias_habiles": a.vac_habiles, "dias_no_habiles": a.vac_no_habiles, "habiles_calendario": a.vac_habiles_reales,
+            "valor_habiles": float(vac_habiles), "valor_no_habiles": float(vac_no_habiles), "valor": float(vacaciones_valor),
+            "salario": float(salario_vac), "promedio": float(promedio), "promedio_sugerido": float(ctx.get("sugerido", 0)),
+            "meses_promedio": float(ctx.get("meses", 0)), "promedio_manual": ctx.get("manual") is not None,
+            "base": float(salario_vac + promedio), "valor_dia": float(round((salario_vac + promedio) / 30, 2)),
+            "dias_habiles_empleado": vac.texto_habiles(empleado.dias_habiles), "saldo": saldo,
+        }
+        if saldo is not None and saldo["pendientes"] < 0:  # se dan más días hábiles de los pendientes
+            pendientes_antes = saldo["pendientes"] + a.vac_habiles_reales
+            alertas.append(f"Se liquidan {a.vac_habiles_reales} día(s) hábiles de vacaciones pero solo tenía "
+                           f"{max(pendientes_antes, 0):,.2f} pendientes (causados {saldo['causados']:,.2f} al {periodo.hasta:%d/%m/%Y})")
+
+    # Auxilios no prestacionales: se descuentan en proporción a los días de ausencia y de vacaciones del periodo
     dias_ausencia = sum(1 for d in dias if d.clase == AUSENCIA)
+    dias_descuento = dias_ausencia + a.vac_dias
     aux_aplicados = []
     for x in sorted((x for x in auxilios or [] if _vigente(x, periodo)), key=lambda x: (x.desde, x.id)):
         q = x.quincena or AMBAS
         base = x.valor_mensual * _fraccion_mensual(periodo, q)
-        menos = x.valor_mensual / 30 * dias_ausencia
+        menos = x.valor_mensual / 30 * dias_descuento
         valor = _pesos(max(base - menos, Decimal("0")))
         calculo = f"valor mensual {x.valor_mensual:,.0f}{_txt_fraccion(periodo, q)}"
-        if dias_ausencia:
-            calculo += f" − {dias_ausencia} día(s) de ausencia × {x.valor_mensual / 30:,.0f}"
+        if dias_descuento:
+            motivo = " y ".join(t for t in (f"{dias_ausencia} de ausencia" if dias_ausencia else "",
+                                            f"{a.vac_dias} de vacaciones" if a.vac_dias else "") if t)
+            calculo += f" − {dias_descuento} día(s) ({motivo}) × {x.valor_mensual / 30:,.0f}"
         aux_aplicados.append({"id": x.id, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo})
     no_prestacional = sum((Decimal(str(x["valor"])) for x in aux_aplicados), Decimal("0"))
 
-    salarial = basico + incapacidad + recargos + extras
+    salarial = basico + incapacidad + recargos + extras + vacaciones_valor
     devengado = salarial + no_prestacional + auxilio
     # Lo no salarial que pase del 40 % de la remuneración total sí entra en la base de salud y pensión
     exceso = _pesos(max(no_prestacional - TOPE_NO_SALARIAL * (salarial + no_prestacional), Decimal("0")))
     ibc = salarial + exceso
-    alertas = []
     if exceso:
         alertas.append(f"Los auxilios no prestacionales superan el 40 % de la remuneración: {exceso:,.0f} entran en la base de salud y pensión")
 
@@ -259,6 +307,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "basico": float(basico), "incapacidad": float(incapacidad), "auxilio": float(auxilio),
         "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia,
         "exceso_no_salarial": float(exceso), "alertas": alertas,
+        "vacaciones": detalle_vac, "vacaciones_valor": float(vacaciones_valor),
         "horas": {c: float(h) for c, h in a.horas.items() if h},
         "valores": {c: float(v) for c, v in valores.items()},
         "recargos": float(recargos), "extras": float(extras),
@@ -290,7 +339,23 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
         for x in db.scalars(select(LiqAuxilio).where(LiqAuxilio.empleado_id.in_(list(resultados)))):
             auxilios[x.empleado_id].append(x)
     ya = descontado(db, {x.id for lista in descuentos.values() for x in lista if x.monto_total is not None}, periodo.id)
+    contexto_vac = _contexto_vacaciones(db, periodo, por_empleado, empleados)
     for empleado_id, r in resultados.items():
         n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas, descuentos[empleado_id], ya,
-                              auxilios[empleado_id])
+                              auxilios[empleado_id], contexto_vac.get(empleado_id))
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
+
+
+def _contexto_vacaciones(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]],
+                         empleados: dict[int, LiqEmpleado]) -> dict[int, dict]:
+    """Datos para liquidar las vacaciones de quienes tienen días de vacaciones en el periodo."""
+    con_vac = {eid: empleados[eid] for eid, dias in por_empleado.items() if eid in empleados and any(vac.es_vacaciones(d) for d in dias)}
+    if not con_vac:
+        return {}
+    fest = festivos.conjunto(db, periodo.desde, periodo.hasta)
+    sugeridos = vac.promedios_sugeridos(db, list(con_vac), periodo)
+    manuales = vac.promedios_manuales(db, periodo.id)
+    antes = vac.habiles_disfrutados(db, con_vac, antes_de=periodo.desde)
+    return {eid: {"festivos": fest, "sugerido": sugeridos.get(eid, (Decimal("0"), Decimal("0")))[0],
+                  "meses": sugeridos.get(eid, (Decimal("0"), Decimal("0")))[1], "manual": manuales.get(eid),
+                  "antes": antes.get(eid, 0)} for eid in con_vac}

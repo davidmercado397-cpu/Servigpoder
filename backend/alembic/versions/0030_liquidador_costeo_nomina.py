@@ -27,8 +27,10 @@ def upgrade() -> None:
             con.execute(sa.text("insert into permiso (codigo, modulo, descripcion) values (:c, :m, :d)"),
                         {"c": codigo, "m": modulo, "d": descripcion})
         # El rol Liquidador ya creado los recibe (el Administrador los recibe en el arranque)
-        con.execute(sa.text("insert into rol_permiso (rol_id, permiso_codigo) select id, :c from rol where nombre = 'Liquidador' "
-                            "and id not in (select rol_id from rol_permiso where permiso_codigo = :c)"), {"c": codigo})
+        # El tipo explícito evita que PostgreSQL deduzca tipos distintos para el mismo parámetro
+        con.execute(sa.text("insert into rol_permiso (rol_id, permiso_codigo) select id, cast(:c as varchar) from rol "
+                            "where nombre = 'Liquidador' and id not in "
+                            "(select rol_id from rol_permiso where permiso_codigo = cast(:c as varchar))"), {"c": codigo})
 
 
 def downgrade() -> None:

@@ -31,7 +31,7 @@ def test_admin_tiene_todos_los_permisos(admin):
 
 def test_roles_base(admin):
     nombres = {r["nombre"] for r in admin.get("/api/roles").json()["data"]}
-    assert nombres == {"Administrador", "Programador", "Nómina", "Liquidador", "Consulta de programación", "Analista de nómina", "Consulta instructivos SIESA", "Planos SIESA", "Comercial costeo", "Programador MFP", "Precios costeo", "Administrador costeo"}
+    assert nombres == {"Administrador", "Programador", "Nómina", "Liquidador", "Consulta de programación", "Analista de nómina", "Consulta instructivos SIESA", "Planos SIESA", "Comercial costeo", "Programador MFP", "Precios costeo", "Administrador costeo", "Gestión humana"}
 
 
 def test_crear_usuario_y_permisos_por_rol(admin):

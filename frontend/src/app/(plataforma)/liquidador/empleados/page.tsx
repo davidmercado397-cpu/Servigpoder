@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, FileUp, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { ImportarPersonal } from "@/components/importar-personal";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { CLASES_ARL, DIAS_SEMANA, type Empleado } from "@/lib/liquidador";
@@ -18,18 +19,22 @@ const habilesTexto = (d: number[]) => {
 
 export default function Empleados() {
   const verNomina = usePermiso("liquidador.nomina.ver");
+  const gestionarPersonal = usePermiso("liquidador.personal.gestionar");
   const router = useRouter();
+  const [estado, setEstado] = useState("activo");
+  const [tipo, setTipo] = useState("todos");
+  const [importar, setImportar] = useState(false);
   const [lista, setLista] = useState<Empleado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
-  const pag = usePaginacion([q]);
+  const pag = usePaginacion([q, estado, tipo]);
 
   const cargar = useCallback(async () => {
-    const r = await apiEnvelope<Empleado[]>(`/liquidador/empleados?q=${encodeURIComponent(q)}&${pag.query}`);
+    const r = await apiEnvelope<Empleado[]>(`/liquidador/empleados?q=${encodeURIComponent(q)}&estado=${estado}&tipo=${tipo}&${pag.query}`);
     setLista(r.data ?? []);
     setMeta(metaDe(r));
-  }, [q, pag.query]);
+  }, [q, estado, tipo, pag.query]);
 
   useEffect(() => {
     const t = setTimeout(() => cargar().catch((e) => setError(mensajeError(e))), 250);
@@ -38,12 +43,17 @@ export default function Empleados() {
 
   return (
     <div className="space-y-5">
-      <Titulo>Empleados</Titulo>
+      <Titulo accion={gestionarPersonal && (
+        <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => setImportar(!importar)}>
+          <FileUp className="h-4 w-4" /> Importar base de personal o libro de vacaciones
+        </button>
+      )}>Empleados</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Se crean y actualizan solos al cargar el Excel de cada nómina. Haga clic en una persona para abrir su ficha: salario, ARL, vacaciones,
-        préstamos, embargos, auxilios y las nóminas en que aparece.
+        Haga clic en una persona para abrir su ficha: datos personales, contratos, salario, ARL, vacaciones, préstamos, embargos, auxilios y las
+        nóminas en que aparece. Quien no esté en la base se crea al cargar el Excel de una nómina.
       </p>
       {error && <Alerta>{error}</Alerta>}
+      {importar && <ImportarPersonal onImportado={() => cargar().catch(() => {})} />}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">
           <div className="relative w-72">
@@ -51,18 +61,35 @@ export default function Empleados() {
             <input className="input pl-8" placeholder="Buscar por cédula o nombre…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
+        <div className="-mt-1 flex flex-wrap gap-2 px-4 pb-3">
+          <select className="input w-40" value={estado} onChange={(e) => setEstado(e.target.value)} aria-label="Estado">
+            <option value="activo">Activos</option>
+            <option value="retirado">Retirados</option>
+            <option value="todos">Todos</option>
+          </select>
+          <select className="input w-48" value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo de personal">
+            <option value="todos">Operativos y administrativos</option>
+            <option value="operativo">Operativos</option>
+            <option value="administrativo">Administrativos</option>
+          </select>
+          {meta && <span className="self-center text-sm text-slate-500">{meta.total.toLocaleString("es-CO")} personas</span>}
+        </div>
         <div className="overflow-auto">
           <table className="tabla">
             <thead>
-              <tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Último periodo</th><th className="text-right">Nóminas</th>
+              <tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Puesto</th><th>Último periodo</th><th className="text-right">Nóminas</th>
                 {verNomina && <th>Salario mensual</th>}<th>ARL</th><th>Vacaciones</th><th /></tr>
             </thead>
             <tbody>
               {lista.map((e) => (
                 <tr key={e.id} className="cursor-pointer hover:bg-marca-50" onClick={() => router.push(`/liquidador/empleados/${e.id}`)}>
                   <td className="font-mono">{e.documento}</td>
-                  <td>{e.nombre}</td>
+                  <td>
+                    {e.nombre}
+                    {e.estado === "retirado" && <Insignia color="ml-2 bg-rose-100 text-rose-800">Retirado</Insignia>}
+                  </td>
                   <td>{e.cargo}</td>
+                  <td className="max-w-[200px] truncate text-sm" title={e.puesto ?? ""}>{e.puesto ?? "—"}</td>
                   <td>{e.ultima ?? "—"}</td>
                   <td className="text-right tabular-nums">{e.quincenas}</td>
                   {verNomina && (

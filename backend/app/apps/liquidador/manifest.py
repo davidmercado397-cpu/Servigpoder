@@ -13,19 +13,23 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "liquidador.asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre las horas contadas"),
     "liquidador.costeo.ver": ("Costeo de nómina", "Ver los costeos de nómina (costo empresa de un Excel de turnos, sin pagarlo)"),
     "liquidador.costeo.gestionar": ("Costeo de nómina", "Crear, recalcular y eliminar costeos de nómina"),
+    "liquidador.personal.ver": ("Ficha del personal", "Ver los datos personales de la ficha (contacto, identificación, seguridad social, cuenta) y los historiales"),
+    "liquidador.personal.gestionar": ("Ficha del personal", "Editar los datos personales, registrar contratos y vacaciones e importar la base de personal y el libro de vacaciones"),
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
     # Por ahora la misma persona liquida, consulta y aprueba
     "Liquidador": ("Liquidador de horas: carga los turnos, revisa, cierra los periodos, configura turnos y liquida la nómina", list(PERMISOS)),
+    "Gestión humana": ("Ficha del personal de SERA: datos personales, contratos y vacaciones (sin la nómina)",
+                       ["liquidador.periodos.ver", "liquidador.personal.ver", "liquidador.personal.gestionar"]),
 }
 
 
 def _router() -> APIRouter:
-    from app.apps.liquidador.routes import asistente, configuracion, costeo, nomina, periodos
+    from app.apps.liquidador.routes import asistente, configuracion, costeo, nomina, periodos, personal
 
     router = APIRouter(prefix="/liquidador")
-    for modulo in (configuracion, periodos, nomina, costeo, asistente):
+    for modulo in (configuracion, periodos, nomina, costeo, personal, asistente):
         router.include_router(modulo.router)
     return router
 

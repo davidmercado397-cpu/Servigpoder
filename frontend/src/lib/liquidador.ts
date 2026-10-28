@@ -43,7 +43,11 @@ export type Nomina = {
   vacaciones?: VacacionesNomina | null; vacaciones_valor?: number;
 };
 
-export type SaldoVacaciones = { fecha_ingreso: string; corte: string; causados: number; previos: number; liquidador: number; pendientes: number };
+export type SaldoVacaciones = {
+  fecha_ingreso: string; corte: string; causados: number; previos: number; liquidador: number; pendientes: number;
+  /** Fecha de corte del libro de vacaciones: «previos» son los disfrutados hasta ese día */
+  corte_libro?: string | null;
+};
 
 /** Vacaciones liquidadas en el periodo: los días hábiles descuentan del saldo; los no hábiles también se pagan */
 export type VacacionesNomina = {
@@ -96,7 +100,33 @@ export type Empleado = {
   saldo_vacaciones: SaldoVacaciones | null;
   /** Clase de riesgo ARL (1 a 5) */
   arl_clase: number | null;
+  estado: "activo" | "retirado"; fecha_retiro: string | null; tipo_personal: "operativo" | "administrativo" | null; puesto: string | null;
 };
+
+/** Ficha del personal: solo con el permiso liquidador.personal.ver */
+export type DatosPersonales = {
+  tipo_personal: string | null; puesto: string | null; tipo_contrato: string | null; sexo: string | null; fecha_nacimiento: string | null;
+  rh: string | null; pais_nacimiento: string | null; depto_nacimiento: string | null; ciudad_nacimiento: string | null;
+  fecha_expedicion: string | null; pais_expedicion: string | null; depto_expedicion: string | null; ciudad_expedicion: string | null;
+  estado_civil: number | null; extranjero: boolean; celular: string | null; correo: string | null; direccion: string | null;
+  barrio: string | null; ciudad: string | null; eps: string | null; fondo_pensiones: string | null; pensionado: boolean;
+  fondo_cesantias: string | null; caja_compensacion: string | null; plan_exequial: string | null; numero_cuenta: string | null;
+  nivel_educativo: string | null; cursos: string | null; edad?: number; antiguedad_anios?: number;
+};
+
+export type Contrato = {
+  id: number; fecha_inicio: string; fecha_retiro: string | null; tipo_contrato: string | null; cargo: string | null; puesto: string | null;
+  motivo_retiro: string | null; observacion: string | null;
+};
+
+export type SalidaVacaciones = {
+  id: number; tipo: "disfrutadas" | "compensadas"; desde: string | null; hasta: string | null; retorno: string | null;
+  dias_habiles: number | null; estado: "historico" | "programada" | "cancelada"; observacion: string | null; origen: "libro" | "manual";
+};
+
+export type TramoVacaciones = { desde: string; hasta: string; dias: number; dias_habiles: number; antes_del_corte: boolean };
+
+export type Hallazgo = { hoja: string; fila: number; documento: string | null; detalle: string };
 
 export const CLASES_ARL: [number, string][] = [[1, "I"], [2, "II"], [3, "III"], [4, "IV"], [5, "V"]];
 

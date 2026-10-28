@@ -3,7 +3,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Time, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import BaseEmpresa as Base
@@ -84,6 +84,42 @@ class LiqEmpleado(Base):
     vacaciones_previas: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), server_default="0")
     # Clase de riesgo ARL (1 a 5), configurada en Empleados
     arl_clase: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Saldo del libro de vacaciones: `vacaciones_previas` son los días disfrutados hasta esta fecha; el liquidador
+    # cuenta los días de vacaciones (V) posteriores
+    vacaciones_corte: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # --- Ficha del personal (base de datos de gestión humana; datos personales con su propio permiso) ---
+    estado: Mapped[str] = mapped_column(String(10), default="activo", server_default="activo")  # activo | retirado
+    fecha_retiro: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tipo_personal: Mapped[str | None] = mapped_column(String(20), nullable=True)  # operativo | administrativo
+    puesto: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tipo_contrato: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sexo: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    fecha_nacimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rh: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    pais_nacimiento: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    depto_nacimiento: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ciudad_nacimiento: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fecha_expedicion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    pais_expedicion: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    depto_expedicion: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ciudad_expedicion: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    estado_civil: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0 ninguno, 1 soltero, 2 casado, 3 viudo, 4 divorciado, 5 unión libre
+    extranjero: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    celular: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    correo: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    direccion: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    barrio: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ciudad: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    eps: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fondo_pensiones: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    pensionado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    fondo_cesantias: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    caja_compensacion: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    plan_exequial: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    numero_cuenta: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    nivel_educativo: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    cursos: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class LiqPeriodo(Base):
@@ -284,3 +320,39 @@ class LiqCosteo(Base):
     @property
     def etiqueta(self) -> str:
         return f"{self.anio}-{self.mes:02d} {self.tipo}"
+
+
+class LiqContrato(Base):
+    """Historial laboral: cada vinculación con su inicio y, si terminó, su retiro (hay reintegros)."""
+
+    __tablename__ = "liq_contrato"
+    __table_args__ = (UniqueConstraint("empleado_id", "fecha_inicio"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
+    fecha_inicio: Mapped[date] = mapped_column(Date)
+    fecha_retiro: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tipo_contrato: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cargo: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    puesto: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    motivo_retiro: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    observacion: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class LiqVacacionSalida(Base):
+    """Historial de vacaciones (libro de vacaciones o registro manual): disfrutadas o compensadas, ya tomadas o
+    programadas. Es informativo: el saldo sale de los días previos al corte y de los días V liquidados después."""
+
+    __tablename__ = "liq_vacacion_salida"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
+    tipo: Mapped[str] = mapped_column(String(15), default="disfrutadas")  # disfrutadas | compensadas
+    desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    retorno: Mapped[date | None] = mapped_column(Date, nullable=True)
+    dias_habiles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estado: Mapped[str] = mapped_column(String(12), default="historico")  # historico | programada | cancelada
+    observacion: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    origen: Mapped[str] = mapped_column(String(10), default="manual")  # libro | manual
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

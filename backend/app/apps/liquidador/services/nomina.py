@@ -356,8 +356,11 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
         n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas,
                               descuentos[empleado_id] if aplica else [], ya, auxilios[empleado_id] if aplica else [],
                               contexto_vac.get(empleado_id))
+        e = empleados[empleado_id]
+        if e.estado == "retirado" and e.fecha_retiro and any(d.fecha > e.fecha_retiro for d in por_empleado[empleado_id]):
+            avisos = [f"Está retirado desde el {e.fecha_retiro:%d/%m/%Y} y tiene turnos después de esa fecha", *avisos]
         n["alertas"] = avisos + n["alertas"]
-        n["otras_nominas"] = bool(avisos)
+        n["otras_nominas"] = any("nómina «" in a for a in avisos)
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
 
 

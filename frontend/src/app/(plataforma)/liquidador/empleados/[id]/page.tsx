@@ -4,13 +4,15 @@ import { ArrowLeft, ArrowRight, Pencil, Plus, Trash2, TriangleAlert } from "luci
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DatosPersonalesForm, HistorialLaboral, HistorialVacaciones } from "@/components/ficha-personal";
 import { FormularioAuxilio } from "@/components/formulario-auxilio";
 import { FormularioDescuento } from "@/components/formulario-descuento";
 import { Alerta, Insignia } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
 import {
-  CLASES_ARL, DIAS_SEMANA, ESTADO_PERIODO, QUINCENAS, horas, nombrePeriodo, type Auxilio, type Descuento, type Empleado,
+  CLASES_ARL, DIAS_SEMANA, ESTADO_PERIODO, QUINCENAS, horas, nombrePeriodo, type Auxilio, type Contrato, type DatosPersonales,
+  type Descuento, type Empleado, type SalidaVacaciones, type TramoVacaciones,
 } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
@@ -18,7 +20,11 @@ type NominaFicha = {
   periodo_id: number; etiqueta: string; anio: number; mes: number; quincena: number; nombre: string; estado: string;
   total_horas: number; dias: Record<string, number>; alertas: number; devengado?: number; neto?: number;
 };
-type Ficha = Empleado & { nominas: NominaFicha[] };
+type Ficha = Empleado & {
+  nominas: NominaFicha[];
+  /** Solo con el permiso de la ficha del personal */
+  personal?: DatosPersonales; contratos?: Contrato[]; salidas?: SalidaVacaciones[]; vacaciones_liquidadas?: TramoVacaciones[];
+};
 type Datos = { salario: string; arl: string; dias: number[]; ingreso: string; previas: string };
 
 const datosDe = (f: Ficha): Datos => ({
@@ -30,6 +36,8 @@ export default function FichaEmpleado() {
   const { id } = useParams<{ id: string }>();
   const verNomina = usePermiso("liquidador.nomina.ver");
   const gestionar = usePermiso("liquidador.nomina.gestionar");
+  const gestionarPersonal = usePermiso("liquidador.personal.gestionar");
+  const [version, setVersion] = useState(0);
   const [f, setF] = useState<Ficha | null>(null);
   const [d, setD] = useState<Datos | null>(null);
   const [descuentos, setDescuentos] = useState<Descuento[]>([]);
@@ -44,6 +52,7 @@ export default function FichaEmpleado() {
     const x = await api<Ficha>(`/liquidador/empleados/${id}`);
     setF(x);
     setD(datosDe(x));
+    setVersion((v) => v + 1);
   }, [id]);
 
   const cargarDescuentos = useCallback(async () => {
@@ -103,16 +112,29 @@ export default function FichaEmpleado() {
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/liquidador/empleados" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Volver"><ArrowLeft className="h-5 w-5" /></Link>
         <div>
-          <h1 className="text-2xl font-bold text-marca-900">{f.nombre}</h1>
-          <p className="text-sm text-slate-500"><span className="font-mono">{f.documento}</span> · {f.cargo} · {f.quincenas} {f.quincenas === 1 ? "nómina" : "nóminas"}{f.ultima ? ` · última ${f.ultima}` : ""}</p>
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold text-marca-900">
+            {f.nombre}
+            {f.estado === "retirado"
+              ? <Insignia color="bg-rose-100 text-rose-800">Retirado{f.fecha_retiro ? ` el ${f.fecha_retiro.split("-").reverse().join("/")}` : ""}</Insignia>
+              : <Insignia color="bg-green-100 text-green-800">Activo</Insignia>}
+          </h1>
+          <p className="text-sm text-slate-500">
+            <span className="font-mono">{f.documento}</span> · {f.cargo}{f.tipo_personal ? ` (${f.tipo_personal})` : ""}{f.puesto ? ` · ${f.puesto}` : ""}
+            {" "}· {f.quincenas} {f.quincenas === 1 ? "nómina" : "nóminas"}{f.ultima ? ` · última ${f.ultima}` : ""}
+          </p>
         </div>
       </div>
       {error && <Alerta>{error}</Alerta>}
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 
+      {f.personal && (
+        <DatosPersonalesForm key={`datos-${version}`} empleadoId={f.id} personal={f.personal} nombre={f.nombre} cargo={f.cargo} editable={gestionarPersonal}
+          onGuardado={(texto) => { setAviso(texto); cargarFicha().catch(() => {}); }} />
+      )}
+
       {/* Datos editables */}
       <section className="tarjeta space-y-4 p-5">
-        <h2 className="font-semibold text-slate-900">Datos del empleado</h2>
+        <h2 className="font-semibold text-slate-900">Nómina y vacaciones</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {verNomina && (
             <div>
@@ -167,7 +189,9 @@ export default function FichaEmpleado() {
         <h2 className="mb-3 font-semibold text-slate-900">Saldo de vacaciones</h2>
         {s ? (
           <div className="grid gap-3 sm:grid-cols-4">
-            {([["Causados", s.causados], ["Disfrutados antes del liquidador", s.previos], ["Liquidados en el liquidador", s.liquidador],
+            {([["Causados", s.causados],
+              [s.corte_libro ? `Disfrutados hasta el ${s.corte_libro.split("-").reverse().join("/")} (libro)` : "Disfrutados antes del liquidador", s.previos],
+              [s.corte_libro ? "Liquidados en nóminas después del corte" : "Liquidados en el liquidador", s.liquidador],
               ["Pendientes", s.pendientes]] as const).map(([t, v], i) => (
               <div key={t} className={`rounded-lg border p-3 ${i === 3 ? (v < 0 ? "border-red-200 bg-red-50" : "border-marca-200 bg-marca-50") : "border-slate-200"}`}>
                 <p className="text-xs text-slate-500">{t}</p>
@@ -179,6 +203,11 @@ export default function FichaEmpleado() {
           <p className="text-sm text-slate-500">Sin fecha de ingreso: registre la fecha arriba para llevar el saldo. Liquidados en el liquidador: {f.vacaciones_liquidador} días hábiles.</p>
         )}
       </section>
+
+      {f.salidas && (
+        <HistorialVacaciones empleadoId={f.id} salidas={f.salidas} liquidadas={f.vacaciones_liquidadas ?? []} editable={gestionarPersonal}
+          onCambio={(texto) => { setAviso(texto); cargarFicha().catch(() => {}); }} />
+      )}
 
       {/* Préstamos y embargos */}
       {verNomina && (
@@ -275,6 +304,11 @@ export default function FichaEmpleado() {
             </table>
           </div>
         </section>
+      )}
+
+      {f.contratos && (
+        <HistorialLaboral empleadoId={f.id} contratos={f.contratos} editable={gestionarPersonal}
+          onCambio={(texto) => { setAviso(texto); cargarFicha().catch(() => {}); }} />
       )}
 
       {/* Historial de nóminas */}

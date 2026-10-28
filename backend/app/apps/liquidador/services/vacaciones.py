@@ -7,7 +7,8 @@
   que es salario ordinario, art. 192 CST: no cuentan extras ni el trabajo en dominicales o festivos) de los
   periodos cargados en los 12 meses anteriores; nómina puede reemplazarlo por periodo.
 - Saldo: 15 días hábiles por año (360 días) desde la fecha de ingreso, menos los disfrutados antes del liquidador
-  y los liquidados en él. Sin fecha de ingreso no hay saldo ni alerta.
+  (o hasta el corte del libro de vacaciones) y los liquidados en él después del corte. Sin fecha de ingreso no hay
+  saldo ni alerta.
 """
 
 from collections import defaultdict
@@ -85,7 +86,8 @@ def promedios_manuales(db: Session, periodo_id: int) -> dict[int, Decimal]:
 
 
 def habiles_disfrutados(db: Session, empleados: dict[int, LiqEmpleado], antes_de: date | None = None) -> dict[int, int]:
-    """Días hábiles de vacaciones ya liquidados en el liquidador (cada fecha una vez, aunque esté en dos periodos)."""
+    """Días hábiles de vacaciones ya liquidados en el liquidador (cada fecha una vez, aunque esté en dos periodos). Con
+    corte del libro de vacaciones solo cuentan los posteriores: los anteriores ya están en los días previos."""
     if not empleados:
         return {}
     consulta = (select(LiqDia.empleado_id, LiqDia.fecha).join(LiqTurno, LiqTurno.id == LiqDia.turno_id)
@@ -98,6 +100,9 @@ def habiles_disfrutados(db: Session, empleados: dict[int, LiqEmpleado], antes_de
     fest = festivos.conjunto(db, min(f for _, f in filas), max(f for _, f in filas))
     cuenta: dict[int, int] = defaultdict(int)
     for eid, fecha in filas:
+        corte = getattr(empleados[eid], "vacaciones_corte", None)
+        if corte is not None and fecha <= corte:
+            continue
         if es_habil(fecha, empleados[eid].dias_habiles, fest):
             cuenta[eid] += 1
     return dict(cuenta)
@@ -111,4 +116,5 @@ def saldo(empleado: LiqEmpleado, disfrutados_liquidador: int, hasta: date) -> di
     previas = empleado.vacaciones_previas or Decimal("0")
     return {"fecha_ingreso": empleado.fecha_ingreso.isoformat(), "corte": hasta.isoformat(), "causados": float(c),
             "previos": float(previas), "liquidador": disfrutados_liquidador,
+            "corte_libro": empleado.vacaciones_corte.isoformat() if getattr(empleado, "vacaciones_corte", None) else None,
             "pendientes": float(c - previas - disfrutados_liquidador)}

@@ -112,6 +112,7 @@ class FilaLeida:
     cargo: str
     dias: list[tuple[date, object]]  # (fecha, turno)
     arl: int | None = None  # solo en el costeo
+    con_cargo: bool = False  # el Excel trae la columna cargo
 
 
 def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple[list[FilaLeida], Resumen]:
@@ -174,7 +175,7 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
         if col_cargo is not None and col_cargo < len(fila) and fila[col_cargo]:
             cargo = str(fila[col_cargo]).strip() or "Vigilante"
 
-        leida = FilaLeida(num, documento, nombre[:200], cargo[:80], [])
+        leida = FilaLeida(num, documento, nombre[:200], cargo[:80], [], con_cargo=col_cargo is not None)
         if col_arl is not None and col_arl < len(fila) and fila[col_arl] not in (None, ""):
             leida.arl = clase_arl(fila[col_arl])
             if leida.arl is None:
@@ -210,16 +211,20 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
 def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
     """Reemplaza los días de la nómina; crea o actualiza los empleados del archivo."""
     leidas, res = leer(db, periodo, contenido)
-    empleados = {e.documento: e for e in db.scalars(select(LiqEmpleado))}
+    from app.apps.liquidador.services.personal import Indice
+
+    empleados = Indice(db.scalars(select(LiqEmpleado)))
     db.execute(delete(LiqDia).where(LiqDia.periodo_id == periodo.id))
     for f in leidas:
-        emp = empleados.get(f.documento)
+        emp = empleados.buscar(f.documento)
         if emp is None:
             emp = LiqEmpleado(documento=f.documento, nombre=f.nombre, cargo=f.cargo)
             db.add(emp)
             empleados[f.documento] = emp
-        else:
-            emp.nombre, emp.cargo = f.nombre, f.cargo
+        elif emp.tipo_personal is None:  # quien viene de la base de personal conserva su nombre y cargo
+            emp.nombre = f.nombre
+            if f.con_cargo:
+                emp.cargo = f.cargo
         db.flush()
         for fecha, turno in f.dias:
             db.add(LiqDia(periodo_id=periodo.id, empleado_id=emp.id, fecha=fecha, turno_id=turno.id, codigo=turno.codigo))

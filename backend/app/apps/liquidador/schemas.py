@@ -196,6 +196,10 @@ class EmpleadoOut(BaseModel):
     vacaciones_liquidador: int = 0  # días hábiles de vacaciones liquidados en el liquidador
     saldo_vacaciones: dict | None = None  # causados, previos, liquidador y pendientes a hoy (con fecha de ingreso)
     arl_clase: int | None = None
+    estado: str = "activo"  # activo | retirado
+    fecha_retiro: date | None = None
+    tipo_personal: str | None = None
+    puesto: str | None = None
 
 
 class TarifaIn(BaseModel):

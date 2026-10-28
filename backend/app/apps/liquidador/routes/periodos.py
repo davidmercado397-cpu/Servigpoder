@@ -253,8 +253,14 @@ def _archivo(contenido: bytes, tipo: str, nombre: str) -> StreamingResponse:
 
 
 @router.get("/empleados", response_model=ApiResponse[list[EmpleadoOut]])
-def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), actual: Usuario = Depends(require(VER))):
-    consulta = select(LiqEmpleado).order_by(LiqEmpleado.documento)
+def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
+              estado: str = Query("todos", pattern="^(todos|activo|retirado)$"),
+              tipo: str = Query("todos", pattern="^(todos|operativo|administrativo)$"), actual: Usuario = Depends(require(VER))):
+    consulta = select(LiqEmpleado).order_by(LiqEmpleado.nombre)
+    if estado != "todos":
+        consulta = consulta.where(LiqEmpleado.estado == estado)
+    if tipo != "todos":
+        consulta = consulta.where(LiqEmpleado.tipo_personal == tipo)
     if q.strip():
         patron = f"%{q.strip()}%"
         consulta = consulta.where(or_(LiqEmpleado.documento.ilike(patron), LiqEmpleado.nombre.ilike(patron)))
@@ -282,7 +288,8 @@ def _empleado_out(e: LiqEmpleado, quincenas: int, ultima: str | None, disfrutado
                        dias_habiles=[int(c) for c in (e.dias_habiles or vacaciones.HABILES_DEFECTO)],
                        fecha_ingreso=e.fecha_ingreso, vacaciones_previas=float(e.vacaciones_previas or 0),
                        vacaciones_liquidador=disfrutados, saldo_vacaciones=vacaciones.saldo(e, disfrutados, date.today()),
-                       arl_clase=e.arl_clase)
+                       arl_clase=e.arl_clase, estado=e.estado or "activo", fecha_retiro=e.fecha_retiro,
+                       tipo_personal=e.tipo_personal, puesto=e.puesto)
 
 
 @router.get("/empleados/{empleado_id}", response_model=ApiResponse[dict])
@@ -307,4 +314,9 @@ def ficha(empleado_id: int, db: DbSession, actual: Usuario = Depends(require(VER
         nominas.append(x)
     ultima = nominas[0]["etiqueta"] if nominas else None
     disfrutados = vacaciones.habiles_disfrutados(db, {e.id: e}).get(e.id, 0)
-    return ok({**_empleado_out(e, len(nominas), ultima, disfrutados, actual).model_dump(mode="json"), "nominas": nominas})
+    ficha = {**_empleado_out(e, len(nominas), ultima, disfrutados, actual).model_dump(mode="json"), "nominas": nominas}
+    if "liquidador.personal.ver" in actual.permisos:  # datos personales e historiales: solo gestión humana y nómina
+        from app.apps.liquidador.routes.personal import datos_personales, historial
+
+        ficha.update(personal=datos_personales(e), **historial(db, e))
+    return ok(ficha)

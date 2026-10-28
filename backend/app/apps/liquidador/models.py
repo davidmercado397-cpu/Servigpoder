@@ -3,11 +3,11 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import BaseEmpresa as Base
-from app.models import Usuario  # noqa: F401  (tabla referenciada por cerrado_por)
+from app.models import Usuario
 
 HORAS = Numeric(5, 2)
 
@@ -361,3 +361,127 @@ class LiqVacacionSalida(Base):
     observacion: Mapped[str | None] = mapped_column(String(300), nullable=True)
     origen: Mapped[str] = mapped_column(String(10), default="manual")  # libro | manual
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------- Gestión humana: salud y casos jurídicos (repositorio de consulta; no afecta la nómina) ----------------
+# Se registran por documento: la persona puede no estar (o ya no estar) en la base de empleados.
+
+class LiqCie(Base):
+    """Catálogo CIE-10 de diagnósticos (datos/cie10.csv)."""
+
+    __tablename__ = "liq_cie"
+
+    codigo: Mapped[str] = mapped_column(String(10), primary_key=True)
+    descripcion: Mapped[str] = mapped_column(String(300))
+
+
+class LiqIncapacidad(Base):
+    """Incapacidad o licencia con su diagnóstico CIE. Las prórrogas se encadenan para sumar los días acumulados."""
+
+    __tablename__ = "liq_incapacidad"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    documento: Mapped[str] = mapped_column(String(32), index=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+    empleado_id: Mapped[int | None] = mapped_column(ForeignKey("liq_empleado.id", ondelete="SET NULL"), nullable=True, index=True)
+    puesto: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # incapacidad | licencia_maternidad | licencia_paternidad | calamidad | otra
+    novedad: Mapped[str] = mapped_column(String(30), default="incapacidad")
+    # enfermedad_general | accidente_trabajo | enfermedad_laboral | accidente_transito
+    origen: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    prorroga: Mapped[bool] = mapped_column(Boolean, default=False)
+    desde: Mapped[date] = mapped_column(Date, index=True)
+    hasta: Mapped[date] = mapped_column(Date)
+    dias: Mapped[int] = mapped_column(Integer)
+    entidad: Mapped[str | None] = mapped_column(String(80), nullable=True)  # EPS, ARL, SOAT o centro médico
+    cie: Mapped[str | None] = mapped_column(String(60), nullable=True)  # uno o varios códigos separados por coma
+    diagnostico: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    soporte: Mapped[str | None] = mapped_column(String(12), nullable=True)  # fisico | escaneado | virtual
+    observacion: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    origen_registro: Mapped[str] = mapped_column(String(10), default="manual")  # libro | manual
+    creado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LiqRestriccion(Base):
+    """Restricción o recomendación médica con su vigencia, o caso de seguimiento (p. ej. oncológico)."""
+
+    __tablename__ = "liq_restriccion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    documento: Mapped[str] = mapped_column(String(32), index=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+    empleado_id: Mapped[int | None] = mapped_column(ForeignKey("liq_empleado.id", ondelete="SET NULL"), nullable=True, index=True)
+    puesto: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tipo: Mapped[str] = mapped_column(String(20), default="restriccion")  # restriccion | recomendacion | oncologico
+    desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cie: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    diagnostico: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    detalle: Mapped[str | None] = mapped_column(Text, nullable=True)  # qué no puede hacer o qué se recomienda
+    observacion: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    origen_registro: Mapped[str] = mapped_column(String(10), default="manual")
+    creado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LiqCaso(Base):
+    """Derecho de petición, tutela, desacato, demanda, orden judicial o queja de acoso laboral, con su seguimiento."""
+
+    __tablename__ = "liq_caso"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    documento: Mapped[str] = mapped_column(String(32), index=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+    empleado_id: Mapped[int | None] = mapped_column(ForeignKey("liq_empleado.id", ondelete="SET NULL"), nullable=True, index=True)
+    # derecho_peticion | tutela | desacato | demanda | orden_judicial | acoso_laboral | otro
+    tipo: Mapped[str] = mapped_column(String(20))
+    asunto: Mapped[str] = mapped_column(String(300))  # quién lo envía y de qué se trata
+    recibido: Mapped[date] = mapped_column(Date, index=True)
+    vence: Mapped[date | None] = mapped_column(Date, nullable=True)
+    estado: Mapped[str] = mapped_column(String(12), default="abierto")  # abierto | contestado | cerrado
+    contacto: Mapped[str | None] = mapped_column(String(200), nullable=True)  # correo o celular para responder
+    observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origen_registro: Mapped[str] = mapped_column(String(10), default="manual")
+    creado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    actuaciones: Mapped[list["LiqCasoActuacion"]] = relationship(back_populates="caso", cascade="all, delete-orphan",
+                                                                 passive_deletes=True, order_by="LiqCasoActuacion.id")
+
+
+class LiqCasoActuacion(Base):
+    """Seguimiento de un caso: cada contestación o gestión con su fecha y medio."""
+
+    __tablename__ = "liq_caso_actuacion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    caso_id: Mapped[int] = mapped_column(ForeignKey("liq_caso.id", ondelete="CASCADE"), index=True)
+    fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    descripcion: Mapped[str] = mapped_column(String(300))
+    medio: Mapped[str | None] = mapped_column(String(60), nullable=True)  # correo, WhatsApp, físico…
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    caso: Mapped[LiqCaso] = relationship(back_populates="actuaciones")
+
+
+class LiqDocumento(Base):
+    """Soporte adjunto (PDF o imagen) de una incapacidad, restricción o caso, guardado en la base. Es una excepción
+    a "no guardar archivos", pedida para tener el repositorio documental de gestión humana."""
+
+    __tablename__ = "liq_documento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    modulo: Mapped[str] = mapped_column(String(12), index=True)  # incapacidad | restriccion | caso
+    registro_id: Mapped[int] = mapped_column(Integer, index=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+    mime: Mapped[str] = mapped_column(String(60))
+    bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    contenido: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)  # solo se lee al descargarlo
+    cargado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Módulos que admiten soportes adjuntos
+DOCUMENTOS_DE = {"incapacidad": LiqIncapacidad, "restriccion": LiqRestriccion, "caso": LiqCaso}

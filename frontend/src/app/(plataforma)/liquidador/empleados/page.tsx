@@ -1,9 +1,10 @@
 "use client";
 
-import { ChevronRight, FileUp, Search } from "lucide-react";
+import { ChevronRight, FileUp, Search, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ImportarPersonal } from "@/components/importar-personal";
+import { NuevoEmpleado } from "@/components/nuevo-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { apiEnvelope, mensajeError } from "@/lib/api";
@@ -24,6 +25,7 @@ export default function Empleados() {
   const [estado, setEstado] = useState("activo");
   const [tipo, setTipo] = useState("todos");
   const [importar, setImportar] = useState(false);
+  const [nuevo, setNuevo] = useState(false);
   const [lista, setLista] = useState<Empleado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [q, setQ] = useState("");
@@ -44,15 +46,23 @@ export default function Empleados() {
   return (
     <div className="space-y-5">
       <Titulo accion={gestionarPersonal && (
-        <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => setImportar(!importar)}>
-          <FileUp className="h-4 w-4" /> Importar base de personal o libro de vacaciones
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => setImportar(!importar)}>
+            <FileUp className="h-4 w-4" /> Importar base de personal o libro de vacaciones
+          </button>
+          {!nuevo && (
+            <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => setNuevo(true)}>
+              <UserPlus className="h-4 w-4" /> Nuevo empleado
+            </button>
+          )}
+        </div>
       )}>Empleados</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
         Haga clic en una persona para abrir su ficha: datos personales, contratos, salario, ARL, vacaciones, préstamos, embargos, cuotas, auxilios y las
-        nóminas en que aparece. Quien no esté en la base se crea al cargar el Excel de una nómina.
+        nóminas en que aparece. También se crean al cargar el Excel de una nómina o al importar la base de personal.
       </p>
       {error && <Alerta>{error}</Alerta>}
+      {nuevo && <NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} />}
       {importar && <ImportarPersonal onImportado={() => cargar().catch(() => {})} />}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">

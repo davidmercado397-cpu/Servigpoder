@@ -37,6 +37,9 @@ export default function FichaEmpleado() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const gestionar = usePermiso("liquidador.nomina.gestionar");
   const gestionarPersonal = usePermiso("liquidador.personal.gestionar");
+  const verSalud = usePermiso("liquidador.salud.ver");
+  const verJuridico = usePermiso("liquidador.juridico.ver");
+  const verPersonal = usePermiso("liquidador.personal.ver");
   const [version, setVersion] = useState(0);
   const [f, setF] = useState<Ficha | null>(null);
   const [d, setD] = useState<Datos | null>(null);
@@ -126,6 +129,18 @@ export default function FichaEmpleado() {
       </div>
       {error && <Alerta>{error}</Alerta>}
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
+
+      {(verSalud || verJuridico || verPersonal) && (
+        <nav className="flex flex-wrap items-center gap-2 text-sm" aria-label="Gestión humana de esta persona">
+          <span className="text-slate-500">Ver de esta persona:</span>
+          {([[verSalud, "incapacidades", "Incapacidades"], [verSalud, "restricciones", "Restricciones médicas"],
+            [verJuridico, "tutelas", "Tutelas y demandas"], [verPersonal, "cuotas-pendientes", "Cuotas pendientes"]] as [boolean, string, string][])
+            .filter(([ver]) => ver).map(([, ruta, texto]) => (
+              <a key={ruta} className="rounded-full border border-slate-200 px-3 py-1 text-marca-700 hover:bg-marca-50"
+                href={`/liquidador/${ruta}?q=${encodeURIComponent(f.documento)}`}>{texto}</a>
+            ))}
+        </nav>
+      )}
 
       {f.personal && (
         <DatosPersonalesForm key={`datos-${version}`} empleadoId={f.id} personal={f.personal} nombre={f.nombre} cargo={f.cargo} editable={gestionarPersonal}

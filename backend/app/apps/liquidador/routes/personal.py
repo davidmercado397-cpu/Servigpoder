@@ -1,6 +1,7 @@
 """Ficha del personal: datos personales, contratos e historial de vacaciones, e importación de la base de personal y
 del libro de vacaciones (los archivos se procesan en memoria y se descartan)."""
 
+import re
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
@@ -13,7 +14,7 @@ from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
-from app.apps.liquidador.models import LiqContrato, LiqDia, LiqEmpleado, LiqTurno, LiqVacacionSalida
+from app.apps.liquidador.models import CARGO_DEFECTO, LiqContrato, LiqDia, LiqEmpleado, LiqTurno, LiqVacacionSalida
 from app.apps.liquidador.services import festivos, personal, vacaciones as vac
 
 router = APIRouter(tags=["liquidador: ficha del personal"])
@@ -73,6 +74,30 @@ class DatosPersonalesIn(BaseModel):
         for f in (self.fecha_nacimiento, self.fecha_expedicion):
             if f is not None and (f > hoy or f.year < 1900):
                 raise ValueError("Revise las fechas de nacimiento y de expedición")
+        return self
+
+
+class NuevoEmpleadoIn(BaseModel):
+    documento: str = Field(min_length=3, max_length=32)
+    nombre: str = Field(min_length=3, max_length=200)
+    cargo: str = Field(CARGO_DEFECTO, min_length=1, max_length=80)
+    tipo_personal: str = Field("operativo", pattern="^(operativo|administrativo)$")
+    puesto: str | None = Field(None, max_length=200)
+    tipo_contrato: str | None = Field(None, max_length=40)
+    # Con fecha de ingreso queda registrado su contrato (historial laboral) y empieza a causar vacaciones
+    fecha_ingreso: date | None = None
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _vacios(cls, v):
+        if isinstance(v, str):
+            return " ".join(v.split()) or None
+        return v
+
+    @model_validator(mode="after")
+    def _ingreso(self):
+        if self.fecha_ingreso and (self.fecha_ingreso.year < 1950 or self.fecha_ingreso > date.today() + timedelta(days=60)):
+            raise ValueError("Revise la fecha de ingreso")
         return self
 
 
@@ -162,6 +187,30 @@ def historial(db: DbSession, e: LiqEmpleado) -> dict:
             t["antes_del_corte"] = bool(e.vacaciones_corte and date.fromisoformat(t["hasta"]) <= e.vacaciones_corte)
     return {"contratos": [contrato_out(c) for c in contratos], "salidas": [salida_out(x) for x in salidas],
             "vacaciones_liquidadas": list(reversed(tramos))}
+
+
+@router.post("/empleados", response_model=ApiResponse[dict], status_code=201)
+def crear_empleado(data: NuevoEmpleadoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Crea un empleado desde la plataforma (sin esperar al Excel de turnos o a la base de personal). Lo demás se
+    completa en su ficha."""
+    # Cédula escrita con puntos o espacios (1.144.000.111): solo los números
+    doc, _ = personal.documento(re.sub(r"[.,\s]", "", data.documento) if re.fullmatch(r"[\d.,\s]+", data.documento) else data.documento)
+    existente = personal.Indice(db.scalars(select(LiqEmpleado))).buscar(doc)
+    if existente is not None:
+        raise ApiError(409, f"Ya existe un empleado con ese documento: {existente.nombre}", "EMPLEADO_EXISTE",
+                       details=[{"id": existente.id}])
+    e = LiqEmpleado(documento=doc, nombre=data.nombre.upper(), cargo=data.cargo, tipo_personal=data.tipo_personal, puesto=data.puesto,
+                    tipo_contrato=data.tipo_contrato, fecha_ingreso=data.fecha_ingreso, estado=personal.ACTIVO)
+    db.add(e)
+    db.flush()
+    if data.fecha_ingreso:
+        db.add(LiqContrato(empleado_id=e.id, fecha_inicio=data.fecha_ingreso, tipo_contrato=data.tipo_contrato, cargo=data.cargo,
+                           puesto=data.puesto))
+        db.flush()
+        personal.sincronizar_estado(db, e)
+    auditar(db, request, "liq_empleado_creado", actual.id, documento=e.documento)
+    db.commit()
+    return ok({"id": e.id, "documento": e.documento, "nombre": e.nombre})
 
 
 @router.put("/empleados/{empleado_id}/datos", response_model=ApiResponse[dict])

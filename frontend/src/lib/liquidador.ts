@@ -39,7 +39,7 @@ export type Nomina = {
   descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; deducciones: number; neto: number; tarifas: string[];
   /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
   auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
-  dias_ausencia?: number; exceso_no_salarial?: number; alertas?: string[];
+  dias_ausencia?: number; dias_tnl?: number; exceso_no_salarial?: number; alertas?: string[];
   vacaciones?: VacacionesNomina | null; vacaciones_valor?: number;
 };
 
@@ -94,7 +94,11 @@ export type Empleado = {
   /** Días hábiles para vacaciones: 0 = lunes … 6 = domingo */
   dias_habiles: number[]; fecha_ingreso: string | null; vacaciones_previas: number; vacaciones_liquidador: number;
   saldo_vacaciones: SaldoVacaciones | null;
+  /** Clase de riesgo ARL (1 a 5) */
+  arl_clase: number | null;
 };
+
+export const CLASES_ARL: [number, string][] = [[1, "I"], [2, "II"], [3, "III"], [4, "IV"], [5, "V"]];
 
 /** Los 12 conceptos, en el orden de las columnas del archivo de liquidación. */
 export const CONCEPTOS: [string, string, string][] = [
@@ -161,12 +165,18 @@ export type PersonaPagada = { empleado_id: number; documento: string; nombre: st
 
 /** Costeo de nómina: costo empresa de un Excel de turnos, sin que cuente como pagado */
 export type CostoEmpresa = {
-  exonerado: boolean; base_aportes: number; base_arl: number; base_prestaciones: number; base_vacaciones: number;
+  exonerado: boolean; arl_clase: number; arl_tarifa: number; base_aportes: number; base_arl: number; base_prestaciones: number; base_vacaciones: number;
   aportes: Record<string, number>; prestaciones: Record<string, number>; total_aportes: number; total_prestaciones: number;
   devengado: number; costo_total: number;
 };
 
-export type ParametrosCosteo = Record<string, number | boolean> & { exonerado: boolean };
+export type ParametrosCosteo = {
+  exonerado: boolean; arl_clase: number; arl_tarifas: Record<string, number>;
+  [k: string]: number | boolean | Record<string, number>;
+};
+
+/** Valor numérico de un % de los parámetros del costeo */
+export const pct = (p: ParametrosCosteo, k: string) => Number(p[k] ?? 0);
 
 export type CosteoResumen = {
   id: number; nombre: string; anio: number; mes: number; quincena: number; etiqueta: string; desde: string; hasta: string;
@@ -176,13 +186,16 @@ export type CosteoResumen = {
 
 export type CosteoPersona = {
   documento: string; nombre: string; cargo: string; existe: boolean; dias: Record<string, number>; horas: Record<string, number>;
+  /** Clase ARL de la columna "arl" del Excel o la del empleado; null = se usó la clase por defecto del costeo */
+  arl_clase: number | null; arl_origen?: "excel" | "empleado" | null; auxilio_mensual: number;
   total_horas: number; nomina: Nomina; costo: CostoEmpresa;
 };
 
 export type Costeo = CosteoResumen & {
-  umbral_activo: boolean; umbral_horas: number; umbral_horas_novedad: number; parametros: ParametrosCosteo; advertencias: string[];
+  umbral_activo: boolean; umbral_horas: number; umbral_horas_novedad: number; auxilio_mensual: number;
+  parametros: ParametrosCosteo; advertencias: string[];
   totales: {
-    personas: number; no_registradas: number; devengado: number; neto: number; total_aportes: number; total_prestaciones: number;
+    personas: number; no_registradas: number; sin_arl: number; devengado: number; neto: number; total_aportes: number; total_prestaciones: number;
     costo_total: number; aportes: Record<string, number>; prestaciones: Record<string, number>;
   };
   resultados: CosteoPersona[];

@@ -195,6 +195,7 @@ class EmpleadoOut(BaseModel):
     vacaciones_previas: float = 0
     vacaciones_liquidador: int = 0  # días hábiles de vacaciones liquidados en el liquidador
     saldo_vacaciones: dict | None = None  # causados, previos, liquidador y pendientes a hoy (con fecha de ingreso)
+    arl_clase: int | None = None
 
 
 class TarifaIn(BaseModel):
@@ -320,6 +321,10 @@ class VacacionesEmpleadoIn(BaseModel):
         if v is not None and (v > date.today() or v.year < 1950):
             raise ValueError("La fecha de ingreso no es válida")
         return v
+
+
+class ConfiguracionEmpleadoIn(VacacionesEmpleadoIn):
+    arl_clase: int | None = Field(None, ge=1, le=5)
 
 
 class PromedioVacacionesIn(BaseModel):

@@ -82,6 +82,8 @@ class LiqEmpleado(Base):
     # Saldo de vacaciones (15 días hábiles por año): fecha de ingreso y días hábiles disfrutados antes del liquidador
     fecha_ingreso: Mapped[date | None] = mapped_column(Date, nullable=True)
     vacaciones_previas: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("0"), server_default="0")
+    # Clase de riesgo ARL (1 a 5), configurada en Empleados
+    arl_clase: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class LiqPeriodo(Base):
@@ -264,6 +266,8 @@ class LiqCosteo(Base):
     umbral_activo: Mapped[bool] = mapped_column(Boolean, default=False)
     umbral_horas: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("42"))
     umbral_horas_novedad: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("7"))
+    # Auxilio no prestacional mensual por persona en el costeo (0 = no aplica)
+    auxilio_mensual: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
     parametros: Mapped[dict] = mapped_column(JSON, default=dict)
     archivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     advertencias: Mapped[list] = mapped_column(JSON, default=list)

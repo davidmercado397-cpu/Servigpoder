@@ -10,6 +10,8 @@
 - Vacaciones (códigos marcados "Es vacaciones"): (salario + promedio variable) ÷ 30 por cada día, separando
   hábiles y no hábiles; ver services/vacaciones.py.
 - Auxilio de transporte: ÷ 30 por día trabajado o de descanso, si el salario no supera 2 mínimos.
+- Auxilios no prestacionales: valor mensual menos 1/30 por cada día de tiempo no laborado (ausencias, incapacidades,
+  vacaciones y demás novedades).
 - Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos y préstamos.
 Cada día se paga con la tarifa vigente ese día (salario mínimo, horas del mes y %).
 """
@@ -241,9 +243,12 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             alertas.append(f"Se liquidan {a.vac_habiles_reales} día(s) hábiles de vacaciones pero solo tenía "
                            f"{max(pendientes_antes, 0):,.2f} pendientes (causados {saldo['causados']:,.2f} al {periodo.hasta:%d/%m/%Y})")
 
-    # Auxilios no prestacionales: se descuentan en proporción a los días de ausencia y de vacaciones del periodo
+    # Auxilios no prestacionales: se descuentan en proporción al tiempo no laborado (TNL) del periodo: ausencias,
+    # incapacidades, vacaciones y cualquier otra novedad; los descansos (Z) y libres (L) no descuentan
     dias_ausencia = sum(1 for d in dias if d.clase == AUSENCIA)
-    dias_descuento = dias_ausencia + a.vac_dias
+    dias_incapacidad_tnl = sum(1 for d in dias if d.clase == INCAPACIDAD)
+    dias_otras_tnl = sum(1 for d in dias if d.clase not in PAGAN_SALARIO and d.clase not in (AUSENCIA, INCAPACIDAD)) - a.vac_dias
+    dias_descuento = dias_ausencia + dias_incapacidad_tnl + a.vac_dias + dias_otras_tnl
     aux_aplicados = []
     for x in sorted((x for x in auxilios or [] if _vigente(x, periodo)), key=lambda x: (x.desde, x.id)):
         q = x.quincena or AMBAS
@@ -252,8 +257,10 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         valor = _pesos(max(base - menos, Decimal("0")))
         calculo = f"valor mensual {x.valor_mensual:,.0f}{_txt_fraccion(periodo, q)}"
         if dias_descuento:
-            motivo = " y ".join(t for t in (f"{dias_ausencia} de ausencia" if dias_ausencia else "",
-                                            f"{a.vac_dias} de vacaciones" if a.vac_dias else "") if t)
+            motivo = ", ".join(t for t in (f"{dias_ausencia} de ausencia" if dias_ausencia else "",
+                                           f"{dias_incapacidad_tnl} de incapacidad" if dias_incapacidad_tnl else "",
+                                           f"{a.vac_dias} de vacaciones" if a.vac_dias else "",
+                                           f"{dias_otras_tnl} de otras novedades" if dias_otras_tnl else "") if t)
             calculo += f" − {dias_descuento} día(s) ({motivo}) × {x.valor_mensual / 30:,.0f}"
         aux_aplicados.append({"id": x.id, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo})
     no_prestacional = sum((Decimal(str(x["valor"])) for x in aux_aplicados), Decimal("0"))
@@ -305,7 +312,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "incapacidad_empresa": a.incapacidad_empresa, "incapacidad_eps": a.incapacidad_eps,
         "dias_auxilio": a.dias_auxilio, "dias_sin_pago": a.dias_sin_pago,
         "basico": float(basico), "incapacidad": float(incapacidad), "auxilio": float(auxilio),
-        "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia,
+        "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia, "dias_tnl": dias_descuento,
         "exceso_no_salarial": float(exceso), "alertas": alertas,
         "vacaciones": detalle_vac, "vacaciones_valor": float(vacaciones_valor),
         "horas": {c: float(h) for c, h in a.horas.items() if h},

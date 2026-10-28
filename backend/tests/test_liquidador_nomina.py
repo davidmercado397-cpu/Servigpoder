@@ -237,8 +237,9 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert (v["dias_habiles"], v["dias_no_habiles"], v["meses_promedio"], v["promedio_sugerido"]) == (4, 1, 0.5, sugerido)
     assert not v["promedio_manual"] and v["saldo"] is None and v["base"] == 1750905 + sugerido
     assert v["valor_habiles"] == round(4 * (1750905 + sugerido) / 30) and n["ibc"] >= v["valor"]
-    # El auxilio no prestacional se descuenta por la ausencia y los 5 días de vacaciones: 150.000 − 6 × 10.000
-    assert n["auxilios"][0]["valor"] == 90000 and n["dias_sin_pago"] == 2
+    # El auxilio se descuenta por todo el tiempo no laborado: 5 vacaciones, 2 incapacidad, 1 LR y 1 AUS → 150.000 − 9 × 10.000
+    assert n["auxilios"][0]["valor"] == 60000 and n["dias_sin_pago"] == 2 and n["dias_tnl"] == 9
+    assert "1 de ausencia, 2 de incapacidad, 5 de vacaciones, 1 de otras novedades" in n["auxilios"][0]["calculo"]
 
     # Lunes a viernes, ingreso 1-jun-2026 (5 días causados al 30-sep) → 3 hábiles y 2 no hábiles, sin alerta
     eid = _resultados(admin, pid)["3003"]["empleado_id"]
@@ -358,3 +359,48 @@ def test_costeo_de_nomina_no_paga_ni_crea_empleados(admin):
     assert admin.post(f"{API}/costeos", files=archivo(contenido, "costeo.xlsx"),
                       data={"nombre": "x", "anio": "2026", "mes": "10", "quincena": "1"}).status_code == 422  # fechas de otro periodo
     assert admin.delete(f"{API}/costeos/{c['id']}").status_code == 200
+
+
+
+def test_arl_por_empleado_y_auxilio_del_costeo(admin):
+    from tests.conftest import archivo
+
+    # En la nómina la ARL se configura en Empleados: la columna arl del Excel se ignora
+    pid = _periodo_con(admin, 2026, 8, 2, [[1001, "1001", 3, *(["A"] * 16)], [3003, "3003", "", *(["A"] * 16)]], ["arl", *range(16, 32)])
+    emp = {e["documento"]: e for e in admin.get(f"{API}/empleados").json()["data"]}
+    assert emp["1001"]["arl_clase"] is None and emp["1001"]["quincenas"] == 1
+    base = {"dias_habiles": [0, 1, 2, 3, 4, 5]}
+    assert admin.put(f"{API}/empleados/{emp['3003']['id']}/configuracion", json={**base, "arl_clase": 5}).status_code == 200
+    assert admin.put(f"{API}/empleados/{emp['3003']['id']}/configuracion", json={**base, "arl_clase": 6}).status_code == 422
+    assert {e["documento"]: e for e in admin.get(f"{API}/empleados").json()["data"]}["3003"]["arl_clase"] == 5
+    assert admin.get(f"{API}/periodos/{pid}").status_code == 200
+
+    # Costeo: la clase viene del Excel (1001 → 2 en romano); si no viene, la del empleado (3003 → 5); si tampoco,
+    # la clase por defecto (7777 → 4). "x" no es válida. Auxilio del costeo de 300.000 mensual; 3003 tiene 1 AUS
+    contenido = xlsx([["documento", "SEPTIEMBRE", "arl", *range(16, 31)], [1001, "1001", "II", *(["A"] * 15)],
+                      [3003, "3003", "", "AUS", *(["A"] * 14)], [7777, "Nuevo", "x", *(["A"] * 15)]])
+    c = admin.post(f"{API}/costeos", files=archivo(contenido, "c.xlsx"),
+                   data={"nombre": "Con ARL", "anio": "2026", "mes": "9", "quincena": "2", "auxilio_mensual": "300000"}).json()["data"]
+    r = {x["documento"]: x for x in c["resultados"]}
+    assert (r["1001"]["arl_clase"], r["3003"]["arl_clase"], r["7777"]["arl_clase"]) == (2, 5, None)
+    assert (r["1001"]["arl_origen"], r["3003"]["arl_origen"], r["7777"]["arl_origen"]) == ("excel", "empleado", None)
+    assert (r["1001"]["costo"]["arl_clase"], r["3003"]["costo"]["arl_clase"], r["7777"]["costo"]["arl_clase"]) == (2, 5, 4)
+    assert any("ARL 'x' no es válida" in a for a in c["advertencias"])
+    assert r["3003"]["costo"]["aportes"]["arl"] == round(r["3003"]["costo"]["base_arl"] * 0.0696)
+    assert c["totales"]["sin_arl"] == 1 and c["auxilio_mensual"] == 300000
+    assert r["7777"]["nomina"]["auxilios_no_prestacionales"] == 150000
+    assert r["3003"]["nomina"]["auxilios_no_prestacionales"] == 140000  # 150.000 − 1 ausencia × 10.000
+    # Sin auxilio en el costeo no se suma ninguno (ni los registrados en el módulo de auxilios)
+    assert admin.post(f"{API}/auxilios", json={"documento": "1001", "descripcion": "Rodamiento", "valor_mensual": 200000,
+                                               "desde": "2026-09-01"}).status_code == 201
+    c0 = admin.post(f"{API}/costeos", files=archivo(contenido, "c.xlsx"),
+                    data={"nombre": "Sin auxilio", "anio": "2026", "mes": "9", "quincena": "2"}).json()["data"]
+    assert all(x["nomina"]["auxilios"] == [] for x in c0["resultados"])
+    # La clase por defecto se puede cambiar y recalcula solo a quien no tiene clase
+    par = {**c["parametros"], "arl_clase": 1}
+    c2 = admin.put(f"{API}/costeos/{c['id']}", json={"nombre": "Con ARL", "parametros": par}).json()["data"]
+    r2 = {x["documento"]: x for x in c2["resultados"]}
+    assert r2["7777"]["costo"]["arl_clase"] == 1 and r2["3003"]["costo"]["arl_clase"] == 5
+    assert load_workbook(BytesIO(admin.get(f"{API}/costeos/{c['id']}/excel").content))["Costo empresa"]["D4"].value == "1 (por defecto)"
+    hoja = load_workbook(BytesIO(admin.get(f"{API}/costeos/plantilla?anio=2026&mes=9&quincena=2").content)).active
+    assert next(hoja.iter_rows(values_only=True))[:4] == ("documento", "SEPTIEMBRE 2026", "arl", 16)

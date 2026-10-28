@@ -279,5 +279,5 @@ def empleados(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), 
                            dias_habiles=[int(c) for c in (e.dias_habiles or vacaciones.HABILES_DEFECTO)],
                            fecha_ingreso=e.fecha_ingreso, vacaciones_previas=float(e.vacaciones_previas or 0),
                            vacaciones_liquidador=disfrutados.get(e.id, 0),
-                           saldo_vacaciones=vacaciones.saldo(e, disfrutados.get(e.id, 0), hoy))
+                           saldo_vacaciones=vacaciones.saldo(e, disfrutados.get(e.id, 0), hoy), arl_clase=e.arl_clase)
                for e in lista], **meta)

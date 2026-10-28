@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ChevronDown, ChevronRight, Plus, Search } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, FileDown, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -17,7 +17,7 @@ export default function Costeos() {
   const router = useRouter();
   const hoy = new Date();
   const [f, setF] = useState({ nombre: "", anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2,
-    umbral_activo: false, umbral_horas: 42, umbral_horas_novedad: 7 });
+    umbral_activo: false, umbral_horas: 42, umbral_horas_novedad: 7, auxilio_mensual: "" });
   const [def, setDef] = useState<ParametrosDefecto | null>(null);
   const [par, setPar] = useState<ParametrosCosteo | null>(null);
   const [verPar, setVerPar] = useState(false);
@@ -53,6 +53,7 @@ export default function Costeos() {
       const c = await subirArchivo<Costeo>("/liquidador/costeos", archivo, {
         nombre: f.nombre, anio: String(f.anio), mes: String(f.mes), quincena: String(f.quincena), umbral_activo: String(f.umbral_activo),
         umbral_horas: String(f.umbral_horas), umbral_horas_novedad: String(f.umbral_horas_novedad), parametros: JSON.stringify(par),
+        auxilio_mensual: f.auxilio_mensual.trim() || "0",
       });
       router.push(`/liquidador/costeos/${c.id}`);
     } catch (err) {
@@ -97,9 +98,19 @@ export default function Costeos() {
                 <option value={0}>Mensual (mes completo)</option>
               </select>
             </div>
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <label className="label">Excel de turnos</label>
               <input className="input" type="file" required accept=".xlsx" onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
+              <a className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-marca-700 hover:underline"
+                href={`/api/liquidador/costeos/plantilla?anio=${f.anio}&mes=${f.mes}&quincena=${f.quincena}`}>
+                <FileDown className="h-3.5 w-3.5" /> Descargar plantilla (con la columna «arl»: clase de riesgo 1 a 5 de cada persona)
+              </a>
+            </div>
+            <div>
+              <label className="label">Auxilio no prestacional mensual</label>
+              <input className="input" type="number" min={0} placeholder="Solo si aplica" value={f.auxilio_mensual}
+                onChange={(e) => setF({ ...f, auxilio_mensual: e.target.value })} />
+              <p className="mt-1 text-xs text-slate-500">Por persona; se descuenta por ausencias, incapacidades y demás tiempo no laborado.</p>
             </div>
           </div>
           <label className="flex flex-wrap items-center gap-2 text-sm text-slate-700">

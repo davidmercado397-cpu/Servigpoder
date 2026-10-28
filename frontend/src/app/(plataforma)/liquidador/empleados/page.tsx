@@ -6,14 +6,14 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
-import { DIAS_SEMANA, type Empleado } from "@/lib/liquidador";
+import { CLASES_ARL, DIAS_SEMANA, type Empleado } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
 export default function Empleados() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const gestionarNomina = usePermiso("liquidador.nomina.gestionar");
   const [editando, setEditando] = useState<{ id: number; valor: string } | null>(null);
-  const [vac, setVac] = useState<{ e: Empleado; dias: number[]; ingreso: string; previas: string } | null>(null);
+  const [vac, setVac] = useState<{ e: Empleado; dias: number[]; ingreso: string; previas: string; arl: string } | null>(null);
   const [aviso, setAviso] = useState("");
   const [lista, setLista] = useState<Empleado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
@@ -48,10 +48,11 @@ export default function Empleados() {
     if (!vac) return;
     setError("");
     try {
-      await api(`/liquidador/empleados/${vac.e.id}/vacaciones`, {
-        method: "PUT", json: { dias_habiles: vac.dias, fecha_ingreso: vac.ingreso || null, vacaciones_previas: Number(vac.previas || 0) },
+      await api(`/liquidador/empleados/${vac.e.id}/configuracion`, {
+        method: "PUT", json: { dias_habiles: vac.dias, fecha_ingreso: vac.ingreso || null, vacaciones_previas: Number(vac.previas || 0),
+          arl_clase: vac.arl ? Number(vac.arl) : null },
       });
-      setAviso(`Vacaciones de ${vac.e.nombre} actualizadas. Los periodos ya calculados cambian solo si se recalculan.`);
+      setAviso(`Configuración de ${vac.e.nombre} actualizada. Los periodos ya calculados cambian solo si se recalculan.`);
       setVac(null);
       await cargar();
     } catch (err) {
@@ -74,7 +75,7 @@ export default function Empleados() {
       {vac && (
         <div className="tarjeta space-y-4 p-5">
           <div className="flex items-center">
-            <h2 className="font-semibold text-slate-900">Vacaciones de {vac.e.nombre}</h2>
+            <h2 className="font-semibold text-slate-900">Configuración de {vac.e.nombre}</h2>
             <button type="button" className="ml-auto rounded-md p-1 text-slate-500 hover:bg-slate-100" onClick={() => setVac(null)} aria-label="Cerrar"><X className="h-5 w-5" /></button>
           </div>
           <div>
@@ -91,6 +92,13 @@ export default function Empleados() {
             <p className="mt-1 text-xs text-slate-500">Los festivos nunca son hábiles. Los días de vacaciones que no sean hábiles también se pagan, pero no descuentan del saldo.</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <label className="label">Clase de riesgo ARL</label>
+              <select className="input" value={vac.arl} onChange={(ev) => setVac({ ...vac, arl: ev.target.value })}>
+                <option value="">Sin definir</option>
+                {CLASES_ARL.map(([n, romano]) => <option key={n} value={n}>Clase {romano}</option>)}
+              </select>
+            </div>
             <div>
               <label className="label">Fecha de ingreso</label>
               <input className="input" type="date" value={vac.ingreso} onChange={(ev) => setVac({ ...vac, ingreso: ev.target.value })} />
@@ -117,7 +125,7 @@ export default function Empleados() {
         </div>
         <div className="overflow-auto">
           <table className="tabla">
-            <thead><tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Último periodo</th><th className="text-right">Periodos</th>{verNomina && <th>Salario mensual</th>}<th>Vacaciones</th></tr></thead>
+            <thead><tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Último periodo</th><th className="text-right">Periodos</th>{verNomina && <th>Salario mensual</th>}<th>ARL</th><th>Vacaciones</th></tr></thead>
             <tbody>
               {lista.map((e) => (
                 <tr key={e.id}>
@@ -148,6 +156,9 @@ export default function Empleados() {
                     </td>
                   )}
                   <td className="whitespace-nowrap text-sm">
+                    {e.arl_clase ? `Clase ${CLASES_ARL.find(([n]) => n === e.arl_clase)?.[1]}` : <span className="text-slate-500">Sin definir</span>}
+                  </td>
+                  <td className="whitespace-nowrap text-sm">
                     <span className="flex items-center gap-1">
                       <span>
                         <span className="block text-xs text-slate-500">Hábiles: {habilesTexto(e.dias_habiles)}</span>
@@ -158,8 +169,9 @@ export default function Empleados() {
                         ) : <span className="text-slate-500">Sin fecha de ingreso</span>}
                       </span>
                       {gestionarNomina && (
-                        <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Configurar vacaciones"
-                          onClick={() => { setAviso(""); setVac({ e, dias: e.dias_habiles, ingreso: e.fecha_ingreso ?? "", previas: String(e.vacaciones_previas || "") }); }}>
+                        <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Configurar ARL y vacaciones"
+                          title="Configurar ARL y vacaciones"
+                          onClick={() => { setAviso(""); setVac({ e, dias: e.dias_habiles, ingreso: e.fecha_ingreso ?? "", previas: String(e.vacaciones_previas || ""), arl: e.arl_clase ? String(e.arl_clase) : "" }); }}>
                           <TreePalm className="h-3.5 w-3.5" />
                         </button>
                       )}

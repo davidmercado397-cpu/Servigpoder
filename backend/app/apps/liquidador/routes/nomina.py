@@ -14,7 +14,8 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.liquidador.models import CERRADA, LiqAuxilio, LiqDescuento, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa, LiqVacacionBase
 from app.apps.liquidador.schemas import (
-    AuxilioIn, AuxilioOut, DescuentoIn, DescuentoOut, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut, VacacionesEmpleadoIn,
+    AuxilioIn, AuxilioOut, ConfiguracionEmpleadoIn, DescuentoIn, DescuentoOut, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut,
+    VacacionesEmpleadoIn,
 )
 from app.apps.liquidador.services import calculo, exportar, reportes
 from app.apps.liquidador.services.nomina import descontado, porcentajes_de_ley
@@ -283,6 +284,19 @@ def vacaciones_empleado(empleado_id: int, data: VacacionesEmpleadoIn, request: R
             vacaciones_previas=float(data.vacaciones_previas))
     db.commit()
     return ok({"id": e.id}, aviso=AVISO)
+
+
+@router.put("/empleados/{empleado_id}/configuracion", response_model=ApiResponse[dict])
+def configuracion_empleado(empleado_id: int, data: ConfiguracionEmpleadoIn, request: Request, db: DbSession,
+                           actual: Usuario = Depends(require(GESTIONAR))):
+    """Clase de riesgo ARL y vacaciones (días hábiles, fecha de ingreso y días disfrutados antes del liquidador)."""
+    e = db.get(LiqEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    antes = e.arl_clase
+    e.arl_clase = data.arl_clase
+    auditar(db, request, "liq_arl_empleado", actual.id, documento=e.documento, antes=antes, despues=data.arl_clase)
+    return vacaciones_empleado(empleado_id, data, request, db, actual)
 
 
 def _vacacion_out(r: LiqResultado, editable: bool) -> dict:

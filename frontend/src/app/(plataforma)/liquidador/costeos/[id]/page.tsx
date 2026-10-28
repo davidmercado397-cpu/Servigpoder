@@ -9,7 +9,9 @@ import { ParametrosCosteoForm } from "@/components/parametros-costeo";
 import { Alerta, Insignia } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
-import { nombrePeriodo, type Costeo, type CosteoPersona, type ParametrosCosteo, type ParametrosDefecto } from "@/lib/liquidador";
+import { CLASES_ARL, nombrePeriodo, pct, type Costeo, type CosteoPersona, type ParametrosCosteo, type ParametrosDefecto } from "@/lib/liquidador";
+
+const romano = (n: number) => CLASES_ARL.find(([c]) => c === n)?.[1] ?? String(n);
 import { usePermiso } from "@/lib/sesion";
 
 export default function DetalleCosteo() {
@@ -86,6 +88,7 @@ export default function DetalleCosteo() {
           <p className="text-sm text-slate-500">
             Costeo · {MESES[c.mes - 1]} {c.anio} — {nombrePeriodo(c)} · del {c.desde} al {c.hasta}{c.archivo ? ` · Archivo: ${c.archivo}` : ""}
             {c.umbral_activo ? ` · umbral semanal de ${c.umbral_horas} h` : ""}
+            {c.auxilio_mensual > 0 ? ` · auxilio no prestacional ${pesos(c.auxilio_mensual)} mensual por persona` : " · sin auxilio no prestacional"}
           </p>
         </div>
         <Insignia color="bg-violet-100 text-violet-800">No cuenta como pagado</Insignia>
@@ -105,6 +108,12 @@ export default function DetalleCosteo() {
         <Alerta tipo="info">
           {t.no_registradas === 1 ? "1 cédula no está registrada" : `${t.no_registradas} cédulas no están registradas`} en el liquidador: se costean con el
           salario mínimo y los días hábiles de lunes a sábado, y no se crean como empleados.
+        </Alerta>
+      )}
+      {t.sin_arl > 0 && (
+        <Alerta tipo="info">
+          {t.sin_arl === 1 ? "1 persona no trae" : `${t.sin_arl} personas no traen`} clase de ARL en el Excel ni la tienen configurada en Empleados:
+          se costean con la clase {romano(c.parametros.arl_clase)}, que se puede cambiar abajo.
         </Alerta>
       )}
       {c.advertencias.length > 0 && (
@@ -128,11 +137,13 @@ export default function DetalleCosteo() {
         <div className="grid gap-4 lg:grid-cols-2">
           <table className="tabla text-sm">
             <thead><tr><th>Aportes del empleador</th><th className="text-right">Total</th></tr></thead>
-            <tbody>{def.aportes.map((k) => <tr key={k}><td>{def.nombres[k]} ({c.parametros[k]} %)</td><td className="text-right tabular-nums">{pesos(t.aportes[k] ?? 0)}</td></tr>)}</tbody>
+            <tbody>{def.aportes.map((k) => (
+              <tr key={k}><td>{def.nombres[k]}{k === "arl" ? "" : ` (${pct(c.parametros, k)} %)`}</td><td className="text-right tabular-nums">{pesos(t.aportes[k] ?? 0)}</td></tr>
+            ))}</tbody>
           </table>
           <table className="tabla text-sm">
             <thead><tr><th>Prestaciones</th><th className="text-right">Total</th></tr></thead>
-            <tbody>{def.prestaciones.map((k) => <tr key={k}><td>{def.nombres[k]} ({c.parametros[k]} %)</td><td className="text-right tabular-nums">{pesos(t.prestaciones[k] ?? 0)}</td></tr>)}</tbody>
+            <tbody>{def.prestaciones.map((k) => <tr key={k}><td>{def.nombres[k]} ({pct(c.parametros, k)} %)</td><td className="text-right tabular-nums">{pesos(t.prestaciones[k] ?? 0)}</td></tr>)}</tbody>
           </table>
         </div>
         <details>
@@ -165,7 +176,11 @@ export default function DetalleCosteo() {
               <tr><td>Total devengado</td><td /><td className="text-right tabular-nums">{pesos(persona.costo.devengado)}</td></tr>
               {def.aportes.map((k) => (
                 <tr key={k}>
-                  <td>{def.nombres[k]} ({c.parametros[k]} %)</td>
+                  <td>
+                    {k === "arl"
+                      ? `ARL clase ${romano(persona.costo.arl_clase)} (${persona.costo.arl_tarifa} %, ${persona.arl_origen === "excel" ? "del Excel" : persona.arl_origen === "empleado" ? "configurada en Empleados" : "por defecto"})`
+                      : `${def.nombres[k]} (${pct(c.parametros, k)} %)`}
+                  </td>
                   <td className="text-slate-500">
                     {persona.costo.exonerado && ["salud", "icbf", "sena"].includes(k) ? "Exonerado (menos de 10 mínimos)" : pesos(k === "arl" ? persona.costo.base_arl : persona.costo.base_aportes)}
                   </td>
@@ -174,7 +189,7 @@ export default function DetalleCosteo() {
               ))}
               {def.prestaciones.map((k) => (
                 <tr key={k}>
-                  <td>{def.nombres[k]} ({c.parametros[k]} %)</td>
+                  <td>{def.nombres[k]} ({pct(c.parametros, k)} %)</td>
                   <td className="text-slate-500">{pesos(k === "vacaciones" ? persona.costo.base_vacaciones : persona.costo.base_prestaciones)}</td>
                   <td className="text-right tabular-nums">{pesos(persona.costo.prestaciones[k])}</td>
                 </tr>
@@ -195,7 +210,7 @@ export default function DetalleCosteo() {
         <div className="overflow-auto">
           <table className="tabla">
             <thead>
-              <tr><th>Documento</th><th>Nombre</th><th className="text-right">Horas</th><th className="text-right">Devengado</th>
+              <tr><th>Documento</th><th>Nombre</th><th>ARL</th><th className="text-right">Horas</th><th className="text-right">Devengado</th>
                 <th className="text-right">Aportes</th><th className="text-right">Prestaciones</th><th className="text-right">Costo total</th></tr>
             </thead>
             <tbody>
@@ -206,6 +221,7 @@ export default function DetalleCosteo() {
                     {r.nombre}
                     {!r.existe && <span className="ml-2 text-xs text-amber-700">sin registrar · salario mínimo</span>}
                   </td>
+                  <td className={r.arl_clase ? "" : "text-slate-500"}>{romano(r.costo.arl_clase)}{r.arl_clase ? "" : " (defecto)"}</td>
                   <td className="text-right tabular-nums">{r.total_horas.toLocaleString("es-CO")}</td>
                   <td className="text-right tabular-nums">{pesos(r.costo.devengado)}</td>
                   <td className="text-right tabular-nums">{pesos(r.costo.total_aportes)}</td>

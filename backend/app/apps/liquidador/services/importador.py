@@ -22,7 +22,27 @@ _ALIAS = {
     # El salario ya no se usa (solo se cuentan horas): la columna se reconoce para no leerla como día
     "salario": "salario", "salario_basico": "salario", "salario_base": "salario", "base_salary": "salario",
     "cargo": "cargo", "position": "cargo",
+    # Solo en el costeo: clase de riesgo ARL de cada persona (en la nómina la ARL se configura en Empleados)
+    "arl": "arl", "riesgo": "arl", "clase_riesgo": "arl", "riesgo_arl": "arl", "clase_arl": "arl", "clase_de_riesgo": "arl",
 }
+ROMANOS = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
+TARIFAS_ARL = {1: 0.522, 2: 1.044, 3: 2.436, 4: 4.35, 5: 6.96}  # % tarifa inicial por clase (Decreto 1772 de 1994)
+
+
+def clase_arl(valor: object) -> int | None:
+    """1-5, I-V, "clase 4" o la tarifa (4,35) → clase de riesgo; None si no se reconoce."""
+    if valor is None or str(valor).strip() == "":
+        return None
+    texto = str(valor).strip().upper().replace("CLASE", "").replace("RIESGO", "").strip()
+    if texto in ROMANOS:
+        return ROMANOS[texto]
+    try:
+        numero = float(texto.replace("%", "").replace(",", "."))
+    except ValueError:
+        return None
+    if numero.is_integer() and 1 <= numero <= 5:
+        return int(numero)
+    return next((c for c, t in TARIFAS_ARL.items() if abs(t - numero) < 0.001), None)
 _MESES = ("", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
           "noviembre", "diciembre")
 
@@ -91,10 +111,12 @@ class FilaLeida:
     nombre: str
     cargo: str
     dias: list[tuple[date, object]]  # (fecha, turno)
+    arl: int | None = None  # solo en el costeo
 
 
-def leer(db: Session, periodo, contenido: bytes) -> tuple[list[FilaLeida], Resumen]:
-    """Lee el Excel sin escribir nada: filas con su turno por fecha, advertencias y conteos."""
+def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple[list[FilaLeida], Resumen]:
+    """Lee el Excel sin escribir nada: filas con su turno por fecha, advertencias y conteos. Con `con_arl` (costeo)
+    lee también la columna "arl"; en la nómina esa columna se ignora."""
     try:
         libro = load_workbook(io.BytesIO(contenido), data_only=True, read_only=True)
     except Exception as e:  # archivo dañado: no se expone el detalle técnico
@@ -112,6 +134,7 @@ def leer(db: Session, periodo, contenido: bytes) -> tuple[list[FilaLeida], Resum
 
     columnas_fecha: list[tuple[int, date]] = []
     col_cargo: int | None = None
+    col_arl: int | None = None
     for i, celda in enumerate(encabezado[2:], start=2):
         if celda is None:
             continue
@@ -120,6 +143,9 @@ def leer(db: Session, periodo, contenido: bytes) -> tuple[list[FilaLeida], Resum
             continue
         if clave == "cargo":
             col_cargo = i
+            continue
+        if clave == "arl":
+            col_arl = i if con_arl else None
             continue
         fecha = _fecha_encabezado(celda, periodo)
         if fecha is not None:
@@ -149,6 +175,10 @@ def leer(db: Session, periodo, contenido: bytes) -> tuple[list[FilaLeida], Resum
             cargo = str(fila[col_cargo]).strip() or "Vigilante"
 
         leida = FilaLeida(num, documento, nombre[:200], cargo[:80], [])
+        if col_arl is not None and col_arl < len(fila) and fila[col_arl] not in (None, ""):
+            leida.arl = clase_arl(fila[col_arl])
+            if leida.arl is None:
+                res.advertencias.append(f"Fila {num}: la clase de riesgo ARL '{fila[col_arl]}' no es válida (1 a 5) — se omitió")
         leidas.append(leida)
         res.empleados += 1
 

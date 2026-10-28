@@ -88,8 +88,9 @@ def liquidacion(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     return _guardar(libro), XLSX, f"liquidacion_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}{sufijo(periodo)}.xlsx"
 
 
-def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
-    """documento | <MES AÑO> | día 1 | día 2 | … con una fila vacía para llenar."""
+def plantilla(periodo: LiqPeriodo, con_arl: bool = False) -> tuple[bytes, str, str]:
+    """documento | <MES AÑO> | día 1 | día 2 | … con una fila vacía para llenar. La del costeo lleva además la
+    columna "arl" (clase de riesgo 1 a 5)."""
     dias, actual = [], periodo.desde
     while actual <= periodo.hasta:
         dias.append(actual.day)
@@ -97,16 +98,19 @@ def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     libro = Workbook()
     hoja = libro.active
     hoja.title = _titulo(periodo)
-    encabezado = ["documento", f"{_MESES[periodo.mes]} {periodo.anio}", *dias]
+    encabezado = ["documento", f"{_MESES[periodo.mes]} {periodo.anio}", *(["arl"] if con_arl else []), *dias]
     hoja.append(encabezado)
     for celda in hoja[1]:
         celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
     hoja.append([""] * len(encabezado))
     hoja.column_dimensions["A"].width = 16
     hoja.column_dimensions["B"].width = 28
+    primera = 4 if con_arl else 3
+    if con_arl:
+        hoja.column_dimensions["C"].width = 6
     for i in range(len(dias)):
-        hoja.column_dimensions[get_column_letter(3 + i)].width = 5
-    hoja.freeze_panes = "C2"
+        hoja.column_dimensions[get_column_letter(primera + i)].width = 5
+    hoja.freeze_panes = f"{get_column_letter(primera)}2"
     hoja.row_dimensions[1].height = 26
     return _guardar(libro), XLSX, f"plantilla_{periodo.anio}_{periodo.mes:02d}_{periodo.tipo}{sufijo(periodo)}.xlsx"
 

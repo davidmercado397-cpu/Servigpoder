@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.apps.liquidador.models import LiqDia, LiqEmpleado, LiqPeriodo
+from app.apps.liquidador.models import CARGO_DEFECTO, LiqDia, LiqEmpleado, LiqPeriodo
 from app.apps.liquidador.services.turnos import por_codigo
 
 _ALIAS = {
@@ -171,9 +171,9 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
             continue
         documento = _texto_documento(fila[0])
         nombre = str((fila[1] if len(fila) > 1 else None) or "").strip() or documento
-        cargo = "Vigilante"
+        cargo = CARGO_DEFECTO
         if col_cargo is not None and col_cargo < len(fila) and fila[col_cargo]:
-            cargo = str(fila[col_cargo]).strip() or "Vigilante"
+            cargo = str(fila[col_cargo]).strip() or CARGO_DEFECTO
 
         leida = FilaLeida(num, documento, nombre[:200], cargo[:80], [], con_cargo=col_cargo is not None)
         if col_arl is not None and col_arl < len(fila) and fila[col_arl] not in (None, ""):

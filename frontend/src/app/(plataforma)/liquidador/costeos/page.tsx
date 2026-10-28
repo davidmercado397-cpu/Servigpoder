@@ -67,7 +67,7 @@ export default function Costeos() {
       <Titulo>Costeo de nómina</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
         Cuánto le costaría a la empresa un Excel de turnos (mismo formato que una nómina), con aportes del empleador y prestaciones. No queda como
-        pagado: no descuenta préstamos ni embargos, no gasta vacaciones y no crea empleados (las cédulas nuevas se costean con el salario mínimo).
+        pagado: no descuenta préstamos, embargos ni cuotas, no gasta vacaciones y no crea empleados (las cédulas nuevas se costean con el salario mínimo).
       </p>
       {error && <Alerta>{error}</Alerta>}
 

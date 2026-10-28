@@ -1,5 +1,5 @@
 """Nómina del liquidador: tarifas (% de recargos y valores de ley por vigencia), salario de cada
-empleado, préstamos y embargos, auxilios no prestacionales, vacaciones y la descarga del archivo de nómina de un periodo."""
+empleado, préstamos, embargos y cuotas, auxilios no prestacionales, vacaciones y la descarga del archivo de nómina de un periodo."""
 
 from datetime import date
 
@@ -105,7 +105,7 @@ def salario(empleado_id: int, data: SalarioIn, request: Request, db: DbSession, 
     return ok({"id": e.id, "salario": float(e.salario) if e.salario is not None else None}, aviso=AVISO)
 
 
-# --- Préstamos y embargos ---
+# --- Préstamos, embargos y cuotas ---
 
 def _descuento_out(x: LiqDescuento, ya: dict) -> DescuentoOut:
     hecho = float(ya.get(x.id, 0))

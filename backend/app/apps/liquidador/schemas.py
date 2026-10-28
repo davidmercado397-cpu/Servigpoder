@@ -240,7 +240,7 @@ class TarifaOut(Orm):
 
 class DescuentoIn(BaseModel):
     documento: str = Field(min_length=1, max_length=32)
-    tipo: Literal["prestamo", "embargo"]
+    tipo: Literal["prestamo", "embargo", "cuota"]
     descripcion: str = Field(min_length=1, max_length=200)
     valor_mensual: Decimal | None = Field(None, gt=0, le=100_000_000)
     porcentaje: Decimal | None = Field(None, gt=0, le=100)

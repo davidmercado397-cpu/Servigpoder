@@ -9,7 +9,7 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "liquidador.turnos.ver": ("Turnos", "Ver turnos, festivos y la hora de inicio nocturna"),
     "liquidador.turnos.gestionar": ("Turnos", "Crear y editar turnos, ajustar festivos y la hora de inicio nocturna"),
     "liquidador.nomina.ver": ("Nómina", "Ver la nómina calculada (devengado, deducciones y neto), salarios, recargos y descuentos"),
-    "liquidador.nomina.gestionar": ("Nómina", "Editar los % de recargos, el salario mínimo, el salario de cada empleado, préstamos y embargos"),
+    "liquidador.nomina.gestionar": ("Nómina", "Editar los % de recargos, el salario mínimo, el salario de cada empleado, préstamos, embargos y cuotas"),
     "liquidador.asistente.usar": ("Asistente IA", "Hacer preguntas al asistente sobre las horas contadas"),
     "liquidador.costeo.ver": ("Costeo de nómina", "Ver los costeos de nómina (costo empresa de un Excel de turnos, sin pagarlo)"),
     "liquidador.costeo.gestionar": ("Costeo de nómina", "Crear, recalcular y eliminar costeos de nómina"),

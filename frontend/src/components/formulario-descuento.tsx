@@ -6,10 +6,10 @@ import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
-import { QUINCENAS, type Descuento, type Quincena } from "@/lib/liquidador";
+import { QUINCENAS, TIPOS_DESCUENTO, type Descuento, type Quincena, type TipoDescuento } from "@/lib/liquidador";
 
 type Formulario = {
-  documento: string; tipo: "prestamo" | "embargo"; descripcion: string; forma: "valor" | "porcentaje";
+  documento: string; tipo: TipoDescuento; descripcion: string; forma: "valor" | "porcentaje";
   valor_mensual: string; porcentaje: string; monto_total: string; desde: string; hasta: string; quincena: Quincena; activo: boolean;
 };
 
@@ -27,7 +27,7 @@ function inicial(d: Descuento | null, documento: string): Formulario {
   };
 }
 
-/** Nuevo préstamo o embargo, o edición de uno. Con `documento` queda fijo el empleado (ficha del empleado). */
+/** Nuevo préstamo, embargo o cuota, o edición de uno. Con `documento` queda fijo el empleado (ficha del empleado). */
 export function FormularioDescuento({ registro, documento, onGuardado, onCancelar }: {
   registro: Descuento | null; documento?: string; onGuardado: () => void; onCancelar: () => void;
 }) {
@@ -55,7 +55,7 @@ export function FormularioDescuento({ registro, documento, onGuardado, onCancela
   return (
     <form onSubmit={guardar} className="tarjeta space-y-4 p-5">
       <div className="flex items-center">
-        <h2 className="font-semibold text-slate-900">{registro ? "Editar préstamo o embargo" : "Nuevo préstamo o embargo"}</h2>
+        <h2 className="font-semibold text-slate-900">{registro ? "Editar préstamo, embargo o cuota" : "Nuevo préstamo, embargo o cuota"}</h2>
         <button type="button" className="ml-auto rounded-md p-1 text-slate-500 hover:bg-slate-100" onClick={onCancelar} aria-label="Cerrar"><X className="h-5 w-5" /></button>
       </div>
       {error && <Alerta>{error}</Alerta>}
@@ -69,13 +69,12 @@ export function FormularioDescuento({ registro, documento, onGuardado, onCancela
         <div>
           <label className="label">Tipo</label>
           <select className="input" value={f.tipo} onChange={(e) => cambiar({ tipo: e.target.value as Formulario["tipo"] })}>
-            <option value="prestamo">Préstamo</option>
-            <option value="embargo">Embargo</option>
+            {Object.entries(TIPOS_DESCUENTO).map(([v, [t]]) => <option key={v} value={v}>{t}</option>)}
           </select>
         </div>
         <div className="sm:col-span-2">
           <label className="label">Descripción</label>
-          <input className="input" required maxLength={200} placeholder="p. ej. Préstamo de calamidad · Juzgado 3 de Cali" value={f.descripcion}
+          <input className="input" required maxLength={200} placeholder="p. ej. Préstamo de calamidad · Juzgado 3 de Cali · Plan exequial" value={f.descripcion}
             onChange={(e) => cambiar({ descripcion: e.target.value })} />
         </div>
         <div>

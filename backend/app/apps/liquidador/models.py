@@ -66,6 +66,10 @@ class LiqFestivoAjuste(Base):
     descripcion: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
+# SERA no tiene vigilantes: quien llega sin cargo en el Excel queda como operario de aseo
+CARGO_DEFECTO = "Operario de aseo"
+
+
 class LiqEmpleado(Base):
     """Se crea o actualiza automáticamente al cargar el Excel de cada quincena."""
 
@@ -74,7 +78,7 @@ class LiqEmpleado(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     documento: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     nombre: Mapped[str] = mapped_column(String(200))
-    cargo: Mapped[str] = mapped_column(String(80), default="Vigilante")
+    cargo: Mapped[str] = mapped_column(String(80), default=CARGO_DEFECTO)
     # Salario mensual propio; vacío = el salario mínimo vigente en cada fecha (así se crean todos)
     salario: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     # Días hábiles para vacaciones (0 = lunes … 6 = domingo); los festivos nunca son hábiles
@@ -225,13 +229,14 @@ class LiqTarifa(Base):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-# Tipos de descuento
+# Tipos de descuento: las cuotas son descuentos periódicos autorizados (plan exequial, pólizas, aportes…)
 PRESTAMO = "prestamo"
 EMBARGO = "embargo"
+CUOTA = "cuota"
 
 
 class LiqDescuento(Base):
-    """Préstamo o embargo de un empleado: un valor mensual fijo (la quincena descuenta la mitad) o un % del
+    """Préstamo, embargo o cuota de un empleado: un valor mensual fijo (la quincena descuenta la mitad) o un % del
     devengado sin auxilio de transporte; con monto total, deja de descontar cuando se completa."""
 
     __tablename__ = "liq_descuento"

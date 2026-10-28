@@ -28,7 +28,7 @@ export type Resultado = {
   otras_nominas?: boolean;
 };
 
-export type DescuentoAplicado = { id: number; tipo: "prestamo" | "embargo"; descripcion: string; valor: number; calculo: string; observacion: string };
+export type DescuentoAplicado = { id: number; tipo: TipoDescuento; descripcion: string; valor: number; calculo: string; observacion: string };
 
 /** Nómina de una persona en el periodo (services/nomina.py). */
 export type Nomina = {
@@ -36,7 +36,7 @@ export type Nomina = {
   dias_salario: number; dias_incapacidad: number; incapacidad_empresa: number; incapacidad_eps: number; dias_auxilio: number; dias_sin_pago: number;
   basico: number; incapacidad: number; auxilio: number; horas: Record<string, number>; valores: Record<string, number>;
   recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
-  descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; deducciones: number; neto: number; tarifas: string[];
+  descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; cuotas?: number; deducciones: number; neto: number; tarifas: string[];
   /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
   auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
   dias_ausencia?: number; dias_tnl?: number; exceso_no_salarial?: number; alertas?: string[];
@@ -60,7 +60,7 @@ export type VacacionPeriodo = VacacionesNomina & { empleado_id: number; document
 
 export const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "deducciones" | "neto", number>;
+export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas" | "deducciones" | "neto", number>;
 
 export type Tarifa = {
   id: number; vigente_desde: string; smlmv: number; auxilio_transporte: number; horas_mes: number; salud_pct: number; pension_pct: number;
@@ -68,12 +68,20 @@ export type Tarifa = {
 };
 
 export type Descuento = {
-  id: number; empleado_id: number; documento: string; nombre: string; tipo: "prestamo" | "embargo"; descripcion: string;
+  id: number; empleado_id: number; documento: string; nombre: string; tipo: TipoDescuento; descripcion: string;
   valor_mensual: number | null; porcentaje: number | null; monto_total: number | null; desde: string; hasta: string | null;
   quincena: Quincena; activo: boolean; descontado: number; saldo: number | null;
 };
 
-/** En qué quincena aplica un préstamo, embargo o auxilio: la mitad en cada una, o completo en una sola */
+/** Préstamo, embargo o cuota (descuento periódico autorizado: plan exequial, pólizas, aportes…) */
+export type TipoDescuento = "prestamo" | "embargo" | "cuota";
+export const TIPOS_DESCUENTO: Record<TipoDescuento, [string, string]> = {
+  prestamo: ["Préstamo", "bg-sky-100 text-sky-800"],
+  embargo: ["Embargo", "bg-rose-100 text-rose-800"],
+  cuota: ["Cuota", "bg-violet-100 text-violet-800"],
+};
+
+/** En qué quincena aplica un préstamo, embargo, cuota o auxilio: la mitad en cada una, o completo en una sola */
 export type Quincena = "ambas" | "primera" | "segunda";
 export const QUINCENAS: [Quincena, string][] = [["ambas", "Ambas quincenas"], ["primera", "Solo 1.ª quincena"], ["segunda", "Solo 2.ª quincena"]];
 
@@ -184,6 +192,7 @@ export const CAMPOS_PAGADO: [string, string][] = [
   ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["recargos", "Recargos"],
   ["extras", "Horas extras"], ["auxilios_no_prestacionales", "Auxilios no prestacionales"], ["auxilio", "Auxilio de transporte"],
   ["devengado", "Total devengado"], ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"],
+  ["cuotas", "Cuotas"],
   ["deducciones", "Total deducciones"], ["neto", "Neto pagado"],
 ];
 

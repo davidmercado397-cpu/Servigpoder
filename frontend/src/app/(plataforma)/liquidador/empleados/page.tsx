@@ -49,7 +49,7 @@ export default function Empleados() {
         </button>
       )}>Empleados</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Haga clic en una persona para abrir su ficha: datos personales, contratos, salario, ARL, vacaciones, préstamos, embargos, auxilios y las
+        Haga clic en una persona para abrir su ficha: datos personales, contratos, salario, ARL, vacaciones, préstamos, embargos, cuotas, auxilios y las
         nóminas en que aparece. Quien no esté en la base se crea al cargar el Excel de una nómina.
       </p>
       {error && <Alerta>{error}</Alerta>}

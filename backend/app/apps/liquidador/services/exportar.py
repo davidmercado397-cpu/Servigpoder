@@ -18,6 +18,8 @@ from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import LiqPeriodo, LiqResultado
 from app.apps.liquidador.services.calculo import AUSENCIA, DESCANSO_PAGO, INCAPACIDAD, LIBRE, NOVEDAD, TRABAJADO
 
+_TIPOS_DESCUENTO = {"prestamo": "Préstamo", "embargo": "Embargo", "cuota": "Cuota"}
+
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Mismo orden de la plantilla de referencia `Libro1.xlsx`
@@ -133,7 +135,7 @@ _CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(OR
 ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
     "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
-    "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
+    "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
 )
 _PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
 
@@ -146,7 +148,7 @@ def fila_nomina(r: LiqResultado) -> list:
             (n.get("vacaciones") or {}).get("valor_habiles", 0), (n.get("vacaciones") or {}).get("valor_no_habiles", 0),
             *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
             n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
-            n.get("prestamos", 0), n.get("deducciones", 0), n.get("neto", 0)]
+            n.get("prestamos", 0), n.get("cuotas", 0), n.get("deducciones", 0), n.get("neto", 0)]
 
 
 def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
@@ -184,11 +186,11 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 42
 
-    desc = libro.create_sheet("Prestamos y embargos")
+    desc = libro.create_sheet("Prestamos embargos y cuotas")
     desc.append(["DOCUMENTO", "EMPLEADO", "TIPO", "DESCRIPCION", "CALCULO", "VALOR DESCONTADO", "OBSERVACION"])
     for r in resultados:
         for x in (r.nomina or {}).get("descuentos", []):
-            desc.append([r.empleado.documento, r.empleado.nombre, "Embargo" if x["tipo"] == "embargo" else "Préstamo",
+            desc.append([r.empleado.documento, r.empleado.nombre, _TIPOS_DESCUENTO.get(x["tipo"], x["tipo"]),
                          x["descripcion"], x["calculo"], x["valor"], x.get("observacion", "")])
     for celda in desc[1]:
         celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO

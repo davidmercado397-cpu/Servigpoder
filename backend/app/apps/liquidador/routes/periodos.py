@@ -217,7 +217,7 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
     pendiente = any(not r.nomina for r in lista)
     if ve_nomina and not pendiente:
         claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
-                         "embargos", "prestamos", "deducciones", "neto")
+                         "embargos", "prestamos", "cuotas", "deducciones", "neto")
         totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}
     return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente,
               en_otras_nominas=sum(1 for r in lista if (r.nomina or {}).get("otras_nominas")))
@@ -310,7 +310,7 @@ def ficha(empleado_id: int, db: DbSession, actual: Usuario = Depends(require(VER
         if ve_nomina and n:
             x.update(devengado=float(r.devengado), neto=float(r.neto), vacaciones=n.get("vacaciones_valor", 0),
                      auxilios_no_prestacionales=n.get("auxilios_no_prestacionales", 0), prestamos=n.get("prestamos", 0),
-                     embargos=n.get("embargos", 0))
+                     embargos=n.get("embargos", 0), cuotas=n.get("cuotas", 0))
         nominas.append(x)
     ultima = nominas[0]["etiqueta"] if nominas else None
     disfrutados = vacaciones.habiles_disfrutados(db, {e.id: e}).get(e.id, 0)

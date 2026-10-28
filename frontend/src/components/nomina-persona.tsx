@@ -2,7 +2,7 @@
 
 import { Fragment } from "react";
 import { pesos } from "@/lib/formato";
-import { CONCEPTOS_PAGO, horas, type Nomina } from "@/lib/liquidador";
+import { CONCEPTOS_PAGO, TIPOS_DESCUENTO, horas, type Nomina } from "@/lib/liquidador";
 
 /** Devengado, deducciones, neto y alertas de una persona (nómina de un periodo o de un costeo). */
 export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina; titulo?: string }) {
@@ -46,7 +46,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
             {fila("Pensión", `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
             {n.descuentos.map((x) => (
               <Fragment key={x.id}>
-                {fila(`${x.tipo === "embargo" ? "Embargo" : "Préstamo"}: ${x.descripcion}`,
+                {fila(`${TIPOS_DESCUENTO[x.tipo]?.[0] ?? x.tipo}: ${x.descripcion}`,
                   <>{x.calculo}{x.observacion && <span className="block text-amber-700">{x.observacion}</span>}</>, x.valor)}
               </Fragment>
             ))}

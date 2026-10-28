@@ -234,7 +234,7 @@ export default function DetalleQuincena() {
             <div className="border-b border-slate-200 p-4">
               <Alerta tipo="info">
                 {enOtras === 1 ? "1 persona también está" : `${enOtras} personas también están`} en otra nómina de estas fechas (marcadas con{" "}
-                <Users className="inline h-3.5 w-3.5" />). Revise su detalle: los préstamos, embargos y auxilios se aplican solo en la nómina creada primero.
+                <Users className="inline h-3.5 w-3.5" />). Revise su detalle: los préstamos, embargos, cuotas y auxilios se aplican solo en la nómina creada primero.
               </Alerta>
             </div>
           )}
@@ -250,7 +250,7 @@ export default function DetalleQuincena() {
               <Cifra titulo="Horas extras" valor={totales.nomina.extras} />
               <Cifra titulo="Auxilio de transporte" valor={totales.nomina.auxilio} />
               <Cifra titulo="Total devengado" valor={totales.nomina.devengado} fuerte
-                detalle={`Deducciones ${pesos(totales.nomina.deducciones)}: salud ${pesos(totales.nomina.salud)}, pensión ${pesos(totales.nomina.pension)}, embargos ${pesos(totales.nomina.embargos)}, préstamos ${pesos(totales.nomina.prestamos)}`} />
+                detalle={`Deducciones ${pesos(totales.nomina.deducciones)}: salud ${pesos(totales.nomina.salud)}, pensión ${pesos(totales.nomina.pension)}, embargos ${pesos(totales.nomina.embargos)}, préstamos ${pesos(totales.nomina.prestamos)}, cuotas ${pesos(totales.nomina.cuotas ?? 0)}`} />
               <Cifra titulo="Neto a pagar" valor={totales.nomina.neto} fuerte />
             </div>
           )}

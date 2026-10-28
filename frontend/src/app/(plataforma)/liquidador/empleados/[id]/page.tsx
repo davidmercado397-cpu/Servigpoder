@@ -11,7 +11,7 @@ import { Alerta, Insignia } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
 import {
-  CLASES_ARL, DIAS_SEMANA, ESTADO_PERIODO, QUINCENAS, horas, nombrePeriodo, type Auxilio, type Contrato, type DatosPersonales,
+  CLASES_ARL, DIAS_SEMANA, ESTADO_PERIODO, QUINCENAS, TIPOS_DESCUENTO, horas, nombrePeriodo, type Auxilio, type Contrato, type DatosPersonales,
   type Descuento, type Empleado, type SalidaVacaciones, type TramoVacaciones,
 } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
@@ -209,11 +209,11 @@ export default function FichaEmpleado() {
           onCambio={(texto) => { setAviso(texto); cargarFicha().catch(() => {}); }} />
       )}
 
-      {/* Préstamos y embargos */}
+      {/* Préstamos, embargos y cuotas */}
       {verNomina && (
         <section className="space-y-3">
           <div className="flex items-center">
-            <h2 className="font-semibold text-slate-900">Préstamos y embargos</h2>
+            <h2 className="font-semibold text-slate-900">Préstamos, embargos y cuotas</h2>
             {gestionar && !editDesc && (
               <button className="btn-secundario ml-auto inline-flex items-center gap-1.5" onClick={() => setEditDesc({ registro: null })}>
                 <Plus className="h-4 w-4" /> Nuevo
@@ -223,7 +223,7 @@ export default function FichaEmpleado() {
           {editDesc && (
             <FormularioDescuento key={editDesc.registro?.id ?? "nuevo"} registro={editDesc.registro} documento={f.documento}
               onCancelar={() => setEditDesc(null)}
-              onGuardado={() => { setEditDesc(null); setAviso("Préstamo o embargo guardado."); cargarDescuentos().catch(() => {}); }} />
+              onGuardado={() => { setEditDesc(null); setAviso("Descuento guardado."); cargarDescuentos().catch(() => {}); }} />
           )}
           <div className="tarjeta overflow-auto">
             <table className="tabla text-sm">
@@ -232,7 +232,7 @@ export default function FichaEmpleado() {
               <tbody>
                 {descuentos.map((x) => (
                   <tr key={x.id} className={x.activo ? "" : "text-slate-400"}>
-                    <td>{x.tipo === "embargo" ? "Embargo" : "Préstamo"}{!x.activo && <Insignia color="ml-1">Inactivo</Insignia>}</td>
+                    <td>{TIPOS_DESCUENTO[x.tipo]?.[0] ?? x.tipo}{!x.activo && <Insignia color="ml-1">Inactivo</Insignia>}</td>
                     <td>{x.descripcion}</td>
                     <td className="whitespace-nowrap text-right tabular-nums">{x.porcentaje !== null ? `${x.porcentaje} %` : `${pesos(x.valor_mensual)}/mes`}</td>
                     <td className="whitespace-nowrap text-xs">{QUINCENAS.find(([v]) => v === x.quincena)?.[1]}</td>
@@ -252,7 +252,7 @@ export default function FichaEmpleado() {
                     </td>
                   </tr>
                 ))}
-                {descuentos.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-sm text-slate-500">Sin préstamos ni embargos.</td></tr>}
+                {descuentos.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-sm text-slate-500">Sin préstamos, embargos ni cuotas.</td></tr>}
               </tbody>
             </table>
           </div>

@@ -144,7 +144,7 @@ def test_prestamo_con_saldo_y_embargo(admin):
     r = admin.get(f"{API}/periodos/{p1}/nomina")
     assert r.headers["content-disposition"] == 'attachment; filename="nomina_2026_11_Q1.xlsx"'
     libro = load_workbook(BytesIO(r.content))
-    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos y embargos", "Vacaciones", "Auxilios no prestacionales", "Tarifas usadas"]
+    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos embargos y cuotas", "Vacaciones", "Auxilios no prestacionales", "Tarifas usadas"]
     filas_x = list(libro.worksheets[0].iter_rows(values_only=True))
     enc = filas_x[0]
     fila = dict(zip(enc, filas_x[1]))
@@ -430,3 +430,27 @@ def test_ficha_del_empleado(admin):
     assert [x["descripcion"] for x in admin.get(f"{API}/descuentos?empleado_id={eid}").json()["data"]] == ["Celular"]
     assert [x["descripcion"] for x in admin.get(f"{API}/auxilios?empleado_id={eid}").json()["data"]] == ["Rodamiento"]
     assert admin.get(f"{API}/empleados/999999").status_code == 404
+
+
+def test_cuota_exequial_y_cargo_por_defecto(admin):
+    dias = list(range(1, 16))
+    p1 = _periodo_con(admin, 2027, 1, 1, [[1001, "1001", *(["A"] * 15)]], dias)
+    base = {"documento": "1001", "desde": "2027-01-01"}
+    assert admin.post(f"{API}/descuentos", json={**base, "tipo": "cuota", "descripcion": "Plan exequial", "valor_mensual": 30000}).status_code == 201
+    assert admin.post(f"{API}/descuentos", json={**base, "tipo": "prestamo", "descripcion": "Préstamo", "valor_mensual": 40000}).status_code == 201
+    assert admin.post(f"{API}/descuentos", json={**base, "tipo": "otro", "descripcion": "x", "valor_mensual": 1}).status_code == 422
+    admin.post(f"{API}/periodos/{p1}/recalcular")
+
+    n = _nomina(admin, p1, "1001")
+    assert [x["tipo"] for x in n["descuentos"]] == ["prestamo", "cuota"]  # la cuota va después del préstamo
+    assert n["cuotas"] == 15000 and n["prestamos"] == 20000
+    assert n["deducciones"] == n["salud"] + n["pension"] + 35000
+
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{p1}/nomina").content))
+    filas = list(libro.worksheets[0].iter_rows(values_only=True))
+    assert dict(zip(filas[0], filas[1]))["CUOTAS"] == 15000
+    assert any(f[0] == "1001" and f[2] == "Cuota" for f in libro.worksheets[1].iter_rows(values_only=True))
+
+    # SERA no tiene vigilantes: sin columna de cargo en el Excel, la persona queda como operario de aseo
+    e = next(x for x in admin.get(f"{API}/empleados?q=1001").json()["data"])
+    assert e["cargo"] == "Operario de aseo"

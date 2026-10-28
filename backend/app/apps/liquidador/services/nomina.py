@@ -12,7 +12,7 @@
 - Auxilio de transporte: ÷ 30 por día trabajado o de descanso, si el salario no supera 2 mínimos.
 - Auxilios no prestacionales: valor mensual menos 1/30 por cada día de tiempo no laborado (ausencias, incapacidades,
   vacaciones y demás novedades).
-- Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos y préstamos.
+- Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos, préstamos y cuotas.
 Cada día se paga con la tarifa vigente ese día (salario mínimo, horas del mes y %).
 """
 
@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import (
-    EMBARGO, MENSUAL, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa,
+    CUOTA, EMBARGO, MENSUAL, PRESTAMO, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado, LiqTarifa,
 )
 from app.apps.liquidador.services import festivos, vacaciones as vac
 
@@ -130,7 +130,7 @@ def _vigente(d, periodo: LiqPeriodo) -> bool:
 
 
 def descontado(db: Session, ids: set[int], excepto_periodo: int | None = None) -> dict[int, Decimal]:
-    """Lo que ya se descontó de cada préstamo o embargo (en todos los periodos o en los demás)."""
+    """Lo que ya se descontó de cada préstamo, embargo o cuota (en todos los periodos o en los demás)."""
     total: dict[int, Decimal] = defaultdict(Decimal)
     if not ids:
         return total
@@ -279,8 +279,9 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     disponible = devengado - salud - pension
 
     aplicados = []
-    # Primero los embargos (orden judicial), luego los préstamos
-    for x in sorted((x for x in descuentos if _vigente(x, periodo)), key=lambda x: (x.tipo != EMBARGO, x.desde, x.id)):
+    # Primero los embargos (orden judicial), luego los préstamos y al final las cuotas (exequial, pólizas…)
+    orden = {EMBARGO: 0, CUOTA: 2}
+    for x in sorted((x for x in descuentos if _vigente(x, periodo)), key=lambda x: (orden.get(x.tipo, 1), x.desde, x.id)):
         if x.valor_mensual:
             q = x.quincena or AMBAS
             valor = _pesos(x.valor_mensual * _fraccion_mensual(periodo, q))
@@ -299,9 +300,11 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         aplicados.append({"id": x.id, "tipo": x.tipo, "descripcion": x.descripcion, "valor": float(valor),
                           "calculo": base_txt, "observacion": observacion})
 
-    prestamos = sum((Decimal(str(x["valor"])) for x in aplicados if x["tipo"] != EMBARGO), Decimal("0"))
-    embargos = sum((Decimal(str(x["valor"])) for x in aplicados if x["tipo"] == EMBARGO), Decimal("0"))
-    deducciones = salud + pension + prestamos + embargos
+    def total(tipo: str) -> Decimal:
+        return sum((Decimal(str(x["valor"])) for x in aplicados if x["tipo"] == tipo), Decimal("0"))
+
+    prestamos, embargos, cuotas = total(PRESTAMO), total(EMBARGO), total(CUOTA)
+    deducciones = salud + pension + prestamos + embargos + cuotas
     neto = devengado - deducciones
     salario_ref = empleado.salario or t_cierre.smlmv
     return {
@@ -321,7 +324,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "devengado": float(devengado), "ibc": float(ibc),
         "salud": float(salud), "salud_pct": float(t_cierre.salud_pct),
         "pension": float(pension), "pension_pct": float(t_cierre.pension_pct),
-        "descuentos": aplicados, "prestamos": float(prestamos), "embargos": float(embargos),
+        "descuentos": aplicados, "prestamos": float(prestamos), "embargos": float(embargos), "cuotas": float(cuotas),
         "deducciones": float(deducciones), "neto": float(neto),
         "tarifas": sorted(x.isoformat() for x in a.tarifas),
     }
@@ -381,7 +384,7 @@ def _contexto_vacaciones(db: Session, periodo: LiqPeriodo, por_empleado: dict[in
 
 def _otras_nominas(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]]) -> dict[int, tuple[list[str], str | None]]:
     """Quienes también están en otra nómina de fechas que se cruzan: {empleado: (alertas, nómina que aplica sus
-    préstamos, embargos y auxilios o None si es esta)}. Los aplica la nómina creada primero."""
+    préstamos, embargos, cuotas y auxilios o None si es esta)}. Los aplica la nómina creada primero."""
     from app.apps.liquidador.services.calculo import hermanas
 
     otras = hermanas(db, periodo)
@@ -410,6 +413,6 @@ def _otras_nominas(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, lis
         primera = min([*ids, periodo.id])
         duenia = None if primera == periodo.id else por_id[primera]
         if duenia is not None:
-            alertas.append(f"Sus préstamos, embargos y auxilios no prestacionales se aplican en la nómina «{duenia.nombre}» ({duenia.etiqueta})")
+            alertas.append(f"Sus préstamos, embargos, cuotas y auxilios no prestacionales se aplican en la nómina «{duenia.nombre}» ({duenia.etiqueta})")
         salida[eid] = (alertas, duenia.nombre if duenia else None)
     return salida

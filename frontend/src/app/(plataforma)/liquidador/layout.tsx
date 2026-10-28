@@ -22,7 +22,7 @@ const MENU: GrupoMenu[] = [
     grupo: "Nómina",
     items: [
       { href: "/liquidador/recargos", texto: "Recargos y salario", icono: BadgePercent, permiso: "liquidador.nomina.ver" },
-      { href: "/liquidador/descuentos", texto: "Préstamos y embargos", icono: HandCoins, permiso: "liquidador.nomina.ver" },
+      { href: "/liquidador/descuentos", texto: "Préstamos, embargos y cuotas", icono: HandCoins, permiso: "liquidador.nomina.ver" },
       { href: "/liquidador/auxilios", texto: "Auxilios no prestacionales", icono: Gift, permiso: "liquidador.nomina.ver" },
       { href: "/liquidador/vacaciones", texto: "Vacaciones", icono: TreePalm, permiso: "liquidador.nomina.ver" },
     ],

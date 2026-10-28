@@ -7,14 +7,9 @@ import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/
 import { Alerta, Insignia, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
-import { QUINCENAS, type Descuento } from "@/lib/liquidador";
+import { QUINCENAS, TIPOS_DESCUENTO, type Descuento } from "@/lib/liquidador";
 import { usePermiso } from "@/lib/sesion";
 
-
-const TIPO: Record<string, [string, string]> = {
-  prestamo: ["Préstamo", "bg-sky-100 text-sky-800"],
-  embargo: ["Embargo", "bg-rose-100 text-rose-800"],
-};
 
 export default function Descuentos() {
   const gestionar = usePermiso("liquidador.nomina.gestionar");
@@ -58,11 +53,11 @@ export default function Descuentos() {
     <div className="space-y-5">
       <Titulo accion={gestionar && !edicion && (
         <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => { setAviso(""); setEdicion({ registro: null }); }}>
-          <Plus className="h-4 w-4" /> Nuevo préstamo o embargo
+          <Plus className="h-4 w-4" /> Nuevo préstamo, embargo o cuota
         </button>
-      )}>Préstamos y embargos</Titulo>
+      )}>Préstamos, embargos y cuotas</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Se descuentan después de salud y pensión: primero los embargos, luego los préstamos. Con un valor mensual y «ambas quincenas», cada
+        Se descuentan después de salud y pensión: primero los embargos, luego los préstamos y al final las cuotas (plan exequial, pólizas, aportes…). Con un valor mensual y «ambas quincenas», cada
         quincena descuenta la mitad; si es solo de una quincena, la cuota completa va en esa; el periodo mensual descuenta la cuota completa; con un %, se aplica sobre el devengado sin auxilio de transporte. Si tiene monto total, deja de
         descontar al completarlo. Nunca se descuenta más que el neto disponible.
       </p>
@@ -98,7 +93,7 @@ export default function Descuentos() {
               {lista.map((d) => (
                 <tr key={d.id} className={d.activo ? "" : "text-slate-400"}>
                   <td><span className="font-medium">{d.nombre}</span><span className="block font-mono text-xs text-slate-500">{d.documento}</span></td>
-                  <td><Insignia color={TIPO[d.tipo][1]}>{TIPO[d.tipo][0]}</Insignia>{!d.activo && <Insignia color="ml-1">Inactivo</Insignia>}</td>
+                  <td><Insignia color={TIPOS_DESCUENTO[d.tipo][1]}>{TIPOS_DESCUENTO[d.tipo][0]}</Insignia>{!d.activo && <Insignia color="ml-1">Inactivo</Insignia>}</td>
                   <td>{d.descripcion}</td>
                   <td className="whitespace-nowrap text-right tabular-nums">{d.porcentaje !== null ? `${d.porcentaje} %` : `${pesos(d.valor_mensual)}/mes`}</td>
                   <td className="whitespace-nowrap text-xs">{QUINCENAS.find(([v]) => v === d.quincena)?.[1] ?? "Ambas quincenas"}</td>
@@ -120,7 +115,7 @@ export default function Descuentos() {
               ))}
             </tbody>
           </table>
-          {lista.length === 0 && <p className="p-6 text-center text-sm text-slate-500">No hay préstamos ni embargos {estado === "todos" ? "" : estado}.</p>}
+          {lista.length === 0 && <p className="p-6 text-center text-sm text-slate-500">No hay préstamos, embargos ni cuotas {estado === "todos" ? "" : estado}.</p>}
         </div>
         <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>

@@ -92,6 +92,7 @@ LC|licencia calamidad|00:00|00:00|0|0|1|0
 LM|licencia de maternidad|00:00|12:00|0|0|1|0
 LP|licencia de paternidad|00:00|00:00|0|0|1|0
 LNR|licencia no remunerada|00:00|00:00|0|0|0|0
+180|incapacidad de mas de 180 dias|00:00|00:00|0|0|0|0
 LR|licencia remunerada|00:00|00:00|0|0|1|0
 AI|ausencia injustificada|00:00|00:00|0|0|0|0
 INC|incapacidad|00:00|00:00|0|0|0|1

@@ -14,7 +14,7 @@ CAMPOS = (
     ("basico", "Sueldo básico"), ("incapacidad", "Incapacidad"), ("vacaciones_valor", "Vacaciones"), ("recargos", "Recargos"),
     ("extras", "Horas extras"), ("auxilios_no_prestacionales", "Auxilios no prestacionales"), ("auxilio", "Auxilio de transporte"),
     ("novedades_devengo", "Novedades (devengo)"), ("devengado", "Total devengado"), ("salud", "Salud"), ("pension", "Pensión"), ("embargos", "Embargos"),
-    ("prestamos", "Préstamos"), ("cuotas", "Cuotas"), ("novedades_deduccion", "Novedades (deducción)"), ("deducciones", "Total deducciones"), ("neto", "Neto pagado"),
+    ("prestamos", "Préstamos"), ("cuotas", "Cuotas"), ("novedades_deduccion", "Novedades (deducción)"), ("deducciones", "Total deducciones"), ("neto", "Neto pagado"), ("provision_ss_180", "Provisión seg. social (cód. 180)"),
 )
 
 

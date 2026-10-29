@@ -15,6 +15,11 @@
 - Novedades manuales: lo que se pagó de menos en nóminas anteriores (y las horas extras o recargos pendientes, valorados
   con la tarifa de la fecha en que se causaron) se paga; lo que se pagó de más se descuenta. Las de horas y el menor
   valor pagado hacen base de salud y pensión; el mayor valor pagado es solo una deducción.
+- Auxilio no prestacional variable (novedad de una sola nómina, p. ej. rodamiento intermunicipal): suma a los
+  auxilios no prestacionales por su valor, sin descuento por tiempo no laborado.
+- Código 180 (incapacidad de más de 180 días): no se paga (lo paga el fondo de pensiones o nadie) y cuenta como tiempo no
+  laborado; SERA provisiona la seguridad social de esos días (salud y pensión del empleado y del empleador sobre el
+  salario de esos días; la salud del empleador no va si está exonerado, art. 114-1 E.T.). No se descuenta del neto.
 - Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos, novedades que descuentan, préstamos
   y cuotas.
 Cada día se paga con la tarifa vigente ese día (salario mínimo, horas del mes y %).
@@ -31,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import (
-    CUOTA, EMBARGO, MENSUAL, NOVEDADES_DEDUCCION, NOVEDADES_HORAS, PRESTAMO, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado,
+    AUXILIO_VARIABLE, CUOTA, EMBARGO, MENSUAL, NOVEDADES_DEDUCCION, NOVEDADES_HORAS, PRESTAMO, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado,
     LiqNovedad, LiqPeriodo, LiqResultado, LiqTarifa,
 )
 from app.apps.liquidador.services import festivos, vacaciones as vac
@@ -104,6 +109,8 @@ def dias_base_30(fecha: date) -> int:
         return 1 + 30 - ultimo
     return 1
 
+
+CODIGO_180 = "180"  # incapacidad de más de 180 días: no se paga; se provisiona la seguridad social
 
 AMBAS, PRIMERA, SEGUNDA = "ambas", "primera", "segunda"
 TOPE_NO_SALARIAL = Decimal("0.40")  # Ley 1393 de 2010, art. 30: lo que pase del 40 % entra en la base de aportes
@@ -203,6 +210,38 @@ def valor_novedad(x: LiqNovedad, empleado: LiqEmpleado, tarifas: Tarifas, period
     return _pesos(total), calculo
 
 
+def provision_codigo_180(empleado: LiqEmpleado, dias: list[LiqDia], tarifas: Tarifas) -> dict | None:
+    """Seguridad social que SERA provisiona por los días con código 180: base = salario ÷ 30 por día (base 30) con la
+    tarifa de cada día; salud y pensión del empleado (% de la tarifa) y del empleador (pensión 12 %, salud 8,5 % salvo
+    exoneración por ganar menos de 10 salarios mínimos). El trabajador recibe 0; nada se descuenta de su neto."""
+    from app.apps.liquidador.services.costeo_nomina import PARAMETROS, TOPE_EXONERACION
+
+    del_180 = [d for d in dias if (getattr(d, "codigo", "") or "").strip().upper() == CODIGO_180]
+    if not del_180:
+        return None
+    base = Decimal("0")
+    dias_base, pct_salud, pct_pension, exonerado = 0, Decimal("0"), Decimal("0"), True
+    for d in del_180:
+        t = tarifas.en(d.fecha)
+        salario = empleado.salario or t.smlmv
+        b = dias_base_30(d.fecha)
+        dias_base += b
+        base += salario / 30 * b
+        pct_salud, pct_pension = t.salud_pct, t.pension_pct
+        exonerado = salario < TOPE_EXONERACION * t.smlmv
+    base = _pesos(base)
+    salud_empleador_pct = Decimal("0") if exonerado else Decimal(str(PARAMETROS["salud"][0]))
+    pension_empleador_pct = Decimal(str(PARAMETROS["pension"][0]))
+    partes = {
+        "salud_empleado": _pesos(base * pct_salud / 100), "pension_empleado": _pesos(base * pct_pension / 100),
+        "salud_empleador": _pesos(base * salud_empleador_pct / 100), "pension_empleador": _pesos(base * pension_empleador_pct / 100),
+    }
+    return {"dias": len(del_180), "dias_base": dias_base, "base": float(base), "exonerado": exonerado,
+            **{k: float(v) for k, v in partes.items()}, "total": float(sum(partes.values(), Decimal("0"))),
+            "porcentajes": {"salud_empleado": float(pct_salud), "pension_empleado": float(pct_pension),
+                            "salud_empleador": float(salud_empleador_pct), "pension_empleador": float(pension_empleador_pct)}}
+
+
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
                       descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None,
                       vacaciones: dict | None = None, novedades: list[LiqNovedad] | None = None) -> dict:
@@ -300,11 +339,15 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
                                            f"{dias_otras_tnl} de otras novedades" if dias_otras_tnl else "") if t)
             calculo += f" − {dias_descuento} día(s) ({motivo}) × {x.valor_mensual / 30:,.0f}"
         aux_aplicados.append({"id": x.id, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo})
+    # Auxilios variables de esta nómina (novedades): por su valor, sin descuento por tiempo no laborado
+    for x in sorted((x for x in novedades or [] if x.tipo == AUXILIO_VARIABLE), key=lambda x: x.id):
+        aux_aplicados.append({"id": f"nov-{x.id}", "descripcion": x.descripcion, "valor": float(_pesos(x.valor or Decimal("0"))),
+                              "calculo": "auxilio variable de esta nómina" + (f" · origen: {x.nomina_origen}" if x.nomina_origen else "")})
     no_prestacional = sum((Decimal(str(x["valor"])) for x in aux_aplicados), Decimal("0"))
 
     # Novedades manuales de esta nómina
     nov_aplicadas, nov_salarial, nov_no_salarial, nov_deducciones = [], Decimal("0"), Decimal("0"), []
-    for x in sorted(novedades or [], key=lambda x: x.id):
+    for x in sorted((x for x in novedades or [] if x.tipo != AUXILIO_VARIABLE), key=lambda x: x.id):
         valor, calculo = valor_novedad(x, empleado, tarifas, periodo)
         deduccion = x.tipo in NOVEDADES_DEDUCCION
         item = {"id": x.id, "tipo": x.tipo, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo,
@@ -328,6 +371,10 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         alertas.append(f"Los pagos no salariales superan el 40 % de la remuneración: {exceso:,.0f} entran en la base de salud y pensión")
 
     t_cierre = tarifas.en(periodo.hasta)
+    provision_180 = provision_codigo_180(empleado, dias, tarifas)
+    if provision_180:
+        alertas.append(f"{provision_180['dias']} día(s) con código 180 (incapacidad de más de 180 días): no se pagan en nómina; "
+                       f"SERA provisiona {provision_180['total']:,.0f} de seguridad social")
     salud = _pesos(ibc * t_cierre.salud_pct / 100)
     pension = _pesos(ibc * t_cierre.pension_pct / 100)
     disponible = devengado - salud - pension
@@ -402,6 +449,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "pension": float(pension), "pension_pct": float(t_cierre.pension_pct),
         "descuentos": aplicados, "prestamos": float(prestamos), "embargos": float(embargos), "cuotas": float(cuotas),
         "novedades": nov_aplicadas, "novedades_devengo": float(nov_devengo), "novedades_deduccion": float(nov_deduccion),
+        "seguridad_social_180": provision_180, "provision_ss_180": provision_180["total"] if provision_180 else 0.0,
         "deducciones": float(deducciones), "neto": float(neto),
         "tarifas": sorted(x.isoformat() for x in a.tarifas),
     }

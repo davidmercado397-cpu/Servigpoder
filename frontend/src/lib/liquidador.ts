@@ -38,11 +38,19 @@ export type Nomina = {
   recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
   descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; cuotas?: number; deducciones: number; neto: number; tarifas: string[];
   /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
-  auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
+  auxilios?: { id: number | string; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
   dias_ausencia?: number; dias_tnl?: number; exceso_no_salarial?: number; alertas?: string[];
   vacaciones?: VacacionesNomina | null; vacaciones_valor?: number;
   /** Novedades manuales de esta nómina (mayor/menor valor pagado, horas pendientes…) */
   novedades?: NovedadAplicada[]; novedades_devengo?: number; novedades_deduccion?: number;
+  /** Días con código 180 (incapacidad de más de 180 días): no se pagan; SERA provisiona la seguridad social */
+  seguridad_social_180?: SeguridadSocial180 | null; provision_ss_180?: number;
+};
+
+export type SeguridadSocial180 = {
+  dias: number; dias_base: number; base: number; exonerado: boolean; salud_empleado: number; pension_empleado: number;
+  salud_empleador: number; pension_empleador: number; total: number;
+  porcentajes: { salud_empleado: number; pension_empleado: number; salud_empleador: number; pension_empleador: number };
 };
 
 export type NovedadAplicada = {
@@ -58,6 +66,7 @@ export type Novedad = {
 };
 
 export const TIPOS_NOVEDAD: [string, string, string][] = [
+  ["auxilio_variable", "Auxilio no prestacional variable", "Se paga solo en esta nómina (p. ej. rodamiento intermunicipal); no hace base de salud y pensión"],
   ["mayor_valor", "Mayor valor pagado", "Se descuenta: se pagó de más en una nómina anterior"],
   ["menor_valor", "Menor valor pagado", "Se paga: se pagó de menos en una nómina anterior (hace base de salud y pensión)"],
   ["horas_extras", "Horas extras pendientes", "Horas por concepto valoradas con la tarifa de la fecha en que se causaron"],
@@ -83,7 +92,7 @@ export type VacacionPeriodo = VacacionesNomina & { empleado_id: number; document
 
 export const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas" | "novedades_devengo" | "novedades_deduccion" | "deducciones" | "neto", number>;
+export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas" | "novedades_devengo" | "novedades_deduccion" | "deducciones" | "neto" | "provision_ss_180", number>;
 
 export type Tarifa = {
   id: number; vigente_desde: string; smlmv: number; auxilio_transporte: number; horas_mes: number; salud_pct: number; pension_pct: number;
@@ -216,7 +225,7 @@ export const CAMPOS_PAGADO: [string, string][] = [
   ["extras", "Horas extras"], ["auxilios_no_prestacionales", "Auxilios no prestacionales"], ["auxilio", "Auxilio de transporte"],
   ["novedades_devengo", "Novedades (devengo)"], ["devengado", "Total devengado"], ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"],
   ["cuotas", "Cuotas"], ["novedades_deduccion", "Novedades (deducción)"],
-  ["deducciones", "Total deducciones"], ["neto", "Neto pagado"],
+  ["deducciones", "Total deducciones"], ["neto", "Neto pagado"], ["provision_ss_180", "Provisión seg. social (cód. 180)"],
 ];
 
 export type NominaDelMes = {

@@ -200,3 +200,32 @@ def test_reporte_de_siigo_solo_con_netos(admin):
     assert filas["1001"]["estado"] == "cuadra" and filas["1001"]["siigo"]["ingresos"] is None
     assert filas["1001"]["diferencia"]["ingresos"] is None and filas["1001"]["diferencia"]["deducciones"] is None
     assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == 9262
+
+
+def test_codigo_180_y_auxilio_variable(admin):
+    # 1001: 10 días trabajados y 5 con código 180; 2002: toda la quincena con código 180
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 10 + ["180"] * 5)], [2002, "2002", *(["180"] * 15)]], DIAS)
+    base_dia = 1750905 / 30
+    n = _nomina(admin, pid, "2002")
+    ss = n["seguridad_social_180"]
+    assert n["neto"] == 0 and n["devengado"] == 0 and n["salud"] == 0
+    assert ss["dias"] == 15 and ss["base"] == int(base_dia * 15 + 0.5) and ss["exonerado"] and ss["salud_empleador"] == 0
+    assert ss["salud_empleado"] == round(ss["base"] * 0.04) and ss["pension_empleador"] == round(ss["base"] * 0.12)
+    assert n["provision_ss_180"] == ss["total"] and any("código 180" in a for a in n["alertas"])
+    n1 = _nomina(admin, pid, "1001")
+    assert n1["seguridad_social_180"]["dias"] == 5 and n1["dias_salario"] == 10 and n1["neto"] > 0
+
+    # Auxilio variable (rodamiento intermunicipal): suma a los auxilios no prestacionales, sin descuento por TNL
+    r = admin.post(f"{API}/periodos/{pid}/novedades", json={"documento": "1001", "tipo": "auxilio_variable",
+                                                           "descripcion": "Rodamiento intermunicipal", "valor": 45000})
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["valor"] == 45000 and r.json()["data"]["deduccion"] is False
+    n2 = _nomina(admin, pid, "1001")
+    assert n2["auxilios_no_prestacionales"] == 45000 and n2["novedades_devengo"] == 0
+    assert n2["ibc"] == n1["ibc"] and n2["devengado"] == n1["devengado"] + 45000
+    assert any(x["descripcion"] == "Rodamiento intermunicipal" for x in n2["auxilios"])
+
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
+    filas = list(libro.worksheets[0].iter_rows(values_only=True))
+    fila = dict(zip(filas[0], next(f for f in filas if f[0] == "2002")))
+    assert fila["DIAS COD 180"] == 15 and fila["PROVISION SEG SOCIAL COD 180"] == ss["total"]

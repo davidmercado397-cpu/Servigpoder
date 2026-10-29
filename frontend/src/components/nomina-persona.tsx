@@ -65,6 +65,17 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
           </tbody>
         </table>
       </div>
+      {n.seguridad_social_180 && (
+        <div className="border-t border-slate-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-900">
+          <b>Código 180 (incapacidad de más de 180 días):</b> {n.seguridad_social_180.dias} día(s) que no se pagan en nómina. SERA provisiona{" "}
+          <b>{pesos(n.seguridad_social_180.total)}</b> de seguridad social sobre {pesos(n.seguridad_social_180.base)}: salud empleado{" "}
+          {pesos(n.seguridad_social_180.salud_empleado)} ({n.seguridad_social_180.porcentajes.salud_empleado} %), pensión empleado{" "}
+          {pesos(n.seguridad_social_180.pension_empleado)} ({n.seguridad_social_180.porcentajes.pension_empleado} %), pensión empleador{" "}
+          {pesos(n.seguridad_social_180.pension_empleador)} ({n.seguridad_social_180.porcentajes.pension_empleador} %), salud empleador{" "}
+          {n.seguridad_social_180.exonerado ? "exonerada" : `${pesos(n.seguridad_social_180.salud_empleador)} (${n.seguridad_social_180.porcentajes.salud_empleador} %)`}.
+          No se descuenta del neto.
+        </div>
+      )}
       {n.vacaciones && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
           Base de vacaciones {pesos(n.vacaciones.base)}: salario {pesos(n.vacaciones.salario)} + promedio variable {pesos(n.vacaciones.promedio)}{" "}

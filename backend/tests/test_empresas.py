@@ -29,7 +29,7 @@ def test_los_datos_de_una_empresa_no_se_ven_en_otra(admin):
     assert _elegir(admin, "nueva").status_code == 200
     assert admin.get(f"{API}/periodos").json()["data"] == []  # esquema propio, vacío
     assert admin.get(f"{API}/empleados").json()["data"] == []
-    assert admin.get(f"{API}/turnos").json()["meta"]["extra"]["total"] == 131  # con su configuración inicial
+    assert admin.get(f"{API}/turnos").json()["meta"]["extra"]["total"] == 132  # con su configuración inicial
     assert admin.get(f"{API}/periodos/{pid}").status_code == 404  # el periodo de SERA no existe aquí
 
     _elegir(admin, "sera")

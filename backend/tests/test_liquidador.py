@@ -37,7 +37,7 @@ def _resultados(cliente, pid: int) -> dict[str, dict]:
 
 def test_configuracion_inicial_trae_los_turnos_de_produccion(admin):
     r = admin.get(f"{API}/turnos?tamano=150").json()
-    assert r["meta"]["extra"]["total"] == 131  # 129 de producción + AA y CC
+    assert r["meta"]["extra"]["total"] == 132  # 129 de producción + AA, CC y 180
     por_codigo = {t["codigo"]: t for t in r["data"]}
     assert por_codigo["D"]["horas_ordinarias"] == 8.4 and por_codigo["D"]["horas_extras"] == 2.8
     assert por_codigo["INC"]["incapacidad"] and por_codigo["INC"]["clase"] == "incapacidad"
@@ -161,7 +161,7 @@ def test_turnos_crear_editar_y_hora_nocturna(admin):
 
     # La hora nocturna regenera todas las matrices
     r = admin.put(f"{API}/parametros", json={"hora_inicio_nocturna": 21})
-    assert r.json()["meta"]["extra"]["turnos_regenerados"] == 132
+    assert r.json()["meta"]["extra"]["turnos_regenerados"] == 133
     assert admin.get(f"{API}/turnos/{t['id']}").json()["data"]["matriz"]["ordinary_night"]["weekday"] == 1
 
     previa = admin.post(f"{API}/turnos/vista-previa", json={"hora_inicio": "18:00", "horas_ordinarias": 8.4, "horas_extras": 2.8}).json()["data"]

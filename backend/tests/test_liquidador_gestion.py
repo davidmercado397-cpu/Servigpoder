@@ -108,6 +108,9 @@ def test_prorrogas_y_alerta_de_180_dias(admin):
     # Otra enfermedad 5 días después, sin marcar como prórroga: empieza otra cuenta
     otra = admin.post(f"{API}/incapacidades", json={**base, "cie": "J00", "desde": "2026-08-05", "hasta": "2026-08-06"}).json()["data"]["id"]
 
+    assert admin.get(f"{API}/incapacidades?anio=&origen=&vista=todas").status_code == 200  # «Todos los años» llega vacío
+    assert len(_lista(admin, "incapacidades?anio=2026")["data"]) == 8 and _lista(admin, "incapacidades?anio=2020")["data"] == []
+    assert admin.get(f"{API}/personal/salidas?anio=&estado=").status_code == 200
     r = _lista(admin, "incapacidades?q=8001")
     assert r["meta"]["extra"]["resumen"]["prolongadas"] == 1
     lista = {x["id"]: x for x in r["data"]}

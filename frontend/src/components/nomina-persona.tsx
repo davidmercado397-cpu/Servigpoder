@@ -54,7 +54,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
           <thead><tr><th>Deducciones</th><th /><th className="text-right">Valor</th></tr></thead>
           <tbody>
             {fila("Salud", n.por_horas && !n.salud_pct ? "esta nómina por horas no descuenta salud" : `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
-            {fila("Pensión", n.por_horas && !n.pension_pct ? "esta nómina por horas no descuenta pensión" : `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
+            {fila("Pensión", n.pensionado ? "pensionado: no descuenta pensión" : n.por_horas && !n.pension_pct ? "esta nómina por horas no descuenta pensión" : `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
             {n.descuentos.map((x) => (
               <Fragment key={x.id}>
                 {fila(`${TIPOS_DESCUENTO[x.tipo]?.[0] ?? x.tipo}: ${x.descripcion}`,

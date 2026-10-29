@@ -24,7 +24,8 @@
 - Código 180 (incapacidad de más de 180 días): no se paga (lo paga el fondo de pensiones o nadie) y cuenta como tiempo no
   laborado; SERA provisiona la seguridad social de esos días (salud y pensión del empleado y del empleador sobre el
   salario de esos días; la salud del empleador no va si está exonerado, art. 114-1 E.T.). No se descuenta del neto.
-- Salud y pensión: % del devengado sin auxilio de transporte. Después, embargos, novedades que descuentan, préstamos
+- Salud y pensión: % del devengado sin auxilio de transporte. Quien está marcado como pensionado en la ficha no descuenta
+  pensión (ni en la nómina normal ni en la por horas, aunque esta descuente pensión). Después, embargos, novedades que descuentan, préstamos
   y cuotas.
 Cada día se paga con la tarifa vigente ese día (salario mínimo, horas del mes y %).
 """
@@ -236,6 +237,8 @@ def provision_codigo_180(empleado: LiqEmpleado, dias: list[LiqDia], tarifas: Tar
     base = _pesos(base)
     salud_empleador_pct = Decimal("0") if exonerado else Decimal(str(PARAMETROS["salud"][0]))
     pension_empleador_pct = Decimal(str(PARAMETROS["pension"][0]))
+    if empleado.pensionado:  # el pensionado no cotiza pensión
+        pct_pension = pension_empleador_pct = Decimal("0")
     partes = {
         "salud_empleado": _pesos(base * pct_salud / 100), "pension_empleado": _pesos(base * pct_pension / 100),
         "salud_empleador": _pesos(base * salud_empleador_pct / 100), "pension_empleador": _pesos(base * pension_empleador_pct / 100),
@@ -402,6 +405,9 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
                        f"SERA provisiona {provision_180['total']:,.0f} de seguridad social")
     salud_pct = t_cierre.salud_pct if not por_horas or getattr(periodo, "descuenta_salud", True) else Decimal("0")
     pension_pct = t_cierre.pension_pct if not por_horas or getattr(periodo, "descuenta_pension", True) else Decimal("0")
+    pensionado = bool(getattr(empleado, "pensionado", False))
+    if pensionado:  # marcado como pensionado en la ficha: nunca descuenta pensión (en ninguna nómina)
+        pension_pct = Decimal("0")
     salud = _pesos(ibc * salud_pct / 100)
     pension = _pesos(ibc * pension_pct / 100)
     disponible = devengado - salud - pension
@@ -473,7 +479,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "recargos": float(recargos), "extras": float(extras),
         "devengado": float(devengado), "ibc": float(ibc),
         "salud": float(salud), "salud_pct": float(salud_pct),
-        "pension": float(pension), "pension_pct": float(pension_pct),
+        "pension": float(pension), "pension_pct": float(pension_pct), "pensionado": pensionado,
         "por_horas": por_horas, "horas_pagadas": float(horas_pagadas), "dias_trabajados": dias_trabajados,
         "dias_auxilio_otra_nomina": len(aux_otra),
         "descuentos": aplicados, "prestamos": float(prestamos), "embargos": float(embargos), "cuotas": float(cuotas),

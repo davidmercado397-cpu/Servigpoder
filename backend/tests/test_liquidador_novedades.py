@@ -295,3 +295,21 @@ def _resultado_id(cliente, pid, doc):
     from tests.test_liquidador import _resultados
 
     return _resultados(cliente, pid)[doc]["empleado_id"]
+
+
+def test_pensionado_no_descuenta_pension(en_empresa, admin):
+    from app.apps.liquidador.models import LiqEmpleado
+
+    normal = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    horas = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Por horas", "tipo_nomina": "horas",
+                                                "descuenta_salud": True, "descuenta_pension": True}).json()["data"]["id"]
+    _cargar(admin, horas, xlsx([["documento", "NOVIEMBRE", 3], [1001, "1001", "A"]]))
+    assert _nomina(admin, normal, "1001")["pension"] > 0 and _nomina(admin, horas, "1001")["pension"] > 0
+
+    s = en_empresa("sera")
+    s.query(LiqEmpleado).filter(LiqEmpleado.documento == "1001").update({"pensionado": True})
+    s.commit()
+    for pid in (normal, horas):
+        admin.post(f"{API}/periodos/{pid}/recalcular")
+        n = _nomina(admin, pid, "1001")
+        assert n["pensionado"] and n["pension"] == 0 and n["pension_pct"] == 0 and n["salud"] > 0

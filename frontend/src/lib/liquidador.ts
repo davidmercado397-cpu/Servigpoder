@@ -48,6 +48,8 @@ export type Nomina = {
   /** Días con código 180 (incapacidad de más de 180 días): no se pagan; SERA provisiona la seguridad social */
   seguridad_social_180?: SeguridadSocial180 | null; provision_ss_180?: number;
   /** Nómina por horas */
+  /** Marcado como pensionado en la ficha: no descuenta pensión */
+  pensionado?: boolean;
   por_horas?: boolean; horas_pagadas?: number; dias_trabajados?: number; dias_auxilio_otra_nomina?: number;
 };
 

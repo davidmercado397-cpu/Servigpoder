@@ -31,7 +31,9 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
         <table className="tabla text-xs">
           <thead><tr><th>Devengado</th><th /><th className="text-right">Valor</th></tr></thead>
           <tbody>
-            {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
+            {n.por_horas
+              ? fila("Sueldo (por horas)", `${horas(n.horas_pagadas ?? 0)} h trabajadas × ${pesos(n.valor_hora)} en ${n.dias_trabajados ?? 0} día(s)`, n.basico)
+              : fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
             {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
             {n.vacaciones && (
               <>
@@ -43,7 +45,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
             {(n.auxilios ?? []).map((x) => (
               <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
             ))}
-            {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
+            {fila("Auxilio de transporte", `${n.dias_auxilio} días${n.por_horas ? " trabajados" : ""}${n.dias_auxilio_otra_nomina ? ` (${n.dias_auxilio_otra_nomina} se pagan en otra nómina)` : ""}`, n.auxilio)}
             {(n.novedades ?? []).filter((x) => !x.deduccion).map(novedad)}
             {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
           </tbody>
@@ -51,8 +53,8 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
         <table className="tabla text-xs">
           <thead><tr><th>Deducciones</th><th /><th className="text-right">Valor</th></tr></thead>
           <tbody>
-            {fila("Salud", `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
-            {fila("Pensión", `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
+            {fila("Salud", n.por_horas && !n.salud_pct ? "esta nómina por horas no descuenta salud" : `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
+            {fila("Pensión", n.por_horas && !n.pension_pct ? "esta nómina por horas no descuenta pensión" : `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
             {n.descuentos.map((x) => (
               <Fragment key={x.id}>
                 {fila(`${TIPOS_DESCUENTO[x.tipo]?.[0] ?? x.tipo}: ${x.descripcion}`,

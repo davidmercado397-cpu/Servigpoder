@@ -34,7 +34,8 @@ export default function Quincenas() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const router = useRouter();
   const hoy = new Date();
-  const [nueva, setNueva] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2, nombre: "General" });
+  const [nueva, setNueva] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2, nombre: "General",
+    tipo_nomina: "normal", descuenta_salud: true, descuenta_pension: true });
   const [lista, setLista] = useState<Periodo[] | null>(null);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [error, setError] = useState("");
@@ -63,7 +64,7 @@ export default function Quincenas() {
   }
 
   function agregarA(g: Grupo) {
-    setNueva({ anio: g.anio, mes: g.mes, quincena: g.quincena, nombre: "" });
+    setNueva({ ...nueva, anio: g.anio, mes: g.mes, quincena: g.quincena, nombre: "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
     setTimeout(() => campoNombre.current?.focus(), 300);
   }
@@ -101,6 +102,22 @@ export default function Quincenas() {
             <input ref={campoNombre} className="input w-56" required maxLength={80} placeholder="Cliente 1, Administrativa…" value={nueva.nombre}
               onChange={(e) => setNueva({ ...nueva, nombre: e.target.value })} />
           </div>
+          <div>
+            <label className="label">Tipo de nómina</label>
+            <select className="input w-40" value={nueva.tipo_nomina} onChange={(e) => setNueva({ ...nueva, tipo_nomina: e.target.value })}>
+              <option value="normal">Normal</option>
+              <option value="horas">Por horas</option>
+            </select>
+          </div>
+          {nueva.tipo_nomina === "horas" && (
+            <div className="flex flex-col gap-1 pb-1 text-sm">
+              <span className="label mb-0">Descuenta</span>
+              <span className="flex gap-3">
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={nueva.descuenta_salud} onChange={(e) => setNueva({ ...nueva, descuenta_salud: e.target.checked })} /> Salud</label>
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={nueva.descuenta_pension} onChange={(e) => setNueva({ ...nueva, descuenta_pension: e.target.checked })} /> Pensión</label>
+              </span>
+            </div>
+          )}
           <button className="btn-primario inline-flex items-center gap-1.5"><Plus className="h-4 w-4" /> Crear nómina</button>
         </form>
       )}
@@ -162,7 +179,7 @@ function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestio
         const [texto, color] = ESTADO_PERIODO[p.estado] ?? [p.estado, ""];
         return (
           <tr key={p.id}>
-            <td className="pl-8 font-medium">{p.nombre}</td>
+            <td className="pl-8 font-medium">{p.nombre}{p.tipo_nomina === "horas" && <Insignia color="ml-2 bg-violet-100 text-violet-800">Por horas</Insignia>}</td>
             <td><Insignia color={color}>{texto}</Insignia></td>
             <td className="max-w-xs truncate text-sm text-slate-600" title={p.archivo ?? ""}>{p.archivo ?? "—"}</td>
             <td className="text-right tabular-nums">{p.empleados.toLocaleString("es-CO")}</td>

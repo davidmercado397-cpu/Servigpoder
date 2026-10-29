@@ -17,6 +17,10 @@
   valor pagado hacen base de salud y pensión; el mayor valor pagado es solo una deducción.
 - Auxilio no prestacional variable (novedad de una sola nómina, p. ej. rodamiento intermunicipal): suma a los
   auxilios no prestacionales por su valor, sin descuento por tiempo no laborado.
+- Nómina por horas: el salario son las horas ordinarias trabajadas × (salario ÷ horas del mes); recargos y extras como
+  siempre. Descansos (Z), libres (L) y festivos no trabajados no pagan salario ni auxilio de transporte. El auxilio va
+  por día con horas trabajadas, una sola vez por día: si ese día también trabajó en otra nómina que lo paga (una normal o
+  una por horas creada antes), aquí no. Descuenta salud y/o pensión según se marque en la nómina.
 - Código 180 (incapacidad de más de 180 días): no se paga (lo paga el fondo de pensiones o nadie) y cuenta como tiempo no
   laborado; SERA provisiona la seguridad social de esos días (salud y pensión del empleado y del empleador sobre el
   salario de esos días; la salud del empleador no va si está exonerado, art. 114-1 E.T.). No se descuenta del neto.
@@ -244,10 +248,14 @@ def provision_codigo_180(empleado: LiqEmpleado, dias: list[LiqDia], tarifas: Tar
 
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
                       descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None,
-                      vacaciones: dict | None = None, novedades: list[LiqNovedad] | None = None) -> dict:
+                      vacaciones: dict | None = None, novedades: list[LiqNovedad] | None = None,
+                      aux_en_otra: dict[date, str] | None = None) -> dict:
     """`vacaciones` (solo si tiene días de vacaciones): festivos, promedio sugerido y meses, promedio manual y
     días hábiles ya disfrutados antes del periodo."""
     a = Acumulado()
+    por_horas = getattr(periodo, "tipo_nomina", "normal") == "horas"
+    aux_en_otra = aux_en_otra or {}
+    horas_pagadas, dias_trabajados, aux_otra = Decimal("0"), 0, []
     ctx = vacaciones or {}
     fest = ctx.get("festivos", set())
     promedio = ctx.get("manual") if ctx.get("manual") is not None else ctx.get("sugerido", Decimal("0"))
@@ -259,7 +267,20 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         valor_dia = salario / 30
         valor_hora = salario / t.horas_mes
         base = dias_base_30(d.fecha)
-        if d.clase in PAGAN_SALARIO:
+        if por_horas and d.clase in PAGAN_SALARIO:
+            # Solo las horas trabajadas (las ordinarias; recargos y extras se suman abajo). Z y L no pagan
+            h_ord = Decimal(str((d.horas or {}).get(HourConcept.ORDINARY_DAY.value, 0) or 0))
+            trabajo = h_ord > 0 or any(v for c, v in (d.horas or {}).items() if c != HourConcept.ORDINARY_DAY.value)
+            horas_pagadas += h_ord
+            a.basico += h_ord * valor_hora
+            if trabajo:
+                dias_trabajados += 1
+                if d.fecha in aux_en_otra:
+                    aux_otra.append(d.fecha)
+                elif salario <= 2 * t.smlmv:
+                    a.dias_auxilio += 1
+                    a.auxilio += t.auxilio_transporte / 30
+        elif d.clase in PAGAN_SALARIO:
             a.dias_salario += base
             a.basico += valor_dia * base
         elif d.clase == INCAPACIDAD:
@@ -283,7 +304,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
                 a.vac_valor_no_habiles += valor_vac
         else:
             a.dias_sin_pago += 1
-        if d.clase in PAGAN_AUXILIO and salario <= 2 * t.smlmv:
+        if not por_horas and d.clase in PAGAN_AUXILIO and salario <= 2 * t.smlmv:
             a.dias_auxilio += base
             a.auxilio += t.auxilio_transporte / 30 * base
         for concepto, h in (d.horas or {}).items():
@@ -371,12 +392,18 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         alertas.append(f"Los pagos no salariales superan el 40 % de la remuneración: {exceso:,.0f} entran en la base de salud y pensión")
 
     t_cierre = tarifas.en(periodo.hasta)
+    if aux_otra:
+        nominas_otra = sorted({aux_en_otra[f] for f in aux_otra})
+        alertas.append(f"{len(aux_otra)} día(s) también los trabajó en {', '.join(f'«{n}»' for n in nominas_otra)}: "
+                       f"el auxilio de transporte de esos días se paga allá")
     provision_180 = provision_codigo_180(empleado, dias, tarifas)
     if provision_180:
         alertas.append(f"{provision_180['dias']} día(s) con código 180 (incapacidad de más de 180 días): no se pagan en nómina; "
                        f"SERA provisiona {provision_180['total']:,.0f} de seguridad social")
-    salud = _pesos(ibc * t_cierre.salud_pct / 100)
-    pension = _pesos(ibc * t_cierre.pension_pct / 100)
+    salud_pct = t_cierre.salud_pct if not por_horas or getattr(periodo, "descuenta_salud", True) else Decimal("0")
+    pension_pct = t_cierre.pension_pct if not por_horas or getattr(periodo, "descuenta_pension", True) else Decimal("0")
+    salud = _pesos(ibc * salud_pct / 100)
+    pension = _pesos(ibc * pension_pct / 100)
     disponible = devengado - salud - pension
 
     aplicados = []
@@ -445,8 +472,10 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "valores": {c: float(v) for c, v in valores.items()},
         "recargos": float(recargos), "extras": float(extras),
         "devengado": float(devengado), "ibc": float(ibc),
-        "salud": float(salud), "salud_pct": float(t_cierre.salud_pct),
-        "pension": float(pension), "pension_pct": float(t_cierre.pension_pct),
+        "salud": float(salud), "salud_pct": float(salud_pct),
+        "pension": float(pension), "pension_pct": float(pension_pct),
+        "por_horas": por_horas, "horas_pagadas": float(horas_pagadas), "dias_trabajados": dias_trabajados,
+        "dias_auxilio_otra_nomina": len(aux_otra),
         "descuentos": aplicados, "prestamos": float(prestamos), "embargos": float(embargos), "cuotas": float(cuotas),
         "novedades": nov_aplicadas, "novedades_devengo": float(nov_devengo), "novedades_deduccion": float(nov_deduccion),
         "seguridad_social_180": provision_180, "provision_ss_180": provision_180["total"] if provision_180 else 0.0,
@@ -479,6 +508,7 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
     ya = descontado(db, {x.id for lista in descuentos.values() for x in lista if x.monto_total is not None}, periodo.id)
     contexto_vac = _contexto_vacaciones(db, periodo, por_empleado, empleados)
     otras = _otras_nominas(db, periodo, por_empleado)
+    aux_otra = _auxilio_en_otras(db, periodo, por_empleado) if getattr(periodo, "tipo_nomina", "normal") == "horas" else {}
     for empleado_id, r in resultados.items():
         avisos, aplica = [], True
         if empleado_id in otras:
@@ -486,13 +516,33 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
             aplica = duenia is None
         n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas,
                               descuentos[empleado_id] if aplica else [], ya, auxilios[empleado_id] if aplica else [],
-                              contexto_vac.get(empleado_id), novedades[empleado_id])
+                              contexto_vac.get(empleado_id), novedades[empleado_id], aux_otra.get(empleado_id))
         e = empleados[empleado_id]
         if e.estado == "retirado" and e.fecha_retiro and any(d.fecha > e.fecha_retiro for d in por_empleado[empleado_id]):
             avisos = [f"Está retirado desde el {e.fecha_retiro:%d/%m/%Y} y tiene turnos después de esa fecha", *avisos]
         n["alertas"] = avisos + n["alertas"]
         n["otras_nominas"] = any("nómina «" in a for a in avisos)
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
+
+
+def _auxilio_en_otras(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]]) -> dict[int, dict[date, str]]:
+    """En una nómina por horas: {empleado: {fecha: nómina}} de los días que esa persona también trabajó en otra nómina que
+    paga ese auxilio de transporte: una normal (siempre lo paga) o una por horas creada antes que esta."""
+    from app.apps.liquidador.services.calculo import hermanas
+
+    otras = [h for h in hermanas(db, periodo) if h.tipo_nomina != "horas" or h.id < periodo.id]
+    if not otras or not por_empleado:
+        return {}
+    por_id = {h.id: h for h in otras}
+    salida: dict[int, dict[date, str]] = defaultdict(dict)
+    for pid, eid, fecha, clase, horas in db.execute(
+            select(LiqDia.periodo_id, LiqDia.empleado_id, LiqDia.fecha, LiqDia.clase, LiqDia.horas)
+            .where(LiqDia.periodo_id.in_(list(por_id)), LiqDia.empleado_id.in_(list(por_empleado)))):
+        h = por_id[pid]
+        paga = (clase in PAGAN_AUXILIO) if h.tipo_nomina != "horas" else any(v for v in (horas or {}).values())
+        if paga:
+            salida[eid].setdefault(fecha, h.nombre)
+    return salida
 
 
 def _contexto_vacaciones(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]],
@@ -536,7 +586,9 @@ def _otras_nominas(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, lis
             texto = f"También está en la nómina «{h.nombre}» ({h.etiqueta})"
             if repetidas:
                 texto += (f": {len(repetidas)} día(s) están en las dos ({', '.join(f.strftime('%d/%m') for f in repetidas[:6])}"
-                          f"{'…' if len(repetidas) > 6 else ''}) y se pagarían dos veces")
+                          f"{'…' if len(repetidas) > 6 else ''})")
+                texto += (" (por horas: cada nómina paga sus horas y el auxilio de transporte va una sola vez)"
+                          if "horas" in (periodo.tipo_nomina, h.tipo_nomina) else " y se pagarían dos veces")
             alertas.append(texto)
         primera = min([*ids, periodo.id])
         duenia = None if primera == periodo.id else por_id[primera]

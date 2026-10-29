@@ -229,3 +229,42 @@ def test_codigo_180_y_auxilio_variable(admin):
     filas = list(libro.worksheets[0].iter_rows(values_only=True))
     fila = dict(zip(filas[0], next(f for f in filas if f[0] == "2002")))
     assert fila["DIAS COD 180"] == 15 and fila["PROVISION SEG SOCIAL COD 180"] == ss["total"]
+
+
+def test_nomina_por_horas(admin):
+    turno = {"hora_inicio": "08:00", "hora_fin": "12:00", "horas_extras": 0, "remunerado": True, "incapacidad": False}
+    assert admin.post(f"{API}/turnos", json={**turno, "codigo": "H4", "nombre": "4 horas", "horas_ordinarias": 4}).status_code == 201
+    assert admin.post(f"{API}/turnos", json={**turno, "codigo": "H2", "nombre": "2 horas", "horas_ordinarias": 2}).status_code == 201
+
+    # Normal (no cambia nada) y dos por horas del mismo periodo
+    normal = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    n_normal_antes = _nomina(admin, normal, "1001")
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Puesto A", "tipo_nomina": "horas",
+                                            "descuenta_salud": True, "descuenta_pension": False})
+    assert r.status_code == 201 and r.json()["data"]["tipo_nomina"] == "horas" and not r.json()["data"]["descuenta_pension"]
+    a = r.json()["data"]["id"]
+    # 5005: 2 h el 3 y el 4 (y un descanso Z el 5) en el Puesto A; el 4 también 4 h en el Puesto B
+    _cargar(admin, a, xlsx([["documento", "NOVIEMBRE", 3, 4, 5], [5005, "5005", "H2", "H2", "Z"]]))
+    b = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Puesto B", "tipo_nomina": "horas"}).json()["data"]["id"]
+    _cargar(admin, b, xlsx([["documento", "NOVIEMBRE", 4], [5005, "5005", "H4"]]))
+
+    hora = 1750905 / 210
+    aux_dia = 249095 / 30
+    na = _nomina(admin, a, "5005")
+    assert na["por_horas"] and na["horas_pagadas"] == 4 and na["basico"] == int(4 * hora + 0.5)
+    assert na["dias_auxilio"] == 2 and na["auxilio"] == int(2 * aux_dia + 0.5)  # el Z no paga auxilio
+    assert na["pension"] == 0 and na["salud"] == int(na["basico"] * 0.04 + 0.5)
+    nb = _nomina(admin, b, "5005")
+    # El 4 ya tiene auxilio en el Puesto A (creado antes): en el B solo las horas
+    assert nb["horas_pagadas"] == 4 and nb["dias_auxilio"] == 0 and nb["auxilio"] == 0 and nb["dias_auxilio_otra_nomina"] == 1
+    assert any("«Puesto A»" in x and "auxilio de transporte" in x for x in nb["alertas"])
+    assert nb["salud"] > 0 and nb["pension"] > 0
+
+    # La nómina normal no cambió
+    assert _nomina(admin, normal, "1001") == n_normal_antes
+
+    # Cambiar a normal: se recalcula como nómina normal
+    r = admin.put(f"{API}/periodos/{a}/tipo", json={"tipo_nomina": "normal"})
+    assert r.status_code == 200 and r.json()["data"]["descuenta_pension"]
+    n = _nomina(admin, a, "5005")
+    assert not n["por_horas"] and n["dias_salario"] == 3 and n["pension"] > 0

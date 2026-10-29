@@ -147,6 +147,11 @@ class LiqPeriodo(Base):
     umbral_activo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     umbral_horas: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("42"), server_default="42")
     umbral_horas_novedad: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("7"), server_default="7")
+    # Nómina por horas: se pagan solo las horas trabajadas (salario ÷ horas del mes), el auxilio de transporte por día
+    # trabajado (una vez por día aunque trabaje en dos nóminas) y descuenta salud y/o pensión según se marque
+    tipo_nomina: Mapped[str] = mapped_column(String(10), default="normal", server_default="normal")  # normal | horas
+    descuenta_salud: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    descuenta_pension: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     cargado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     calculado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cerrado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -136,7 +136,7 @@ ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
     "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
     "NOVEDADES DEVENGO", "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "NOVEDADES DEDUCCION",
-    "TOTAL DEDUCCIONES", "NETO A PAGAR", "DIAS COD 180", "PROVISION SEG SOCIAL COD 180",
+    "TOTAL DEDUCCIONES", "NETO A PAGAR", "DIAS COD 180", "PROVISION SEG SOCIAL COD 180", "HORAS PAGADAS (POR HORAS)",
 )
 _PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
 
@@ -150,7 +150,8 @@ def fila_nomina(r: LiqResultado) -> list:
             *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
             n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("novedades_devengo", 0), n.get("devengado", 0), n.get("salud", 0),
             n.get("pension", 0), n.get("embargos", 0), n.get("prestamos", 0), n.get("cuotas", 0), n.get("novedades_deduccion", 0),
-            n.get("deducciones", 0), n.get("neto", 0), (n.get("seguridad_social_180") or {}).get("dias", 0), n.get("provision_ss_180", 0)]
+            n.get("deducciones", 0), n.get("neto", 0), (n.get("seguridad_social_180") or {}).get("dias", 0), n.get("provision_ss_180", 0),
+            n.get("horas_pagadas", 0) if n.get("por_horas") else None]
 
 
 TIPOS_NOVEDAD = {"auxilio_variable": "Auxilio no prestacional variable", "mayor_valor": "Mayor valor pagado", "menor_valor": "Menor valor pagado", "horas_extras": "Horas extras pendientes",

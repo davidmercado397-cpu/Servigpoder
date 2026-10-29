@@ -21,6 +21,57 @@ type Totales = { horas: Record<string, number>; dias: Record<string, number>; no
 const TIPO_DIA = Object.fromEntries(TIPOS_DIA);
 const DIA_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 
+/** Nómina normal o por horas (y qué descuenta la de horas); cambiarla recalcula la nómina. */
+function TipoNomina({ p, editable, onGuardado, onError }: {
+  p: Periodo; editable: boolean; onGuardado: (p: Periodo) => void; onError: (m: string) => void;
+}) {
+  const [edicion, setEdicion] = useState<{ tipo_nomina: string; descuenta_salud: boolean; descuenta_pension: boolean } | null>(null);
+  const horasNomina = (p.tipo_nomina ?? "normal") === "horas";
+  const descuenta = [p.descuenta_salud !== false && "salud", p.descuenta_pension !== false && "pensión"].filter(Boolean).join(" y ") || "ni salud ni pensión";
+
+  async function guardar() {
+    if (!edicion) return;
+    try {
+      onGuardado(await api<Periodo>(`/liquidador/periodos/${p.id}/tipo`, { method: "PUT", json: edicion }));
+      setEdicion(null);
+    } catch (e) {
+      onError(mensajeError(e));
+    }
+  }
+
+  if (!edicion) {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm">
+        <Insignia color={horasNomina ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>
+          {horasNomina ? `Por horas · descuenta ${descuenta}` : "Nómina normal"}
+        </Insignia>
+        {editable && (
+          <button className="text-xs text-marca-600 hover:underline" onClick={() => setEdicion({
+            tipo_nomina: p.tipo_nomina ?? "normal", descuenta_salud: p.descuenta_salud !== false, descuenta_pension: p.descuenta_pension !== false })}>
+            Cambiar
+          </button>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">
+      <select className="input w-36 py-1" value={edicion.tipo_nomina} onChange={(e) => setEdicion({ ...edicion, tipo_nomina: e.target.value })} aria-label="Tipo de nómina">
+        <option value="normal">Normal</option>
+        <option value="horas">Por horas</option>
+      </select>
+      {edicion.tipo_nomina === "horas" && (
+        <>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={edicion.descuenta_salud} onChange={(e) => setEdicion({ ...edicion, descuenta_salud: e.target.checked })} /> Descuenta salud</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={edicion.descuenta_pension} onChange={(e) => setEdicion({ ...edicion, descuenta_pension: e.target.checked })} /> Descuenta pensión</label>
+        </>
+      )}
+      <button className="btn-primario py-1" onClick={guardar}>Guardar y recalcular</button>
+      <button className="text-xs text-slate-500 hover:underline" onClick={() => setEdicion(null)}>Cancelar</button>
+    </span>
+  );
+}
+
 export default function DetalleQuincena() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -146,6 +197,10 @@ export default function DetalleQuincena() {
           </p>
         </div>
         <Insignia color={estadoColor}>{estadoTexto}</Insignia>
+        <TipoNomina p={p} editable={gestionar && !cerrada} onError={setError}
+          onGuardado={(x) => { setP(x); setAviso((x.tipo_nomina ?? "normal") === "horas"
+            ? "Nómina por horas: se pagan las horas trabajadas y el auxilio de transporte por día trabajado. Se recalculó."
+            : "Nómina normal. Se recalculó."); cargarResultados().catch(() => {}); }} />
         {gestionar && !cerrada && (
           <button onClick={eliminar} className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-red-50 hover:text-red-700">
             <Trash2 className="h-4 w-4" /> Eliminar nómina

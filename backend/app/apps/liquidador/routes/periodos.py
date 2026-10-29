@@ -16,7 +16,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado
 from app.apps.liquidador.schemas import (
-    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
+    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, TipoNominaIn, UmbralIn,
 )
 from app.apps.liquidador.services import calculo, exportar, importador, vacaciones
 
@@ -65,8 +65,10 @@ def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
 @router.post("/periodos", response_model=ApiResponse[PeriodoOut], status_code=201)
 def crear(data: PeriodoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     desde, hasta = calculo.rango_quincena(data.anio, data.mes, data.quincena)
+    horas = data.tipo_nomina == "horas"
     p = LiqPeriodo(anio=data.anio, mes=data.mes, quincena=data.quincena, nombre=data.nombre, desde=desde, hasta=hasta,
-                   advertencias=[])
+                   advertencias=[], tipo_nomina=data.tipo_nomina, descuenta_salud=data.descuenta_salud or not horas,
+                   descuenta_pension=data.descuenta_pension or not horas)
     _nombre_libre(db, p, data.nombre)
     db.add(p)
     db.flush()
@@ -80,6 +82,23 @@ def _nombre_libre(db: DbSession, p: LiqPeriodo, nombre: str) -> None:
                                               func.lower(LiqPeriodo.nombre) == nombre.lower()))
     if otra is not None and otra.id != p.id:
         raise ApiError(409, f"El periodo {p.etiqueta} ya tiene una nómina «{otra.nombre}»")
+
+
+@router.put("/periodos/{periodo_id}/tipo", response_model=ApiResponse[PeriodoOut])
+def cambiar_tipo(periodo_id: int, data: TipoNominaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Nómina normal o por horas (y qué descuenta la de horas). Si ya tiene el Excel cargado, se recalcula."""
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    horas = data.tipo_nomina == "horas"
+    p.tipo_nomina = data.tipo_nomina
+    p.descuenta_salud, p.descuenta_pension = data.descuenta_salud or not horas, data.descuenta_pension or not horas
+    db.flush()
+    if p.cargado_en is not None:
+        calculo.calcular(db, p)
+    auditar(db, request, "liq_nomina_tipo", actual.id, periodo=p.etiqueta, nomina=p.nombre, tipo=p.tipo_nomina,
+            salud=p.descuenta_salud, pension=p.descuenta_pension)
+    db.commit()
+    return ok(_periodo_out(db, p))
 
 
 @router.put("/periodos/{periodo_id}/nombre", response_model=ApiResponse[PeriodoOut])

@@ -5,6 +5,8 @@ export type Periodo = {
   id: number; anio: number; mes: number; quincena: number; tipo: string; etiqueta: string; desde: string; hasta: string;
   /** Nombre de la nómina dentro del periodo (Cliente 1, Administrativa…); las anteriores quedaron como «General» */
   nombre: string;
+  /** Nómina por horas: se pagan las horas trabajadas y el auxilio por día trabajado; descuenta salud y/o pensión según se marque */
+  tipo_nomina?: "normal" | "horas"; descuenta_salud?: boolean; descuenta_pension?: boolean;
   estado: "borrador" | "calculada" | "cerrada"; archivo: string | null; advertencias: string[];
   cargado_en: string | null; calculado_en: string | null; cerrado_en: string | null; creado_en: string | null; empleados: number;
   /** Umbral semanal de horas: se marca al liquidar y vale para cada carga o recálculo del periodo */
@@ -45,6 +47,8 @@ export type Nomina = {
   novedades?: NovedadAplicada[]; novedades_devengo?: number; novedades_deduccion?: number;
   /** Días con código 180 (incapacidad de más de 180 días): no se pagan; SERA provisiona la seguridad social */
   seguridad_social_180?: SeguridadSocial180 | null; provision_ss_180?: number;
+  /** Nómina por horas */
+  por_horas?: boolean; horas_pagadas?: number; dias_trabajados?: number; dias_auxilio_otra_nomina?: number;
 };
 
 export type SeguridadSocial180 = {

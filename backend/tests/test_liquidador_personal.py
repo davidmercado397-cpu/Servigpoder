@@ -45,7 +45,7 @@ def _base() -> bytes:
     return _libro({
         "OPERATIVOS": [ACTIVOS,
                        _activo(1, 5001.0, "ANA OPERATIVA", inicio=datetime(2025, 1, 15)),
-                       _activo(2, "PPT 1234567", "JOSE EXTRANJERO", expedicion="#VALUE!", barrio=datetime(2026, 8, 7)),
+                       _activo(2, "PPT 1234567", "JOSE EXTRANJERO", expedicion="#VALUE!", barrio=datetime(2026, 8, 7), pension="COLPENSIONES"),
                        _activo(3, 5004.0, "LUIS PENSIONADO", pension="PENSIONADO VEJEZ - COLPENSIONES")],
         "RETIROS OP": [RETIROS,
                        [1, 5003.0, "PEDRO RETIRADO", "OPERARIO DE ASEO", None, "PALMIRA", None, None, None, None, None,
@@ -93,6 +93,8 @@ def test_importar_base_de_personal(admin):
     assert pedro["estado"] == "retirado" and pedro["fecha_retiro"] == "2026-09-30" and pedro["contratos"][0]["observacion"] == "ABANDONO DEL PUESTO"
     luis = _ficha(admin, "5004")["personal"]
     assert luis["pensionado"] and luis["fondo_pensiones"] == "COLPENSIONES"
+    jose = _ficha(admin, "PPT 1234567")["personal"]  # afiliado a Colpensiones: no es pensionado
+    assert not jose["pensionado"] and jose["fondo_pensiones"] == "COLPENSIONES"
     assert _ficha(admin, "5005")["puesto"] == "002 - 77 ALCALDIA"
     assert [e["documento"] for e in admin.get(f"{API}/empleados?estado=retirado").json()["data"]] == ["5005", "5003"]
     # Volver a importar no duplica contratos

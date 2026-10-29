@@ -225,7 +225,7 @@ def _aplicar_datos(e: LiqEmpleado, v: dict, hoja: str, num: int, doc: str, infor
         e.extranjero = str(v["extranjero"]).strip() in ("1", "1.0", "SI", "Si", "si")
     if v.get("fondo_pensiones") not in (None, ""):
         fondo = _texto(v["fondo_pensiones"], 120) or ""
-        if "PENSION" in _norm(fondo):  # «PENSIONADA VEJEZ - COLPENSIONES»: pensionado y su fondo
+        if "PENSIONAD" in _norm(fondo):  # «PENSIONADA VEJEZ - COLPENSIONES»: pensionado y su fondo (COLPENSIONES solo es afiliado)
             e.pensionado = True
             partes = [p.strip() for p in fondo.split("-") if p.strip()]
             poner("fondo_pensiones", partes[-1][:80] if len(partes) > 1 else None)

@@ -391,7 +391,7 @@ class LiqNovedad(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     periodo_id: Mapped[int] = mapped_column(ForeignKey("liq_periodo.id", ondelete="CASCADE"), index=True)
     empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
-    tipo: Mapped[str] = mapped_column(String(20))
+    tipo: Mapped[str] = mapped_column(String(30))
     descripcion: Mapped[str] = mapped_column(String(200))
     # Horas extras y recargos pendientes: horas por concepto y fecha en que se causaron (para la tarifa)
     horas: Mapped[dict] = mapped_column(JSON, default=dict)

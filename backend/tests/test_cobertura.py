@@ -144,3 +144,20 @@ def test_exportar_hallazgos(admin):
     _, *filas = list(load_workbook(BytesIO(r.content))["Tramos"].iter_rows(values_only=True))
     assert filas and all(f[7] == "Hueco" for f in filas)
     assert admin.get(f"/api/capacidad/analisis/{analisis_id}/hallazgos?tipo=otro").status_code == 422
+
+
+def test_turno_creado_despues_cuenta_al_recalcular(admin):
+    # La noche del 15 en el puesto 25 se programa con un turno que aún no está en el catálogo: no cuenta
+    importar_matriz(admin)
+    sin_noche = [f for f in HORARIOS if f[0] != "18:00 - 06:00"]
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(sin_noche)))
+    r = admin.post("/api/capacidad/programacion/cargas", files=archivo(xlsx(programacion({"25": ["18:00 - 06:00"]}))))
+    antes = admin.get(f"/api/capacidad/analisis/{r.json()['meta']['extra']['analisis_id']}").json()["data"]["resumen"]
+    assert antes["programadas"] == 0
+
+    # Se crea el turno en el maestro y se recalcula: cuenta como programado sin volver a subir la programación
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
+    despues = admin.post("/api/capacidad/analisis", json={"anio": 2026, "mes": 9}).json()["data"]["resumen"]
+    assert despues["programadas"] == 12 and despues["descubiertas"] == antes["descubiertas"] - 12
+    carga = admin.get("/api/capacidad/programacion/cargas").json()["data"][0]
+    assert not carga["resumen"].get("codigos_desconocidos")

@@ -43,6 +43,14 @@ def fin_contrato(m: CstMfp) -> date | None:
     return sumar_meses(m.fecha_inicio, m.duracion_meses)
 
 
+def meses_faltantes(m: CstMfp, d: date) -> float:
+    """Meses del contrato que faltan a la fecha, entre 0 y la duración. Se cuentan desde el inicio (duración −
+    transcurridos) y no desde d hasta el fin: si d cae en un día recortado (29-31 → fin de mes), contar hacia
+    adelante desde d da una fracción de más y transcurridos + faltantes no sumaría la duración."""
+    duracion = float(m.duracion_meses or 0)
+    return max(0.0, min(duracion, duracion - meses_entre(m.fecha_inicio, d)))
+
+
 def anio_contrato(m: CstMfp, d: date) -> int:
     """Año del contrato (1, 2, 3…) en que cae la fecha."""
     if not m.fecha_inicio or d < m.fecha_inicio:
@@ -117,8 +125,7 @@ def estado_item(m: CstMfp, it: CstMfpItem, hoy: date, fecha_reembolso: date | No
     fin = fin_contrato(m)
     if tipo.reembolsable and tipo.unidad != HORAS and fin and duracion:
         ref = fecha_reembolso or (m.fecha_terminacion if m.terminada and m.fecha_terminacion else hoy)
-        faltan = max(0.0, min(float(duracion), meses_entre(ref, fin)))
-        e.reembolso = round(ejecutado * faltan / duracion, 2)
+        e.reembolso = round(ejecutado * meses_faltantes(m, ref) / duracion, 2)
     return e
 
 
@@ -160,7 +167,7 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
         estado = "vencida"
     else:
         estado = "vigente"
-    meses_pendientes = max(0.0, meses_entre(m.fecha_terminacion if m.terminada and m.fecha_terminacion else hoy, fin)) if fin else None
+    meses_pendientes = meses_faltantes(m, m.fecha_terminacion if m.terminada and m.fecha_terminacion else hoy) if fin else None
     pendiente = sum(max(0.0, i.pendiente) for i in en_pesos)
 
     alertas: list[dict] = []

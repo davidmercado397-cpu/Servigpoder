@@ -3,13 +3,14 @@ bolsa de horas por año, reembolso por terminación anticipada, importación del
 
 from datetime import date, datetime
 from io import BytesIO
+from types import SimpleNamespace
 
 import openpyxl
 import pytest
 
 from app.apps.costeo.services import calculo
 from app.apps.costeo.services.calculo import PARAMETROS, Rango
-from app.apps.costeo.services.mfp import meses_entre, sumar_meses
+from app.apps.costeo.services.mfp import meses_entre, meses_faltantes, sumar_meses
 from tests.conftest import ACCESOS, archivo, entrar
 
 API = "/api/costeo"
@@ -87,6 +88,10 @@ def test_fechas_de_contrato():
     assert sumar_meses(date(2026, 1, 31), 1) == date(2026, 2, 28)
     assert meses_entre(date(2026, 3, 1), date(2027, 3, 1)) == 12
     assert meses_entre(date(2026, 3, 1), date(2026, 3, 16)) == pytest.approx(15 / 31)
+    # Mes 18 de un contrato que empieza un 29: cae en el 28 de febrero (recortado) y aun así faltan 18 exactos
+    m = SimpleNamespace(fecha_inicio=date(2025, 8, 29), duracion_meses=36)
+    assert meses_faltantes(m, sumar_meses(m.fecha_inicio, 18)) == pytest.approx(18)
+    assert meses_faltantes(m, date(2025, 1, 1)) == 36 and meses_faltantes(m, date(2029, 1, 1)) == 0
 
 
 # ---------------- MFP ----------------

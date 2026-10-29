@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { NominaPersona } from "@/components/nomina-persona";
 import { NovedadesNomina } from "@/components/novedades-nomina";
+import { ProgramacionDias } from "@/components/programacion-dias";
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
@@ -394,7 +395,7 @@ export default function DetalleQuincena() {
         </section>
       )}
 
-      {detalle && <DetallePersona detalle={detalle} onCerrar={() => setDetalle(null)} />}
+      {detalle && <DetallePersona detalle={detalle} desde={p.desde} hasta={p.hasta} onCerrar={() => setDetalle(null)} />}
     </div>
   );
 }
@@ -445,7 +446,7 @@ function UmbralSemanal({ p, editable, onGuardado, onError }: {
   );
 }
 
-function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado; dias: Dia[] }; onCerrar: () => void }) {
+function DetallePersona({ detalle, desde, hasta, onCerrar }: { detalle: { empleado: Resultado; dias: Dia[] }; desde: string; hasta: string; onCerrar: () => void }) {
   const { empleado: e, dias } = detalle;
   const usados = CONCEPTOS.filter(([k]) => e.horas[k]);
   return (
@@ -464,6 +465,7 @@ function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado;
               <span key={k} className={`rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{texto}: <b>{e.dias[k]}</b></span>
             ))}
           </div>
+          <ProgramacionDias dias={dias} desde={desde} hasta={hasta} diasAuxilio={e.nomina?.dias_auxilio} />
           {e.nomina && <NominaPersona n={e.nomina} />}
           {e.umbral_semanas && e.umbral_semanas.length > 0 && (
             <div className="overflow-auto rounded-lg border border-slate-200">

@@ -407,6 +407,23 @@ def descargar_periodo_completo(request: Request, db: DbSession, anio: int = Quer
     return _archivo(*archivo)
 
 
+@router.get("/periodos/{periodo_id}/comprobantes", dependencies=[Depends(limitar("exportar", 10, 60))])
+def descargar_comprobantes(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Comprobantes de nómina (desprendibles) en PDF, uno por página, con lo que se pagó: solo de nóminas cerradas."""
+    from app.apps.liquidador.routes.periodos import _archivo
+    from app.apps.liquidador.services import desprendibles
+
+    p = db.get(LiqPeriodo, periodo_id)
+    if p is None:
+        raise ApiError(404, "Periodo no encontrado")
+    if p.estado != CERRADA:
+        raise ApiError(409, "Los comprobantes de pago se generan de nóminas cerradas: cierre la nómina primero", "NOMINA_ABIERTA")
+    contenido, tipo, nombre = desprendibles.generar(db, p, getattr(request.state, "empresa", None))
+    auditar(db, request, "liq_comprobantes_descargados", actual.id, periodo=p.etiqueta, nomina=p.nombre)
+    db.commit()
+    return _archivo(contenido, tipo, nombre)
+
+
 @router.get("/periodos/{periodo_id}/nomina", dependencies=[Depends(limitar("exportar", 10, 60))])
 def descargar_nomina(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     from app.apps.liquidador.routes.periodos import _archivo

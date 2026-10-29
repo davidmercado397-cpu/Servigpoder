@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Banknote, Download, FileDown, FileSpreadsheet, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
+import { ArrowLeft, Banknote, Download, FileDown, FileSpreadsheet, FileText, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -289,6 +289,17 @@ export default function DetalleQuincena() {
                   <Banknote className="h-4 w-4" /> Nómina
                 </a>
               )}
+              {verNomina && (cerrada ? (
+                <a className="btn-secundario inline-flex items-center gap-1.5" href={`/api/liquidador/periodos/${id}/comprobantes`}
+                  title="Comprobantes de nómina en PDF, uno por página, con lo que se pagó">
+                  <FileText className="h-4 w-4" /> Comprobantes de pago
+                </a>
+              ) : (
+                <span className="btn-secundario inline-flex cursor-not-allowed items-center gap-1.5 opacity-50"
+                  title="Los comprobantes de pago se generan cuando la nómina está cerrada">
+                  <FileText className="h-4 w-4" /> Comprobantes de pago
+                </span>
+              ))}
               {verNomina && (
                 <a className="btn-secundario inline-flex items-center gap-1.5"
                   href={`/api/liquidador/nominas-del-periodo/excel?anio=${p.anio}&mes=${p.mes}&quincena=${p.quincena}`}

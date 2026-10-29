@@ -9,7 +9,7 @@ import { pesos } from "@/lib/formato";
 import { CONCEPTOS_PAGO, TIPOS_NOVEDAD, type Hallazgo, type Novedad } from "@/lib/liquidador";
 
 type Formulario = {
-  documento: string; tipo: string; descripcion: string; valor: string; fecha_causacion: string; salarial: boolean; nomina_origen: string;
+  documento: string; tipo: string; descripcion: string; valor: string; fecha_causacion: string; salarial: boolean;
   horas: Record<string, string>;
 };
 const DE_HORAS = ["horas_extras", "recargos"];
@@ -21,7 +21,7 @@ function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
   const [f, setF] = useState<Formulario>(() => ({
     documento: registro?.documento ?? "", tipo: registro?.tipo ?? "menor_valor", descripcion: registro?.descripcion ?? "",
     valor: registro?.valor_escrito?.toString() ?? "", fecha_causacion: registro?.fecha_causacion ?? "", salarial: registro?.salarial ?? true,
-    nomina_origen: registro?.nomina_origen ?? "", horas: Object.fromEntries(Object.entries(registro?.horas ?? {}).map(([k, v]) => [k, String(v)])),
+    horas: Object.fromEntries(Object.entries(registro?.horas ?? {}).map(([k, v]) => [k, String(v)])),
   }));
   const [error, setError] = useState("");
   const cambiar = (c: Partial<Formulario>) => setF({ ...f, ...c });
@@ -33,7 +33,7 @@ function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
     setError("");
     const horas = deHoras ? Object.fromEntries(Object.entries(f.horas).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)])) : {};
     const datos = { documento: f.documento, tipo: f.tipo, descripcion: f.descripcion, horas, valor: f.valor ? Number(f.valor) : null,
-      fecha_causacion: deHoras && f.fecha_causacion ? f.fecha_causacion : null, salarial: f.salarial, nomina_origen: f.nomina_origen || null };
+      fecha_causacion: deHoras && f.fecha_causacion ? f.fecha_causacion : null, salarial: f.salarial, nomina_origen: registro?.nomina_origen ?? null };
     try {
       await api(registro ? `/liquidador/novedades/${registro.id}` : `/liquidador/periodos/${periodoId}/novedades`,
         { method: registro ? "PUT" : "POST", json: datos });
@@ -66,10 +66,6 @@ function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
           <label className="label">Descripción</label>
           <input className="input" required maxLength={200} value={f.descripcion} placeholder="p. ej. Recargos dominicales no pagados en octubre"
             onChange={(e) => cambiar({ descripcion: e.target.value })} />
-        </div>
-        <div>
-          <label className="label">Nómina de origen</label>
-          <input className="input" maxLength={80} value={f.nomina_origen} placeholder="p. ej. Octubre 2.ª quincena" onChange={(e) => cambiar({ nomina_origen: e.target.value })} />
         </div>
         {deHoras && (
           <div>

@@ -1,7 +1,7 @@
 """Novedades manuales de nómina: plantilla de Excel e importación (el archivo se procesa y se descarta).
 
 Plantilla: una fila por novedad con la cédula, el tipo, la descripción, el valor o las horas por concepto (horas extras y
-recargos pendientes), la fecha en que se causaron, la nómina de origen y si es salarial (solo «otro devengo»).
+recargos pendientes), la fecha en que se causaron y si es salarial (solo «otro devengo»).
 Importar reemplaza las novedades cargadas antes por Excel en esa nómina; las registradas a mano se conservan.
 """
 
@@ -23,7 +23,7 @@ TIPOS = {AUXILIO_VARIABLE: "Auxilio no prestacional variable", MAYOR_VALOR: "May
          RECARGOS_PENDIENTES: "Recargos pendientes", OTRO_DEVENGO: "Otro devengo", OTRA_DEDUCCION: "Otra deducción"}
 # Concepto de horas → encabezado de la plantilla (los mismos nombres del archivo de liquidación)
 COLUMNAS_HORAS = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
-ENCABEZADO = ("CEDULA", "NOMBRE", "TIPO", "DESCRIPCION", "VALOR", "FECHA CAUSACION", "NOMINA ORIGEN", "SALARIAL",
+ENCABEZADO = ("CEDULA", "NOMBRE", "TIPO", "DESCRIPCION", "VALOR", "FECHA CAUSACION", "SALARIAL",
               *(t for _, t in COLUMNAS_HORAS))
 
 
@@ -43,7 +43,7 @@ def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     hoja.append(list(ENCABEZADO))
     for celda in hoja[1]:
         celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
-    hoja.append(["", "", "", "", "", "", "", ""] + [""] * len(COLUMNAS_HORAS))
+    hoja.append([""] * len(ENCABEZADO))
     _autoajustar(hoja, minimo=12, maximo=26)
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 42

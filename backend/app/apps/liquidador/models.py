@@ -397,6 +397,25 @@ class LiqNovedad(Base):
     empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
 
 
+class LiqSiigoCarga(Base):
+    """Datos leídos del reporte de netos de Siigo de un periodo, para volver a comparar sin subir el archivo otra vez.
+    Se guardan los datos (no el archivo) y se borran solos al vencer (24 horas); subir otro reporte los reemplaza."""
+
+    __tablename__ = "liq_siigo_carga"
+    __table_args__ = (UniqueConstraint("anio", "mes", "quincena"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anio: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    quincena: Mapped[int] = mapped_column(Integer)
+    archivo: Mapped[str] = mapped_column(String(255))
+    personas: Mapped[list] = mapped_column(JSON, default=list)  # [{documento, nombre, hojas: [{hoja, ingresos, deducciones, neto}]}]
+    hallazgos: Mapped[list] = mapped_column(JSON, default=list)
+    cargado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    vence_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 # ---------------- Gestión humana: salud y casos jurídicos (repositorio de consulta; no afecta la nómina) ----------------
 # Se registran por documento: la persona puede no estar (o ya no estar) en la base de empleados.
 

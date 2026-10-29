@@ -2,19 +2,23 @@
 NETO A PAGAR) contra lo liquidado aquí en todas las nóminas del mismo periodo. Se cruza persona por persona sumando
 sus nóminas en cada lado, para que no importe cómo se repartieron. El archivo se procesa y se descarta.
 
+Los datos leídos (no el archivo) quedan 24 horas por periodo para volver a comparar contra la nómina actual sin subirlo
+otra vez; después se borran solos.
+
 Las posibles causas son pistas: se busca qué concepto liquidado aquí explica la diferencia (recargos, extras, auxilio de
 transporte, auxilios no prestacionales, vacaciones, incapacidad, novedades, días de salario, descuentos).
 """
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.apps.liquidador.models import LiqPeriodo, LiqResultado
+from app.apps.liquidador.models import LiqPeriodo, LiqResultado, LiqSiigoCarga
 from app.apps.liquidador.services.exportar import XLSX, _CENTRO, _FUENTE, _RELLENO, _autoajustar, _guardar
 from app.apps.liquidador.services.personal import ErrorArchivo, Indice, _abrir, _norm, _texto, documento
 
@@ -37,6 +41,7 @@ class PersonaSiigo:
     ingresos: float = 0.0
     deducciones: float = 0.0
     neto: float = 0.0
+    detalle: list[dict] = field(default_factory=list)  # una entrada por hoja (nómina de Siigo) donde aparece
 
 
 def _num(v) -> float | None:
@@ -48,11 +53,14 @@ def _num(v) -> float | None:
         return None
 
 
-def leer(contenido: bytes) -> tuple[dict[str, PersonaSiigo], list[dict], dict[str, float]]:
-    """(personas por documento, hallazgos, neto total de cada hoja)."""
+VIGENCIA = timedelta(hours=24)
+
+
+def leer(contenido: bytes) -> tuple[dict[str, PersonaSiigo], list[dict]]:
+    """(personas por documento, hallazgos)."""
     libro = _abrir(contenido)
     personas: dict[str, PersonaSiigo] = {}
-    hallazgos, por_hoja = [], {}
+    hallazgos = []
     for hoja in libro.worksheets:
         cols: dict[str, int] = {}
         for num, fila in enumerate(hoja.iter_rows(values_only=True), start=1):
@@ -74,14 +82,49 @@ def leer(contenido: bytes) -> tuple[dict[str, PersonaSiigo], list[dict], dict[st
                 hallazgos.append({"hoja": hoja.title, "fila": num, "documento": doc, "detalle": "Sin neto a pagar: no se comparó"})
                 continue
             p = personas.setdefault(doc, PersonaSiigo(doc, _texto(v("nombre"), 200) or doc))
+            ingresos, deducciones = _num(v("ingresos")) or 0.0, _num(v("deducciones")) or 0.0
             p.hojas.append(hoja.title)
-            p.ingresos += _num(v("ingresos")) or 0.0
-            p.deducciones += _num(v("deducciones")) or 0.0
+            p.detalle.append({"hoja": hoja.title, "ingresos": ingresos, "deducciones": deducciones, "neto": neto})
+            p.ingresos += ingresos
+            p.deducciones += deducciones
             p.neto += neto
-            por_hoja[hoja.title] = por_hoja.get(hoja.title, 0.0) + neto
     if not personas:
         raise ErrorArchivo("No se encontraron filas con CEDULA y NETO A PAGAR. Use el reporte de netos de nómina de Siigo.")
-    return personas, hallazgos, por_hoja
+    return personas, hallazgos
+
+
+def purgar(db: Session) -> None:
+    db.execute(delete(LiqSiigoCarga).where(LiqSiigoCarga.vence_en < datetime.now(timezone.utc)))
+
+
+def guardar(db: Session, anio: int, mes: int, quincena: int, contenido: bytes, archivo: str, usuario_id: int | None) -> LiqSiigoCarga:
+    """Lee el reporte y deja sus datos 24 horas para el periodo (reemplaza los anteriores)."""
+    personas, hallazgos = leer(contenido)
+    purgar(db)
+    db.execute(delete(LiqSiigoCarga).where(LiqSiigoCarga.anio == anio, LiqSiigoCarga.mes == mes, LiqSiigoCarga.quincena == quincena))
+    ahora = datetime.now(timezone.utc)
+    c = LiqSiigoCarga(anio=anio, mes=mes, quincena=quincena, archivo=archivo[:255], hallazgos=hallazgos, cargado_por=usuario_id,
+                      cargado_en=ahora, vence_en=ahora + VIGENCIA,
+                      personas=[{"documento": p.documento, "nombre": p.nombre, "hojas": p.detalle} for p in personas.values()])
+    db.add(c)
+    db.flush()
+    return c
+
+
+def vigente(db: Session, anio: int, mes: int, quincena: int) -> LiqSiigoCarga | None:
+    purgar(db)
+    return db.scalar(select(LiqSiigoCarga).where(LiqSiigoCarga.anio == anio, LiqSiigoCarga.mes == mes, LiqSiigoCarga.quincena == quincena))
+
+
+def _personas(c: LiqSiigoCarga) -> dict[str, PersonaSiigo]:
+    out = {}
+    for x in c.personas:
+        p = PersonaSiigo(x["documento"], x["nombre"], [h["hoja"] for h in x["hojas"]], detalle=x["hojas"])
+        p.ingresos = sum(h["ingresos"] for h in x["hojas"])
+        p.deducciones = sum(h["deducciones"] for h in x["hojas"])
+        p.neto = sum(h["neto"] for h in x["hojas"])
+        out[p.documento] = p
+    return out
 
 
 def _pistas(dif: float, componentes: dict[str, float], lista, tolerancia: float, verbo: str) -> list[str]:
@@ -93,8 +136,14 @@ def _pistas(dif: float, componentes: dict[str, float], lista, tolerancia: float,
             for campo, texto in lista if (valor := componentes.get(campo, 0.0)) and abs(dif - valor) <= margen]
 
 
-def comparar(db: Session, anio: int, mes: int, quincena: int, contenido: bytes, tolerancia: float = 1.0) -> dict:
-    siigo, hallazgos, por_hoja = leer(contenido)
+def comparar(db: Session, carga: LiqSiigoCarga, tolerancia: float = 1.0) -> dict:
+    """Compara los datos de Siigo guardados con lo liquidado ahora en todas las nóminas del periodo."""
+    anio, mes, quincena = carga.anio, carga.mes, carga.quincena
+    siigo, hallazgos = _personas(carga), carga.hallazgos
+    por_hoja: dict[str, float] = {}
+    for s in siigo.values():
+        for h in s.detalle:
+            por_hoja[h["hoja"]] = por_hoja.get(h["hoja"], 0.0) + h["neto"]
     nominas = list(db.scalars(select(LiqPeriodo).where(LiqPeriodo.anio == anio, LiqPeriodo.mes == mes, LiqPeriodo.quincena == quincena)
                               .order_by(LiqPeriodo.id)))
     if not nominas:
@@ -125,7 +174,7 @@ def comparar(db: Session, anio: int, mes: int, quincena: int, contenido: bytes, 
         propio = nuestras.get(e.documento) if e else None
         if propio is None:
             filas.append({"documento": doc, "nombre": s.nombre, "estado": "solo_siigo", "hojas_siigo": s.hojas, "nominas": [],
-                          "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto}, "sistema": None,
+                          "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto, "hojas": s.detalle}, "sistema": None,
                           "diferencia": {"ingresos": -s.ingresos, "deducciones": -s.deducciones, "neto": -s.neto},
                           "pistas": ["No está liquidado aquí en este periodo"]})
             continue
@@ -150,7 +199,7 @@ def comparar(db: Session, anio: int, mes: int, quincena: int, contenido: bytes, 
                 pistas += dp
         filas.append({"documento": e.documento, "nombre": propio["nombre"], "empleado_id": propio["empleado_id"],
                       "estado": "cuadra" if cuadra else "diferencia", "hojas_siigo": s.hojas, "nominas": propio["nominas"],
-                      "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto},
+                      "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto, "hojas": s.detalle},
                       "sistema": {c: round(propio[c], 2) for c in CAMPOS_SISTEMA}, "diferencia": {k: round(v, 2) for k, v in dif.items()},
                       "pistas": pistas})
     for doc, propio in nuestras.items():
@@ -175,6 +224,7 @@ def comparar(db: Session, anio: int, mes: int, quincena: int, contenido: bytes, 
         "hojas_siigo": {k: round(v, 2) for k, v in por_hoja.items()},
         "nominas_sistema": {k: round(v, 2) for k, v in por_nomina.items()},
         "filas": filas, "hallazgos": hallazgos,
+        "carga": {"archivo": carga.archivo, "cargado_en": carga.cargado_en.isoformat(), "vence_en": carga.vence_en.isoformat()},
     }
 
 

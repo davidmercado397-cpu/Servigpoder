@@ -428,23 +428,66 @@ def pagado_por_mes_excel(request: Request, db: DbSession, anio: int = Query(ge=2
 
 # --- Comparación con Siigo ---
 
-@router.post("/comparar-siigo", dependencies=[Depends(limitar("liq_siigo", 10, 60))])
-async def comparar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
-                         mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1, ge=0, le=1_000_000),
-                         formato: str = Form("json", pattern="^(json|excel)$"), actual: Usuario = Depends(require(VER))):
-    """Cruza el reporte de netos de Siigo con todas las nóminas del periodo, persona por persona. El archivo no se guarda."""
-    from app.apps.liquidador.routes.periodos import _archivo
+def _etiqueta(anio: int, mes: int, quincena: int) -> str:
+    return f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"
+
+
+@router.post("/comparar-siigo", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_siigo", 10, 60))])
+async def cargar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
+                       mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1, ge=0, le=1_000_000),
+                       actual: Usuario = Depends(require(VER))):
+    """Lee el reporte de netos de Siigo del periodo y lo compara con todas las nóminas liquidadas aquí. Los datos leídos
+    quedan 24 horas para volver a comparar sin subirlo; el archivo no se guarda."""
     from app.apps.liquidador.services.personal import ErrorArchivo
 
     contenido = await leer_xlsx(archivo)
     try:
-        res = siigo.comparar(db, anio, mes, quincena, contenido, tolerancia)
+        carga = siigo.guardar(db, anio, mes, quincena, contenido, archivo.filename or "siigo.xlsx", actual.id)
+        res = siigo.comparar(db, carga, tolerancia)
     except ErrorArchivo as e:
+        db.rollback()
         raise ApiError(422, str(e), "EXCEL_INVALIDO") from e
     r = res["resumen"]
     auditar(db, request, "liq_comparacion_siigo", actual.id, anio=anio, mes=mes, quincena=quincena, con_diferencia=r["con_diferencia"],
-            solo_siigo=r["solo_siigo"], solo_sistema=r["solo_sistema"], formato=formato)
+            solo_siigo=r["solo_siigo"], solo_sistema=r["solo_sistema"])
     db.commit()
-    if formato == "excel":
-        return _archivo(*siigo.excel(res, f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"))
     return ok(res)
+
+
+def _carga(db, anio: int, mes: int, quincena: int):
+    c = siigo.vigente(db, anio, mes, quincena)
+    if c is None:
+        db.commit()
+        raise ApiError(404, "No hay un reporte de Siigo cargado para ese periodo en las últimas 24 horas", "SIN_CARGA")
+    return c
+
+
+@router.get("/comparar-siigo", response_model=ApiResponse[dict])
+def comparar_siigo(db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12), quincena: int = Query(ge=0, le=2),
+                   tolerancia: float = Query(1, ge=0, le=1_000_000), _=Depends(require(VER))):
+    """Vuelve a comparar el reporte guardado del periodo contra la nómina actual."""
+    res = siigo.comparar(db, _carga(db, anio, mes, quincena), tolerancia)
+    db.commit()
+    return ok(res)
+
+
+@router.get("/comparar-siigo/excel", dependencies=[Depends(limitar("exportar", 10, 60))])
+def comparar_siigo_excel(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                         quincena: int = Query(ge=0, le=2), tolerancia: float = Query(1, ge=0, le=1_000_000),
+                         actual: Usuario = Depends(require(VER))):
+    from app.apps.liquidador.routes.periodos import _archivo
+
+    res = siigo.comparar(db, _carga(db, anio, mes, quincena), tolerancia)
+    auditar(db, request, "liq_comparacion_siigo_descargada", actual.id, anio=anio, mes=mes, quincena=quincena)
+    db.commit()
+    return _archivo(*siigo.excel(res, _etiqueta(anio, mes, quincena)))
+
+
+@router.delete("/comparar-siigo", response_model=ApiResponse[dict])
+def quitar_siigo(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                 quincena: int = Query(ge=0, le=2), actual: Usuario = Depends(require(VER))):
+    c = _carga(db, anio, mes, quincena)
+    db.delete(c)
+    auditar(db, request, "liq_comparacion_siigo_quitada", actual.id, anio=anio, mes=mes, quincena=quincena)
+    db.commit()
+    return ok({"quitada": True})

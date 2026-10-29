@@ -116,7 +116,7 @@ def _siigo(hojas: dict[str, list[list]]) -> bytes:
     return buf.getvalue()
 
 
-def test_excel_del_periodo_y_comparacion_con_siigo(admin):
+def test_excel_del_periodo_y_comparacion_con_siigo(admin, en_empresa):
     general = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], DIAS)
     otra = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Cliente 2"}).json()["data"]["id"]
     _cargar(admin, otra, xlsx([["documento", "NOVIEMBRE", 1, 2], [3003, "3003", "A", "A"]]))
@@ -146,11 +146,35 @@ def test_excel_del_periodo_y_comparacion_con_siigo(admin):
     filas = {f["documento"]: f for f in d["filas"]}
     assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == round(b["auxilio"], 2)
     assert any("auxilio de transporte" in p for p in filas["2002"]["pistas"])
+    assert filas["2002"]["siigo"]["hojas"] == [{"hoja": "UNIDADES", "ingresos": b["devengado"] - b["auxilio"], "deducciones": b["deducciones"],
+                                                "neto": b["neto"] - b["auxilio"]}]
     assert filas["4004"]["estado"] == "solo_siigo" and filas["3003"]["estado"] == "solo_sistema"
     assert d["hojas_siigo"]["CVC"] == 460000 and set(d["nominas_sistema"]) == {"General", "Cliente 2"}
     assert round(d["resumen"]["neto_sistema"], 2) == round(a["neto"] + b["neto"] + c["neto"], 2)
 
-    r = admin.post(f"{API}/comparar-siigo", files=archivo(siigo, "netos.xlsx"), data={**datos, "formato": "excel"})
+    assert d["carga"]["archivo"] == "netos.xlsx"
+
+    # Los datos quedan 24 horas: se vuelve a comparar sin subir el archivo, contra la nómina actual
+    consulta = "anio=2026&mes=11&quincena=1"
+    r = admin.get(f"{API}/comparar-siigo/excel?{consulta}")
     assert r.status_code == 200 and load_workbook(BytesIO(r.content)).sheetnames == ["Comparacion", "Resumen"]
+    admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "cuota", "descripcion": "Exequial", "valor_mensual": 20000,
+                                          "desde": "2026-11-01"})
+    admin.post(f"{API}/periodos/{general}/recalcular")
+    otra_vez = admin.get(f"{API}/comparar-siigo?{consulta}").json()["data"]
+    assert {f["documento"]: f for f in otra_vez["filas"]}["1001"]["estado"] == "diferencia"
+    assert admin.get(f"{API}/comparar-siigo?anio=2026&mes=11&quincena=2").status_code == 404
+
+    # Vencidos (más de 24 horas) se borran solos
+    from datetime import datetime, timedelta, timezone
+
+    from app.apps.liquidador.models import LiqSiigoCarga
+
+    s = en_empresa("sera")
+    s.query(LiqSiigoCarga).update({"vence_en": datetime.now(timezone.utc) - timedelta(minutes=1)})
+    s.commit()
+    assert admin.get(f"{API}/comparar-siigo?{consulta}").status_code == 404
+    assert s.query(LiqSiigoCarga).count() == 0
+
     vacio = admin.post(f"{API}/comparar-siigo", files=archivo(xlsx([["hola"]]), "x.xlsx"), data=datos)
     assert vacio.status_code == 422

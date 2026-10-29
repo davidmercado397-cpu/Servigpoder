@@ -374,7 +374,9 @@ class LiqVacacionSalida(Base):
 MAYOR_VALOR, MENOR_VALOR = "mayor_valor", "menor_valor"
 HORAS_EXTRAS, RECARGOS_PENDIENTES = "horas_extras", "recargos"
 OTRO_DEVENGO, OTRA_DEDUCCION = "otro_devengo", "otra_deduccion"
-AUXILIO_VARIABLE = "auxilio_variable"  # auxilio no prestacional de una sola nómina (p. ej. rodamiento intermunicipal)
+AUXILIO_VARIABLE = "auxilio_variable"  # auxilio no prestacional de una sola nómina
+AUXILIO_INTERMUNICIPAL = "auxilio_intermunicipal"  # rodamiento por transporte intermunicipal: no prestacional, de una sola nómina
+AUXILIOS_VARIABLES = (AUXILIO_VARIABLE, AUXILIO_INTERMUNICIPAL)  # se pagan con los auxilios no prestacionales
 NOVEDADES_DEDUCCION = (MAYOR_VALOR, OTRA_DEDUCCION)
 NOVEDADES_HORAS = (HORAS_EXTRAS, RECARGOS_PENDIENTES)
 

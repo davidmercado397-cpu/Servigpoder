@@ -57,7 +57,8 @@ function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
         </div>
         <div>
           <label className="label">Tipo</label>
-          <select className="input" value={f.tipo} onChange={(e) => cambiar({ tipo: e.target.value, horas: {} })}>
+          <select className="input" value={f.tipo} onChange={(e) => cambiar({ tipo: e.target.value, horas: {},
+            descripcion: e.target.value === "auxilio_intermunicipal" && !f.descripcion ? "Auxilio intermunicipal" : f.descripcion })}>
             {TIPOS_NOVEDAD.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
           <p className="mt-1 text-xs text-slate-500">{TIPOS_NOVEDAD.find(([v]) => v === f.tipo)?.[2]}</p>

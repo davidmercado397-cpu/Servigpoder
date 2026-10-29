@@ -316,3 +316,16 @@ def test_pensionado_no_descuenta_pension(en_empresa, admin):
         admin.post(f"{API}/periodos/{pid}/recalcular")
         n = _nomina(admin, pid, "1001")
         assert n["pensionado"] and n["pension"] == 0 and n["pension_pct"] == 0 and n["salud"] > 0
+
+
+def test_auxilio_intermunicipal(admin):
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 13 + ["AUS"] * 2)]], DIAS)
+    n0 = _nomina(admin, pid, "1001")
+    r = admin.post(f"{API}/periodos/{pid}/novedades", json={"documento": "1001", "tipo": "auxilio_intermunicipal",
+                                                           "descripcion": "Auxilio intermunicipal", "valor": 60000})
+    assert r.status_code == 201, r.text
+    n = _nomina(admin, pid, "1001")
+    # No prestacional y completo aunque tenga ausencias: no cambia la base de salud y pensión
+    assert n["auxilios_no_prestacionales"] == 60000 and n["ibc"] == n0["ibc"] and n["devengado"] == n0["devengado"] + 60000
+    assert any("intermunicipal" in x["calculo"] for x in n["auxilios"])
+    assert admin.get(f"{API}/periodos/{pid}/novedades").json()["data"][0]["valor"] == 60000

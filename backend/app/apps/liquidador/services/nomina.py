@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.apps.liquidador.dominio.tipos import HourConcept
 from app.apps.liquidador.models import (
-    AUXILIO_VARIABLE, CUOTA, EMBARGO, MENSUAL, NOVEDADES_DEDUCCION, NOVEDADES_HORAS, PRESTAMO, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado,
+    AUXILIOS_VARIABLES, CUOTA, EMBARGO, MENSUAL, NOVEDADES_DEDUCCION, NOVEDADES_HORAS, PRESTAMO, LiqAuxilio, LiqDescuento, LiqDia, LiqEmpleado,
     LiqNovedad, LiqPeriodo, LiqResultado, LiqTarifa,
 )
 from app.apps.liquidador.services import festivos, vacaciones as vac
@@ -364,14 +364,14 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             calculo += f" − {dias_descuento} día(s) ({motivo}) × {x.valor_mensual / 30:,.0f}"
         aux_aplicados.append({"id": x.id, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo})
     # Auxilios variables de esta nómina (novedades): por su valor, sin descuento por tiempo no laborado
-    for x in sorted((x for x in novedades or [] if x.tipo == AUXILIO_VARIABLE), key=lambda x: x.id):
+    for x in sorted((x for x in novedades or [] if x.tipo in AUXILIOS_VARIABLES), key=lambda x: x.id):
         aux_aplicados.append({"id": f"nov-{x.id}", "descripcion": x.descripcion, "valor": float(_pesos(x.valor or Decimal("0"))),
-                              "calculo": "auxilio variable de esta nómina" + (f" · origen: {x.nomina_origen}" if x.nomina_origen else "")})
+                              "calculo": ("auxilio intermunicipal" if x.tipo == "auxilio_intermunicipal" else "auxilio variable") + " de esta nómina" + (f" · origen: {x.nomina_origen}" if x.nomina_origen else "")})
     no_prestacional = sum((Decimal(str(x["valor"])) for x in aux_aplicados), Decimal("0"))
 
     # Novedades manuales de esta nómina
     nov_aplicadas, nov_salarial, nov_no_salarial, nov_deducciones = [], Decimal("0"), Decimal("0"), []
-    for x in sorted((x for x in novedades or [] if x.tipo != AUXILIO_VARIABLE), key=lambda x: x.id):
+    for x in sorted((x for x in novedades or [] if x.tipo not in AUXILIOS_VARIABLES), key=lambda x: x.id):
         valor, calculo = valor_novedad(x, empleado, tarifas, periodo)
         deduccion = x.tipo in NOVEDADES_DEDUCCION
         item = {"id": x.id, "tipo": x.tipo, "descripcion": x.descripcion, "valor": float(valor), "calculo": calculo,

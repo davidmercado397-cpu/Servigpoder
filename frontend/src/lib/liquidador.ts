@@ -72,7 +72,8 @@ export type Novedad = {
 };
 
 export const TIPOS_NOVEDAD: [string, string, string][] = [
-  ["auxilio_variable", "Auxilio no prestacional variable", "Se paga solo en esta nómina (p. ej. rodamiento intermunicipal); no hace base de salud y pensión"],
+  ["auxilio_intermunicipal", "Auxilio intermunicipal", "Rodamiento por transporte intermunicipal: no prestacional, se paga solo en esta nómina y no hace base de salud y pensión"],
+  ["auxilio_variable", "Auxilio no prestacional variable", "Otro auxilio no prestacional que se paga solo en esta nómina; no hace base de salud y pensión"],
   ["mayor_valor", "Mayor valor pagado", "Se descuenta: se pagó de más en una nómina anterior"],
   ["menor_valor", "Menor valor pagado", "Se paga: se pagó de menos en una nómina anterior (hace base de salud y pensión)"],
   ["horas_extras", "Horas extras pendientes", "Horas por concepto valoradas con la tarifa de la fecha en que se causaron"],

@@ -154,7 +154,7 @@ def fila_nomina(r: LiqResultado) -> list:
             n.get("horas_pagadas", 0) if n.get("por_horas") else None]
 
 
-TIPOS_NOVEDAD = {"auxilio_variable": "Auxilio no prestacional variable", "mayor_valor": "Mayor valor pagado", "menor_valor": "Menor valor pagado", "horas_extras": "Horas extras pendientes",
+TIPOS_NOVEDAD = {"auxilio_intermunicipal": "Auxilio intermunicipal", "auxilio_variable": "Auxilio no prestacional variable", "mayor_valor": "Mayor valor pagado", "menor_valor": "Menor valor pagado", "horas_extras": "Horas extras pendientes",
                  "recargos": "Recargos pendientes", "otro_devengo": "Otro devengo", "otra_deduccion": "Otra deducción"}
 
 

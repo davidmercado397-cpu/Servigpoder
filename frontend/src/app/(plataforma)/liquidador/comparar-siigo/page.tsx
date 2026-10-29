@@ -109,7 +109,7 @@ export default function CompararSiigo() {
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth() + 1);
   const [quincena, setQuincena] = useState(hoy.getDate() > 15 ? 2 : 1);
-  const [tolerancia, setTolerancia] = useState("1");
+  const [tolerancia, setTolerancia] = useState("1000");  // diferencias de hasta $1.000 por persona se toman como cuadradas
   const [archivo, setArchivo] = useState<File | null>(null);
   const [res, setRes] = useState<Resultado | null>(null);
   const [vista, setVista] = useState<Vista>("diferencia");

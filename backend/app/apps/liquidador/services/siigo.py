@@ -136,7 +136,7 @@ def _pistas(dif: float, componentes: dict[str, float], lista, tolerancia: float,
             for campo, texto in lista if (valor := componentes.get(campo, 0.0)) and abs(dif - valor) <= margen]
 
 
-def comparar(db: Session, carga: LiqSiigoCarga, tolerancia: float = 1.0) -> dict:
+def comparar(db: Session, carga: LiqSiigoCarga, tolerancia: float = 1000.0) -> dict:
     """Compara los datos de Siigo guardados con lo liquidado ahora en todas las nóminas del periodo."""
     anio, mes, quincena = carga.anio, carga.mes, carga.quincena
     siigo, hallazgos = _personas(carga), carga.hallazgos

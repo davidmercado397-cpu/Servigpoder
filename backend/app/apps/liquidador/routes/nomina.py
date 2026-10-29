@@ -434,7 +434,7 @@ def _etiqueta(anio: int, mes: int, quincena: int) -> str:
 
 @router.post("/comparar-siigo", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_siigo", 10, 60))])
 async def cargar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
-                       mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1, ge=0, le=1_000_000),
+                       mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1000, ge=0, le=1_000_000),
                        actual: Usuario = Depends(require(VER))):
     """Lee el reporte de netos de Siigo del periodo y lo compara con todas las nóminas liquidadas aquí. Los datos leídos
     quedan 24 horas para volver a comparar sin subirlo; el archivo no se guarda."""
@@ -464,7 +464,7 @@ def _carga(db, anio: int, mes: int, quincena: int):
 
 @router.get("/comparar-siigo", response_model=ApiResponse[dict])
 def comparar_siigo(db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12), quincena: int = Query(ge=0, le=2),
-                   tolerancia: float = Query(1, ge=0, le=1_000_000), _=Depends(require(VER))):
+                   tolerancia: float = Query(1000, ge=0, le=1_000_000), _=Depends(require(VER))):
     """Vuelve a comparar el reporte guardado del periodo contra la nómina actual."""
     res = siigo.comparar(db, _carga(db, anio, mes, quincena), tolerancia)
     db.commit()
@@ -473,7 +473,7 @@ def comparar_siigo(db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int 
 
 @router.get("/comparar-siigo/excel", dependencies=[Depends(limitar("exportar", 10, 60))])
 def comparar_siigo_excel(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
-                         quincena: int = Query(ge=0, le=2), tolerancia: float = Query(1, ge=0, le=1_000_000),
+                         quincena: int = Query(ge=0, le=2), tolerancia: float = Query(1000, ge=0, le=1_000_000),
                          actual: Usuario = Depends(require(VER))):
     from app.apps.liquidador.routes.periodos import _archivo
 

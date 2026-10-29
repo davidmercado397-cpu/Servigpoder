@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, FileSpreadsheet, GitCompare, Plus } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, GitCompare, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -39,6 +39,8 @@ export default function Quincenas() {
   const [lista, setLista] = useState<Periodo[] | null>(null);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [recalculando, setRecalculando] = useState<string | null>(null);
   const pag = usePaginacion();
   const campoNombre = useRef<HTMLInputElement>(null);
 
@@ -60,6 +62,28 @@ export default function Quincenas() {
       router.push(`/liquidador/quincenas/${p.id}`);
     } catch (err) {
       setError(mensajeError(err));
+    }
+  }
+
+  async function recalcularTodo(g: Grupo) {
+    if (!window.confirm(`¿Recalcular todas las nóminas abiertas de ${MESES[g.mes - 1]} ${g.anio} · ${nombrePeriodo(g)}? `
+      + "Se vuelven a calcular con los turnos, préstamos, cuotas, auxilios y novedades vigentes. Las cerradas no cambian.")) return;
+    setError("");
+    setAviso("");
+    setRecalculando(g.clave);
+    try {
+      const r = await api<{ recalculadas: string[]; cerradas: string[]; sin_excel: string[] }>("/liquidador/nominas-del-periodo/recalcular",
+        { method: "POST", json: { anio: g.anio, mes: g.mes, quincena: g.quincena } });
+      setAviso([
+        r.recalculadas.length ? `Recalculadas: ${r.recalculadas.join(", ")}.` : "No había nóminas abiertas con Excel para recalcular.",
+        r.cerradas.length ? `Cerradas (no cambian): ${r.cerradas.join(", ")}.` : "",
+        r.sin_excel.length ? `Sin Excel cargado: ${r.sin_excel.join(", ")}.` : "",
+      ].filter(Boolean).join(" "));
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err));
+    } finally {
+      setRecalculando(null);
     }
   }
 
@@ -122,6 +146,7 @@ export default function Quincenas() {
         </form>
       )}
       {error && <Alerta>{error}</Alerta>}
+      {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 
       <div className="tarjeta overflow-auto">
         <table className="tabla">
@@ -130,7 +155,8 @@ export default function Quincenas() {
           </thead>
           <tbody>
             {lista && agrupar(lista).map((g) => (
-              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} verNomina={verNomina} onAgregar={() => agregarA(g)} />
+              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} verNomina={verNomina} onAgregar={() => agregarA(g)}
+                ocupado={recalculando === g.clave} onRecalcular={() => recalcularTodo(g)} />
             ))}
           </tbody>
         </table>
@@ -141,7 +167,9 @@ export default function Quincenas() {
   );
 }
 
-function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestionar: boolean; verNomina: boolean; onAgregar: () => void }) {
+function PeriodoFilas({ g, gestionar, verNomina, onAgregar, onRecalcular, ocupado }: {
+  g: Grupo; gestionar: boolean; verNomina: boolean; onAgregar: () => void; onRecalcular: () => void; ocupado: boolean;
+}) {
   const personas = g.nominas.reduce((s, p) => s + p.empleados, 0);
   return (
     <>
@@ -166,6 +194,12 @@ function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestio
                   <GitCompare className="h-4 w-4" /> Comparar con Siigo
                 </Link>
               </>
+            )}
+            {gestionar && g.nominas.some((p) => p.estado === "calculada") && (
+              <button onClick={onRecalcular} disabled={ocupado} title="Recalcula todas las nóminas abiertas de este periodo"
+                className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${ocupado ? "animate-spin" : ""}`} /> {ocupado ? "Recalculando…" : "Recalcular todas"}
+              </button>
             )}
             {gestionar && (
               <button onClick={onAgregar} className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline">

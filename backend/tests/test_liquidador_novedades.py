@@ -356,3 +356,19 @@ def test_importar_cuotas_desde_la_lista_de_la_entidad(admin):
     mutual2 = xlsx([["IDENTIFICACION", "NOMBRE", "", "", "", "", "", "", "VALOR"], [1001, "UNO PRUEBA", None, None, None, None, None, None, 16500]])
     d = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(mutual2, "mutual.xlsx"), data=datos).json()["data"]
     assert (d["actualizadas"], d["desactivadas"]) == (1, 1)
+
+
+def test_recalcular_todas_las_nominas_del_periodo(admin):
+    a = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    b = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Cliente 2"}).json()["data"]["id"]
+    _cargar(admin, b, xlsx([["documento", "NOVIEMBRE", 1, 2], [2002, "2002", "A", "A"]]))
+    admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Sin excel"})
+    admin.post(f"{API}/periodos/{b}/cerrar")
+    admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "cuota", "descripcion": "Mutual", "valor_mensual": 30000,
+                                          "desde": "2026-11-01", "quincena": "primera"})
+    assert _nomina(admin, a, "1001")["cuotas"] == 0
+    r = admin.post(f"{API}/nominas-del-periodo/recalcular", json={"anio": 2026, "mes": 11, "quincena": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"] == {"recalculadas": ["General"], "cerradas": ["Cliente 2"], "sin_excel": ["Sin excel"]}
+    assert _nomina(admin, a, "1001")["cuotas"] == 30000
+    assert admin.post(f"{API}/nominas-del-periodo/recalcular", json={"anio": 2030, "mes": 1, "quincena": 1}).status_code == 404

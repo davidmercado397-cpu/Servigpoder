@@ -14,6 +14,7 @@ from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
+from pydantic import BaseModel, Field
 from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado
 from app.apps.liquidador.schemas import (
     CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, TipoNominaIn, UmbralIn,
@@ -169,6 +170,35 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
     auditar(db, request, "liq_periodo_recalculado", actual.id, periodo=p.etiqueta, empleados=empleados)
     db.commit()
     return ok(_periodo_out(db, p))
+
+
+class PeriodoClaveIn(BaseModel):
+    anio: int = Field(ge=2020, le=2100)
+    mes: int = Field(ge=1, le=12)
+    quincena: int = Field(ge=0, le=2)
+
+
+@router.post("/nominas-del-periodo/recalcular", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_recalcular", 10, 60))])
+def recalcular_periodo(data: PeriodoClaveIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Recalcula todas las nóminas abiertas y con Excel del periodo (p. ej. después de cargar cuotas o cambiar tarifas).
+    Las cerradas y las que aún no tienen Excel no se tocan."""
+    nominas = list(db.scalars(select(LiqPeriodo).where(LiqPeriodo.anio == data.anio, LiqPeriodo.mes == data.mes,
+                                                       LiqPeriodo.quincena == data.quincena).order_by(LiqPeriodo.id)))
+    if not nominas:
+        raise ApiError(404, "No hay nóminas en ese periodo")
+    recalculadas, cerradas, sin_excel = [], [], []
+    for p in nominas:
+        if p.estado == CERRADA:
+            cerradas.append(p.nombre)
+        elif p.cargado_en is None:
+            sin_excel.append(p.nombre)
+        else:
+            calculo.calcular(db, p, con_hermanas=False)
+            recalculadas.append(p.nombre)
+    auditar(db, request, "liq_periodo_recalculado_todo", actual.id, anio=data.anio, mes=data.mes, quincena=data.quincena,
+            recalculadas=len(recalculadas), cerradas=len(cerradas))
+    db.commit()
+    return ok({"recalculadas": recalculadas, "cerradas": cerradas, "sin_excel": sin_excel})
 
 
 @router.put("/periodos/{periodo_id}/umbral", response_model=ApiResponse[PeriodoOut])

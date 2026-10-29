@@ -250,26 +250,40 @@ ESTADOS = {"cuadra": "Cuadra", "diferencia": "Con diferencia", "solo_siigo": "So
 
 
 def excel(res: dict, etiqueta: str) -> tuple[bytes, str, str]:
+    """Comparación persona por persona. Si el reporte de Siigo trae solo el neto, no van las columnas de ingresos y
+    deducciones de Siigo ni sus diferencias (quedarían en blanco); si solo algunas hojas las traen, esas celdas dicen
+    «No viene en el reporte»."""
+    solo_neto = bool(res["resumen"].get("solo_neto"))
+    NO_VIENE = "No viene en el reporte"
     libro = Workbook()
     hoja = libro.active
     hoja.title = "Comparacion"
-    hoja.append(["DOCUMENTO", "EMPLEADO", "ESTADO", "HOJAS SIIGO", "NOMINAS SISTEMA", "INGRESOS SIIGO", "INGRESOS SISTEMA", "DIF INGRESOS",
-                 "DEDUCCIONES SIIGO", "DEDUCCIONES SISTEMA", "DIF DEDUCCIONES", "NETO SIIGO", "NETO SISTEMA", "DIF NETO",
+    comparadas = ["INGRESOS SISTEMA", "DEDUCCIONES SISTEMA"] if solo_neto else         ["INGRESOS SIIGO", "INGRESOS SISTEMA", "DIF INGRESOS", "DEDUCCIONES SIIGO", "DEDUCCIONES SISTEMA", "DIF DEDUCCIONES"]
+    hoja.append(["DOCUMENTO", "EMPLEADO", "ESTADO", "HOJAS SIIGO", "NOMINAS SISTEMA", *comparadas, "NETO SIIGO", "NETO SISTEMA", "DIF NETO",
                  "BASICO", "INCAPACIDAD", "VACACIONES", "RECARGOS", "EXTRAS", "AUX. NO PRESTACIONALES", "AUX. TRANSPORTE",
                  "NOVEDADES DEVENGO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "NOVEDADES DEDUCCION", "POSIBLES CAUSAS"])
+
+    def de_siigo(v):  # None con la persona en Siigo = la hoja no trae esa columna
+        return NO_VIENE if v is None and f["siigo"] else v
+
     for f in res["filas"]:
         s, n, d = f["siigo"] or {}, f["sistema"] or {}, f["diferencia"]
+        if solo_neto:
+            valores = [n.get("devengado"), n.get("deducciones")]
+        else:
+            valores = [de_siigo(s.get("ingresos")), n.get("devengado"), d["ingresos"] if d["ingresos"] is not None or not f["siigo"] else NO_VIENE,
+                       de_siigo(s.get("deducciones")), n.get("deducciones"),
+                       d["deducciones"] if d["deducciones"] is not None or not f["siigo"] else NO_VIENE]
         hoja.append([f["documento"], f["nombre"], ESTADOS[f["estado"]], " · ".join(f["hojas_siigo"]),
-                     " · ".join(x["nombre"] for x in f["nominas"]),
-                     s.get("ingresos"), n.get("devengado"), d["ingresos"], s.get("deducciones"), n.get("deducciones"), d["deducciones"],
-                     s.get("neto"), n.get("neto"), d["neto"],
+                     " · ".join(x["nombre"] for x in f["nominas"]), *valores, s.get("neto"), n.get("neto"), d["neto"],
                      *(n.get(c) for c in ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilios_no_prestacionales",
                                           "auxilio", "novedades_devengo", "salud", "pension", "embargos", "prestamos", "cuotas",
                                           "novedades_deduccion")),
                      " | ".join(f["pistas"])])
+    ultima_moneda = hoja.max_column - 1
     for celda in hoja[1]:
         celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
-    for col in range(6, 29):
+    for col in range(6, ultima_moneda + 1):
         for (celda,) in hoja.iter_rows(min_row=2, min_col=col, max_col=col):
             celda.number_format = "$ #,##0.00"
     _autoajustar(hoja, minimo=10, maximo=40)
@@ -279,7 +293,8 @@ def excel(res: dict, etiqueta: str) -> tuple[bytes, str, str]:
 
     r = res["resumen"]
     resumen = libro.create_sheet("Resumen")
-    for fila in (["Personas en Siigo", r["personas_siigo"]], ["Personas en el sistema", r["personas_sistema"]], ["Cuadran", r["cuadran"]],
+    for fila in (*([["El reporte de Siigo trae solo el neto a pagar: se compararon solo los netos", ""]] if solo_neto else []),
+                 ["Personas en Siigo", r["personas_siigo"]], ["Personas en el sistema", r["personas_sistema"]], ["Cuadran", r["cuadran"]],
                  ["Con diferencia", r["con_diferencia"]], ["Solo en Siigo", r["solo_siigo"]], ["Solo en el sistema", r["solo_sistema"]],
                  ["Neto Siigo", r["neto_siigo"]], ["Neto sistema", r["neto_sistema"]], ["Diferencia (sistema − Siigo)", r["diferencia_neto"]],
                  ["Tolerancia por persona", r["tolerancia"]], [], ["NETO POR HOJA DE SIIGO", ""],

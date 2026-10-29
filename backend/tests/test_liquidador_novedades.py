@@ -200,6 +200,9 @@ def test_reporte_de_siigo_solo_con_netos(admin):
     assert filas["1001"]["estado"] == "cuadra" and filas["1001"]["siigo"]["ingresos"] is None
     assert filas["1001"]["diferencia"]["ingresos"] is None and filas["1001"]["diferencia"]["deducciones"] is None
     assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == 9262
+    hoja = load_workbook(BytesIO(admin.get(f"{API}/comparar-siigo/excel?anio=2026&mes=11&quincena=1").content))["Comparacion"]
+    enc = [c.value for c in hoja[1]]
+    assert "INGRESOS SIIGO" not in enc and "DIF INGRESOS" not in enc and "NETO SIIGO" in enc and "INGRESOS SISTEMA" in enc
 
 
 def test_codigo_180_y_auxilio_variable(admin):

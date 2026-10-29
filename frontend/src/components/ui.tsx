@@ -76,8 +76,9 @@ export function Modal({ children, onCerrar }: { children: React.ReactNode; onCer
     return () => { document.body.style.overflow = previo; window.removeEventListener("keydown", tecla); };
   }, [onCerrar]);
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 px-4 py-10" role="dialog" aria-modal="true">
-      <div className="mx-auto w-full max-w-5xl [&>*]:shadow-2xl">{children}</div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 px-4 py-10 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+      {/* Fondo blanco sólido detrás del formulario (algunos tienen fondo de color translúcido) */}
+      <div className="mx-auto w-full max-w-5xl rounded-xl bg-white shadow-2xl">{children}</div>
     </div>
   );
 }

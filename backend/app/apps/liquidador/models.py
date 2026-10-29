@@ -182,7 +182,9 @@ class LiqDia(Base):
     empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id"), index=True)
     fecha: Mapped[date] = mapped_column(Date)
     turno_id: Mapped[int] = mapped_column(ForeignKey("liq_turno.id"))
-    codigo: Mapped[str] = mapped_column(String(8))  # código tal como se cargó
+    codigo: Mapped[str] = mapped_column(String(40))  # código tal como se cargó («H4+H4» si son varios turnos el mismo día)
+    # Solo en nóminas por horas: otros turnos del mismo día (otra línea del Excel, otro puesto); sus horas se suman
+    turnos_extra: Mapped[list] = mapped_column(JSON, default=list)
     tipo_dia: Mapped[str] = mapped_column(String(24), default="")  # columna de la matriz (weekday, sunday…)
     clase: Mapped[str] = mapped_column(String(20), default="")  # trabajado, descanso_pago, libre, ausencia…
     horas: Mapped[dict] = mapped_column(JSON, default=dict)  # {concepto: horas} solo los que aplican

@@ -268,3 +268,30 @@ def test_nomina_por_horas(admin):
     assert r.status_code == 200 and r.json()["data"]["descuenta_pension"]
     n = _nomina(admin, a, "5005")
     assert not n["por_horas"] and n["dias_salario"] == 3 and n["pension"] > 0
+
+
+def test_varias_lineas_el_mismo_dia_solo_en_nomina_por_horas(admin):
+    turno = {"hora_inicio": "08:00", "hora_fin": "12:00", "horas_extras": 0, "remunerado": True, "incapacidad": False}
+    admin.post(f"{API}/turnos", json={**turno, "codigo": "H4", "nombre": "4 horas", "horas_ordinarias": 4})
+    excel = xlsx([["documento", "NOVIEMBRE", 3, 4], [5005, "5005", "H4", "H4"], [5005, "5005", "H4", ""], [6006, "6006", "A", "A"]])
+
+    horas = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Por horas", "tipo_nomina": "horas"}).json()["data"]["id"]
+    r = _cargar(admin, horas, excel)
+    assert r.status_code == 200, r.text
+    assert any("más de una línea" in a for a in r.json()["data"]["advertencias"])
+    n = _nomina(admin, horas, "5005")
+    assert n["horas_pagadas"] == 12 and n["dias_auxilio"] == 2  # 8 h el 3 (dos puestos) + 4 h el 4; auxilio una vez por día
+    dias = admin.get(f"{API}/periodos/{horas}/empleados/{_resultado_id(admin, horas, '5005')}").json()["data"]["dias"]
+    assert [d["codigo"] for d in dias] == ["H4+H4", "H4"]
+
+    # En la nómina normal la segunda línea se omite como siempre
+    normal = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Normal"}).json()["data"]["id"]
+    r = _cargar(admin, normal, excel)
+    assert any("solo se permiten en la nómina por horas" in a for a in r.json()["data"]["advertencias"])
+    assert _nomina(admin, normal, "5005")["dias_salario"] == 2
+
+
+def _resultado_id(cliente, pid, doc):
+    from tests.test_liquidador import _resultados
+
+    return _resultados(cliente, pid)[doc]["empleado_id"]

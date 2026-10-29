@@ -1,8 +1,9 @@
 "use client";
 
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { FileUp, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { FormularioDescuento } from "@/components/formulario-descuento";
+import { ImportarCuotas } from "@/components/importar-cuotas";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
@@ -20,6 +21,7 @@ export default function Descuentos() {
   const [edicion, setEdicion] = useState<{ registro: Descuento | null } | null>(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
+  const [importar, setImportar] = useState(false);
   const pag = usePaginacion([q, estado]);
 
   const cargar = useCallback(async () => {
@@ -52,9 +54,14 @@ export default function Descuentos() {
   return (
     <div className="space-y-5">
       <Titulo accion={gestionar && !edicion && (
-        <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => { setAviso(""); setEdicion({ registro: null }); }}>
-          <Plus className="h-4 w-4" /> Nuevo préstamo, embargo o cuota
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => { setAviso(""); setImportar(true); }}>
+            <FileUp className="h-4 w-4" /> Importar cuotas desde Excel
+          </button>
+          <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => { setAviso(""); setEdicion({ registro: null }); }}>
+            <Plus className="h-4 w-4" /> Nuevo préstamo, embargo o cuota
+          </button>
+        </div>
       )}>Préstamos, embargos y cuotas</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
         Se descuentan después de salud y pensión: primero los embargos, luego los préstamos y al final las cuotas (plan exequial, pólizas, aportes…). Con un valor mensual y «ambas quincenas», cada
@@ -63,6 +70,11 @@ export default function Descuentos() {
       </p>
       {error && <Alerta>{error}</Alerta>}
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
+      {importar && (
+        <Modal onCerrar={() => setImportar(false)}>
+          <ImportarCuotas onCerrar={() => setImportar(false)} onImportado={() => cargar().catch(() => {})} />
+        </Modal>
+      )}
 
       {edicion && (
         <Modal onCerrar={() => setEdicion(null)}>

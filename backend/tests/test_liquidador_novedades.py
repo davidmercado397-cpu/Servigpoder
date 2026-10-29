@@ -329,3 +329,30 @@ def test_auxilio_intermunicipal(admin):
     assert n["auxilios_no_prestacionales"] == 60000 and n["ibc"] == n0["ibc"] and n["devengado"] == n0["devengado"] + 60000
     assert any("intermunicipal" in x["calculo"] for x in n["auxilios"])
     assert admin.get(f"{API}/periodos/{pid}/novedades").json()["data"][0]["valor"] == 60000
+
+
+def test_importar_cuotas_desde_la_lista_de_la_entidad(admin):
+    pid = _periodo_con(admin, 2026, 11, 2, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], list(range(16, 31)))
+    mutual = xlsx([[None] * 8 + [36800], ["No.", None, "TIPO", "IDENTIFICACION", "NOMBRES Y APELLIDOS", "F. NAC", "TEL", "CIUDAD", "VALOR A PAGAR"],
+                   [1, 1, "Titular", 1001, "UNO PRUEBA", None, None, "CALI", 15900], [2, 2, "Titular", 2002, "DOS PRUEBA", None, None, "CALI", 15900],
+                   [3, 3, "Titular", 9999, "NO ESTA", None, None, "CALI", 5000]])
+    datos = {"descripcion": "Cuota mutual", "columna_valor": "I", "quincena": "segunda", "desde": "2026-11-01"}
+    r = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(mutual, "mutual.xlsx"), data=datos)
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert (d["creadas"], d["personas"]) == (2, 3) and any("no está en la base" in h["detalle"] for h in d["hallazgos"])
+    admin.post(f"{API}/periodos/{pid}/recalcular")
+    n = _nomina(admin, pid, "1001")
+    assert n["cuotas"] == 15900 and n["descuentos"][0]["descripcion"] == "Cuota mutual"
+    # Valores como texto («20900.00») y filas de total al final; solo en la 2.ª quincena
+    recordar = xlsx([["Fecha", "Empresa"], [], ["Identificacion", "Afiliado", "Inicio", "Plan", "GBF", "Adicional", "Desc", "Valor Total"],
+                     [1001, "UNO PRUEBA", None, "PLAN", "20900.00", 0, None, "20900.00"], [None] * 6 + ["Valor total", "20900.00"]])
+    r = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(recordar, "recordar.xlsx"),
+                   data={**datos, "descripcion": "Cuota recordar", "columna_valor": "H"})
+    assert r.json()["data"]["creadas"] == 1 and r.json()["data"]["total"] == 20900
+    q1 = _periodo_con(admin, 2026, 12, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    assert _nomina(admin, q1, "1001")["cuotas"] == 0  # solo 2.ª quincena
+    # La siguiente lista ya no trae a 2002: se le desactiva la cuota
+    mutual2 = xlsx([["IDENTIFICACION", "NOMBRE", "", "", "", "", "", "", "VALOR"], [1001, "UNO PRUEBA", None, None, None, None, None, None, 16500]])
+    d = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(mutual2, "mutual.xlsx"), data=datos).json()["data"]
+    assert (d["actualizadas"], d["desactivadas"]) == (1, 1)

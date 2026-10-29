@@ -136,6 +136,28 @@ def listar_descuentos(db: DbSession, p: Paginacion, q: str = Query("", max_lengt
     return ok([_descuento_out(x, ya) for x in lista], **meta)
 
 
+@router.post("/descuentos/importar-cuotas", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_cuotas", 10, 60))])
+async def importar_cuotas(request: Request, db: DbSession, archivo: UploadFile = File(...),
+                          descripcion: str = Form(..., min_length=2, max_length=200), columna_valor: str = Form(..., pattern=r"^[A-Za-z]{1,3}$"),
+                          quincena: str = Form("segunda", pattern="^(ambas|primera|segunda)$"), desde: date = Form(...),
+                          desactivar_ausentes: bool = Form(True), actual: Usuario = Depends(require(GESTIONAR))):
+    """Cuotas desde la lista de una entidad (mutual, plan exequial…): crea o actualiza la cuota de cada cédula. El archivo
+    se procesa y se descarta."""
+    from app.apps.liquidador.services import cuotas
+    from app.apps.liquidador.services.personal import ErrorArchivo
+
+    contenido = await leer_xlsx(archivo)
+    try:
+        res = cuotas.importar(db, contenido, " ".join(descripcion.split()), columna_valor, quincena, desde, desactivar_ausentes)
+    except ErrorArchivo as e:
+        db.rollback()
+        raise ApiError(422, str(e), "EXCEL_INVALIDO") from e
+    auditar(db, request, "liq_cuotas_importadas", actual.id, archivo=(archivo.filename or "")[:255], descripcion=descripcion,
+            **{k: v for k, v in res.items() if k != "hallazgos"}, hallazgos=len(res["hallazgos"]))
+    db.commit()
+    return ok(res, aviso=AVISO)
+
+
 def _empleado_por_documento(db: DbSession, documento: str) -> LiqEmpleado:
     e = db.scalar(select(LiqEmpleado).where(LiqEmpleado.documento == documento.strip()))
     if e is None:

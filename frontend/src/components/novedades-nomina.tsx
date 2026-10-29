@@ -13,10 +13,14 @@ type Formulario = {
   horas: Record<string, string>;
 };
 const DE_HORAS = ["horas_extras", "recargos"];
+
+/** Misma persona, tipo y valor (o mismas horas): probablemente se registró dos veces */
+const claveRepetida = (documento: string, tipo: string, valor: number | null, horas: Record<string, number>) =>
+  [documento.trim(), tipo, valor ?? "", JSON.stringify(Object.entries(horas).filter(([, h]) => h).sort())].join("|");
 const RECARGOS = ["ordinary_night", "holiday_day_surcharge", "holiday_night_surcharge", "sunday_surcharge", "sunday_night_surcharge"];
 
-function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
-  periodoId: number; registro: Novedad | null; onGuardado: () => void; onCancelar: () => void;
+function FormularioNovedad({ periodoId, registro, existentes, onGuardado, onCancelar }: {
+  periodoId: number; registro: Novedad | null; existentes: Novedad[]; onGuardado: () => void; onCancelar: () => void;
 }) {
   const [f, setF] = useState<Formulario>(() => ({
     documento: registro?.documento ?? "", tipo: registro?.tipo ?? "menor_valor", descripcion: registro?.descripcion ?? "",
@@ -34,6 +38,9 @@ function FormularioNovedad({ periodoId, registro, onGuardado, onCancelar }: {
     const horas = deHoras ? Object.fromEntries(Object.entries(f.horas).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)])) : {};
     const datos = { documento: f.documento, tipo: f.tipo, descripcion: f.descripcion, horas, valor: f.valor ? Number(f.valor) : null,
       fecha_causacion: deHoras && f.fecha_causacion ? f.fecha_causacion : null, salarial: f.salarial, nomina_origen: registro?.nomina_origen ?? null };
+    const clave = claveRepetida(datos.documento, datos.tipo, datos.valor, horas);
+    const igual = existentes.find((x) => x.id !== registro?.id && claveRepetida(x.documento, x.tipo, x.valor_escrito, x.horas) === clave);
+    if (igual && !window.confirm(`${igual.nombre} ya tiene una novedad igual en esta nómina («${igual.descripcion}»). ¿Registrarla otra vez?`)) return;
     try {
       await api(registro ? `/liquidador/novedades/${registro.id}` : `/liquidador/periodos/${periodoId}/novedades`,
         { method: registro ? "PUT" : "POST", json: datos });
@@ -144,6 +151,10 @@ export function NovedadesNomina({ periodoId, editable, onCambio }: { periodoId: 
     }
   }
 
+  const cuenta = new Map<string, number>();
+  lista.forEach((x) => { const k = claveRepetida(x.documento, x.tipo, x.valor_escrito, x.horas); cuenta.set(k, (cuenta.get(k) ?? 0) + 1); });
+  const repetida = (x: Novedad) => (cuenta.get(claveRepetida(x.documento, x.tipo, x.valor_escrito, x.horas)) ?? 0) > 1;
+  const repetidas = lista.filter(repetida).length;
   const devengo = lista.filter((x) => x.deduccion === false).reduce((s, x) => s + (x.valor ?? 0), 0);
   const deduccion = lista.filter((x) => x.deduccion).reduce((s, x) => s + (x.valor ?? 0), 0);
 
@@ -169,7 +180,7 @@ export function NovedadesNomina({ periodoId, editable, onCambio }: { periodoId: 
       {error && <Alerta>{error}</Alerta>}
       {edicion && (
         <Modal onCerrar={() => setEdicion(null)}>
-          <FormularioNovedad key={edicion.registro?.id ?? "nueva"} periodoId={periodoId} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+          <FormularioNovedad key={edicion.registro?.id ?? "nueva"} periodoId={periodoId} registro={edicion.registro} existentes={lista} onCancelar={() => setEdicion(null)}
             onGuardado={() => { setEdicion(null); listo(); }} />
         </Modal>
       )}
@@ -191,6 +202,12 @@ export function NovedadesNomina({ periodoId, editable, onCambio }: { periodoId: 
           )}
         </Alerta>
       )}
+      {repetidas > 0 && (
+        <Alerta tipo="info">
+          {repetidas} novedades parecen repetidas (misma persona, tipo y valor), marcadas abajo. Si sobra alguna, elimínela con la papelera
+          {editable ? "" : " (la nómina debe estar abierta)"}: la nómina se recalcula sola.
+        </Alerta>
+      )}
       {lista.length > 0 && (
         <div className="overflow-auto">
           <table className="tabla text-sm">
@@ -198,7 +215,8 @@ export function NovedadesNomina({ periodoId, editable, onCambio }: { periodoId: 
             <tbody>
               {lista.map((x) => (
                 <tr key={x.id} className="align-top">
-                  <td><span className="font-medium">{x.nombre}</span><span className="block font-mono text-xs text-slate-500">{x.documento}</span></td>
+                  <td><span className="font-medium">{x.nombre}</span><span className="block font-mono text-xs text-slate-500">{x.documento}</span>
+                    {repetida(x) && <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Posible repetida</span>}</td>
                   <td className="whitespace-nowrap text-xs">{TIPOS_NOVEDAD.find(([v]) => v === x.tipo)?.[1]}
                     <span className={`block ${x.deduccion ? "text-red-700" : "text-green-700"}`}>{x.deduccion ? "Descuenta" : x.salarial ? "Paga (salarial)" : "Paga (no salarial)"}</span></td>
                   <td className="text-xs">{x.descripcion}{x.nomina_origen && <span className="text-slate-500"> · origen: {x.nomina_origen}</span>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, FileUp, Search, UserPlus } from "lucide-react";
+import { ChevronRight, FileDown, FileUp, Search, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ImportarPersonal } from "@/components/importar-personal";
@@ -21,6 +21,7 @@ const habilesTexto = (d: number[]) => {
 export default function Empleados() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const gestionarPersonal = usePermiso("liquidador.personal.gestionar");
+  const verPersonal = usePermiso("liquidador.personal.ver");
   const router = useRouter();
   const [estado, setEstado] = useState("activo");
   const [tipo, setTipo] = useState("todos");
@@ -45,12 +46,20 @@ export default function Empleados() {
 
   return (
     <div className="space-y-5">
-      <Titulo accion={gestionarPersonal && (
+      <Titulo accion={(verPersonal || gestionarPersonal) && (
         <div className="flex flex-wrap gap-2">
+          {verPersonal && (
+            <a className="btn-secundario inline-flex items-center gap-1.5" href="/api/liquidador/personal/exportar-base"
+              title="Todos los empleados con su ficha, en el mismo formato de la base de personal (se puede corregir y volver a importar)">
+              <FileDown className="h-4 w-4" /> Exportar base de personal
+            </a>
+          )}
+          {gestionarPersonal && (
           <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => setImportar(!importar)}>
             <FileUp className="h-4 w-4" /> Importar base de personal o libro de vacaciones
           </button>
-          {!nuevo && (
+          )}
+          {gestionarPersonal && !nuevo && (
             <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => setNuevo(true)}>
               <UserPlus className="h-4 w-4" /> Nuevo empleado
             </button>

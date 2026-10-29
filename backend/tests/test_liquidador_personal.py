@@ -184,3 +184,29 @@ def test_datos_personales_solo_con_permiso(admin):
         entrar(c, "gh1", "clave-segura-1")
         f = _ficha(c, "5001")
         assert f["personal"]["correo"] == "ana@correo.com" and f["salario"] is None
+
+
+def test_exportar_base_y_volver_a_importar(admin):
+    from openpyxl import load_workbook
+
+    primera = admin.post(f"{API}/personal/importar-base", files=archivo(_base(), "base.xlsx")).json()["data"]
+    r = admin.get(f"{API}/personal/exportar-base")
+    assert r.status_code == 200 and "base_de_personal_" in r.headers["content-disposition"]
+    libro = load_workbook(BytesIO(r.content))
+    assert libro.sheetnames == ["OPERATIVOS", "ADMINISTRATIVOS", "RETIROS OP", "RETIROS ADMIN"]
+    op = list(libro["OPERATIVOS"].iter_rows(values_only=True))
+    enc = op[0]
+    filas = {str(f[0]): dict(zip(enc, f)) for f in op[1:]}
+    assert set(filas) == {"PPT 1234567", "5004"} and "SALARIO MENSUAL" in enc
+    assert filas["5004"]["FONDO DE PENSIONES"] == "PENSIONADO - COLPENSIONES" and filas["5004"]["PENSIONADO"] == "SI"
+    adm = {str(f[0]) for f in list(libro["ADMINISTRATIVOS"].iter_rows(values_only=True))[1:]}
+    assert adm == {"5001", "5002"}
+    retiros_op = {str(f[0]) for f in list(libro["RETIROS OP"].iter_rows(values_only=True))[1:]}
+    retiros_adm = {str(f[0]) for f in list(libro["RETIROS ADMIN"].iter_rows(values_only=True))[1:]}
+    assert retiros_op == {"5003"} and retiros_adm == {"5001", "5005"}  # 5001 volvió a ingresar: su contrato anterior queda en retiros
+    # Volver a importar lo exportado no cambia nada
+    otra = admin.post(f"{API}/personal/importar-base", files=archivo(r.content, "exportada.xlsx")).json()["data"]
+    assert (otra["creados"], otra["activos"], otra["retirados"]) == (0, primera["activos"], primera["retirados"])
+    luis = _ficha(admin, "5004")["personal"]
+    assert luis["pensionado"] and luis["fondo_pensiones"] == "COLPENSIONES"
+    assert not _ficha(admin, "PPT 1234567")["personal"]["pensionado"]

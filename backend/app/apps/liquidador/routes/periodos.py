@@ -265,7 +265,7 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
             totales["dias"][k] = totales["dias"].get(k, 0) + v
     pendiente = any(not r.nomina for r in lista)
     if ve_nomina and not pendiente:
-        claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
+        claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "licencias_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
                          "embargos", "prestamos", "cuotas", "novedades_devengo", "novedades_deduccion",
                          "deducciones", "neto", "provision_ss_180")
         totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}

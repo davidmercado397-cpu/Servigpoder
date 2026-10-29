@@ -41,6 +41,9 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
                 {n.vacaciones.dias_no_habiles > 0 && fila("Vacaciones días no hábiles", `${n.vacaciones.dias_no_habiles} días × ${pesos(n.vacaciones.valor_dia)}`, n.vacaciones.valor_no_habiles)}
               </>
             )}
+            {(n.licencias ?? []).map((x) => (
+              <Fragment key={`lic-${x.codigo}`}>{fila(`Licencia remunerada: ${x.nombre}`, `${x.dias} día(s) × ${pesos(n.valor_dia)} (${x.codigo})`, x.valor)}</Fragment>
+            ))}
             {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
             {(n.auxilios ?? []).map((x) => (
               <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
@@ -88,7 +91,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
       {(n.alertas ?? []).map((a) => <p key={a} className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{a}</p>)}
       {n.dias_sin_pago > 0 && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (licencias…, que se pagan en otro proceso).
+          {n.dias_sin_pago} días sin pago en esta nómina: ausencias, licencias no remuneradas y demás novedades que no se pagan.
         </p>
       )}
     </section>

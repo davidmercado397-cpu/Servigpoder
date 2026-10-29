@@ -48,6 +48,8 @@ export type Nomina = {
   /** Días con código 180 (incapacidad de más de 180 días): no se pagan; SERA provisiona la seguridad social */
   seguridad_social_180?: SeguridadSocial180 | null; provision_ss_180?: number;
   /** Nómina por horas */
+  /** Licencias remuneradas (códigos marcados «Remunerado» en Turnos): salario ÷ 30 por día */
+  licencias?: { codigo: string; nombre: string; dias: number; valor: number }[]; licencias_valor?: number; dias_licencia?: number;
   /** Marcado como pensionado en la ficha: no descuenta pensión */
   pensionado?: boolean;
   por_horas?: boolean; horas_pagadas?: number; dias_trabajados?: number; dias_auxilio_otra_nomina?: number;
@@ -228,7 +230,7 @@ export const RECARGOS = ["ordinary_night", "holiday_day_surcharge", "holiday_nig
 
 /** Pagado por mes: suma de las nóminas cerradas del mes */
 export const CAMPOS_PAGADO: [string, string][] = [
-  ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["recargos", "Recargos"],
+  ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["licencias_valor", "Licencias remuneradas"], ["recargos", "Recargos"],
   ["extras", "Horas extras"], ["auxilios_no_prestacionales", "Auxilios no prestacionales"], ["auxilio", "Auxilio de transporte"],
   ["novedades_devengo", "Novedades (devengo)"], ["devengado", "Total devengado"], ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"],
   ["cuotas", "Cuotas"], ["novedades_deduccion", "Novedades (deducción)"],

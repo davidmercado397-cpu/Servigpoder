@@ -11,7 +11,7 @@ from app.apps.liquidador.models import CERRADA, LiqPeriodo, LiqResultado
 from app.apps.liquidador.services.exportar import XLSX, _FUENTE, _RELLENO, _CENTRO, _autoajustar, _guardar
 
 CAMPOS = (
-    ("basico", "Sueldo básico"), ("incapacidad", "Incapacidad"), ("vacaciones_valor", "Vacaciones"), ("recargos", "Recargos"),
+    ("basico", "Sueldo básico"), ("incapacidad", "Incapacidad"), ("vacaciones_valor", "Vacaciones"), ("licencias_valor", "Licencias remuneradas"), ("recargos", "Recargos"),
     ("extras", "Horas extras"), ("auxilios_no_prestacionales", "Auxilios no prestacionales"), ("auxilio", "Auxilio de transporte"),
     ("novedades_devengo", "Novedades (devengo)"), ("devengado", "Total devengado"), ("salud", "Salud"), ("pension", "Pensión"), ("embargos", "Embargos"),
     ("prestamos", "Préstamos"), ("cuotas", "Cuotas"), ("novedades_deduccion", "Novedades (deducción)"), ("deducciones", "Total deducciones"), ("neto", "Neto pagado"), ("provision_ss_180", "Provisión seg. social (cód. 180)"),

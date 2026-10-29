@@ -189,9 +189,9 @@ function EditorTurno({ inicial, soloLectura, onCerrar, onGuardado }: {
             <div><label className="label">Hora fin <span className="font-normal text-slate-400">(informativa)</span></label><input className="input" type="time" required value={f.hora_fin} onChange={(e) => campo("hora_fin", e.target.value)} /></div>
             <div><label className="label">Horas ordinarias</label><input className="input" type="number" min={0} max={24} step="0.01" disabled={f.incapacidad} value={f.incapacidad ? "0" : f.horas_ordinarias} onChange={(e) => campo("horas_ordinarias", e.target.value)} /></div>
             <div><label className="label">Horas extras</label><input className="input" type="number" min={0} max={24} step="0.01" disabled={f.incapacidad} value={f.incapacidad ? "0" : f.horas_extras} onChange={(e) => campo("horas_extras", e.target.value)} /></div>
-            <label className={`flex items-center gap-2 text-sm ${f.incapacidad ? "text-slate-400" : "text-slate-700"}`}>
-              <input type="checkbox" className="h-4 w-4" disabled={f.incapacidad} checked={f.remunerado && !f.incapacidad} onChange={(e) => campo("remunerado", e.target.checked)} />
-              Día remunerado
+            <label className={`flex items-start gap-2 text-sm ${f.incapacidad ? "text-slate-400" : "text-slate-700"}`}>
+              <input type="checkbox" className="mt-0.5 h-4 w-4" disabled={f.incapacidad} checked={f.remunerado && !f.incapacidad} onChange={(e) => campo("remunerado", e.target.checked)} />
+              <span>Día remunerado<span className="block text-xs text-slate-500">En códigos sin horas (licencias de maternidad, paternidad, luto, remunerada…) la nómina paga el día con el salario, sin auxilio de transporte.</span></span>
             </label>
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" className="mt-0.5 h-4 w-4" checked={f.incapacidad} onChange={(e) => campo("incapacidad", e.target.checked)} />

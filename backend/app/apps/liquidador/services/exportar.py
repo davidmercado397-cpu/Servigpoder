@@ -134,7 +134,7 @@ def _guardar(libro: Workbook) -> bytes:
 _CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
 ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
-    "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
+    "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", "LICENCIAS REMUNERADAS", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
     "NOVEDADES DEVENGO", "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "NOVEDADES DEDUCCION",
     "TOTAL DEDUCCIONES", "NETO A PAGAR", "DIAS COD 180", "PROVISION SEG SOCIAL COD 180", "HORAS PAGADAS (POR HORAS)",
 )
@@ -147,6 +147,7 @@ def fila_nomina(r: LiqResultado) -> list:
     return [r.empleado.documento, r.empleado.nombre, n.get("salario", 0), n.get("dias_salario", 0), n.get("dias_incapacidad", 0),
             n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0),
             (n.get("vacaciones") or {}).get("valor_habiles", 0), (n.get("vacaciones") or {}).get("valor_no_habiles", 0),
+            n.get("licencias_valor", 0),
             *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
             n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("novedades_devengo", 0), n.get("devengado", 0), n.get("salud", 0),
             n.get("pension", 0), n.get("embargos", 0), n.get("prestamos", 0), n.get("cuotas", 0), n.get("novedades_deduccion", 0),

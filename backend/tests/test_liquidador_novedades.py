@@ -372,3 +372,17 @@ def test_recalcular_todas_las_nominas_del_periodo(admin):
     assert r.json()["data"] == {"recalculadas": ["General"], "cerradas": ["Cliente 2"], "sin_excel": ["Sin excel"]}
     assert _nomina(admin, a, "1001")["cuotas"] == 30000
     assert admin.post(f"{API}/nominas-del-periodo/recalcular", json={"anio": 2030, "mes": 1, "quincena": 1}).status_code == 404
+
+
+def test_licencias_remuneradas(admin):
+    # 2 días de licencia de luto (LL) y 1 de licencia no remunerada (LNR)
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 12 + ["LL", "LL", "LNR"])]], DIAS)
+    n = _nomina(admin, pid, "1001")
+    dia = 1750905 / 30
+    assert n["licencias"] == [{"codigo": "LL", "nombre": "licencia de luto", "dias": 2, "valor": int(2 * dia + 0.5)}]
+    assert n["licencias_valor"] == int(2 * dia + 0.5) and n["dias_salario"] == 12 and n["dias_sin_pago"] == 1
+    assert n["dias_auxilio"] == 12  # la licencia no paga auxilio de transporte
+    assert n["ibc"] == n["basico"] + sum(n["valores"].values()) + n["licencias_valor"]
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
+    filas = list(libro.worksheets[0].iter_rows(values_only=True))
+    assert dict(zip(filas[0], filas[1]))["LICENCIAS REMUNERADAS"] == n["licencias_valor"]

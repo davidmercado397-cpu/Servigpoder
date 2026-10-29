@@ -49,9 +49,10 @@ def test_nomina_de_una_quincena(admin):
     assert n["ibc"] == 1010940 and n["salud"] == 40438 and n["pension"] == 40438
     assert n["neto"] == 1135488 - 80876 == 1054612
 
-    # 3003: LR (otro proceso) y AUS no se pagan; V×5 como vacaciones; L sí; INC al 100 %; el auxilio solo por los 4 días A
+    # 3003: AUS no se paga; LR (licencia remunerada) se paga como licencia; V×5 como vacaciones; L sí; INC al 100 %; el auxilio solo por los 4 días A
     n = _nomina(admin, pid, "3003")
-    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 2 and n["dias_auxilio"] == 4
+    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 1 and n["dias_auxilio"] == 4
+    assert [(x["codigo"], x["dias"]) for x in n["licencias"]] == [("LR", 1)]
     assert n["vacaciones"]["dias_habiles"] == 4 and n["vacaciones"]["dias_no_habiles"] == 1 and n["vacaciones_valor"] == 291818
     assert n["basico"] == 291818 and n["incapacidad"] == 116727 and n["auxilio"] == 33213
     assert (n["incapacidad_empresa"], n["incapacidad_eps"]) == (2, 0)
@@ -238,7 +239,7 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert not v["promedio_manual"] and v["saldo"] is None and v["base"] == 1750905 + sugerido
     assert v["valor_habiles"] == round(4 * (1750905 + sugerido) / 30) and n["ibc"] >= v["valor"]
     # El auxilio se descuenta por todo el tiempo no laborado: 5 vacaciones, 2 incapacidad, 1 LR y 1 AUS → 150.000 − 9 × 10.000
-    assert n["auxilios"][0]["valor"] == 60000 and n["dias_sin_pago"] == 2 and n["dias_tnl"] == 9
+    assert n["auxilios"][0]["valor"] == 60000 and n["dias_sin_pago"] == 1 and n["dias_tnl"] == 9
     assert "1 de ausencia, 2 de incapacidad, 5 de vacaciones, 1 de otras novedades" in n["auxilios"][0]["calculo"]
 
     # Lunes a viernes, ingreso 1-jun-2026 (5 días causados al 30-sep) → 3 hábiles y 2 no hábiles, sin alerta

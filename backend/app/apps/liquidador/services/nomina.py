@@ -1,7 +1,7 @@
 """Nómina de cada empleado a partir de los días y las horas contadas del periodo.
 
 - Salario básico: salario mensual ÷ 30 por cada día trabajado, de descanso (Z) o libre (L). Las ausencias
-  y las demás novedades (licencias…, que se pagan en otro proceso) no se pagan aquí.
+  y las demás novedades no remuneradas no se pagan aquí; las licencias remuneradas sí (ver abajo).
 - Base de 30 días: el día 31 no suma salario; si se paga el último día de febrero, se completan los 30.
 - Incapacidad: se paga al 100 %. Los 2 primeros días de cada incapacidad los paga la empresa y del 3.º en
   adelante la EPS (que reconoce el 66,67 %); la división es informativa.
@@ -9,6 +9,9 @@
   llevan solo el adicional (la hora ya está en el salario); las extras, la hora completa.
 - Vacaciones (códigos marcados "Es vacaciones"): (salario + promedio variable) ÷ 30 por cada día, separando
   hábiles y no hábiles; ver services/vacaciones.py.
+- Licencias remuneradas (códigos marcados «Remunerado» en Turnos: maternidad, paternidad, luto, licencia remunerada…):
+  salario ÷ 30 por cada día (base 30). Hacen base de salud y pensión; no pagan auxilio de transporte y, como tiempo no
+  laborado, descuentan los auxilios no prestacionales.
 - Auxilio de transporte: ÷ 30 por día trabajado o de descanso, si el salario no supera 2 mínimos.
 - Auxilios no prestacionales: valor mensual menos 1/30 por cada día de tiempo no laborado (ausencias, incapacidades,
   vacaciones y demás novedades).
@@ -178,6 +181,7 @@ class Acumulado:
     vac_dias: int = 0  # días calendario de vacaciones
     vac_valor_habiles: Decimal = Decimal("0")
     vac_valor_no_habiles: Decimal = Decimal("0")
+    licencias: dict = field(default_factory=dict)  # código → [días base 30, valor, nombre]
     horas: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
     valores: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
     tarifas: set[date] = field(default_factory=set)
@@ -305,6 +309,11 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             else:
                 a.vac_no_habiles += base
                 a.vac_valor_no_habiles += valor_vac
+        elif getattr(getattr(d, "turno", None), "remunerado", False):
+            # Licencia remunerada (maternidad, paternidad, luto…): se paga el día con el salario
+            t_lic = a.licencias.setdefault(d.turno.codigo, [0, Decimal("0"), d.turno.nombre])
+            t_lic[0] += base
+            t_lic[1] += valor_dia * base
         else:
             a.dias_sin_pago += 1
         if not por_horas and d.clase in PAGAN_AUXILIO and salario <= 2 * t.smlmv:
@@ -385,7 +394,9 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             nov_no_salarial += valor
     nov_devengo = nov_salarial + nov_no_salarial
 
-    salarial = basico + incapacidad + recargos + extras + vacaciones_valor + nov_salarial
+    licencias = [{"codigo": c, "nombre": n, "dias": dd, "valor": float(_pesos(v))} for c, (dd, v, n) in sorted(a.licencias.items())]
+    licencias_valor = sum((Decimal(str(x["valor"])) for x in licencias), Decimal("0"))
+    salarial = basico + incapacidad + recargos + extras + vacaciones_valor + licencias_valor + nov_salarial
     devengado = salarial + no_prestacional + nov_no_salarial + auxilio
     # Lo no salarial que pase del 40 % de la remuneración total sí entra en la base de salud y pensión
     no_salarial = no_prestacional + nov_no_salarial
@@ -474,6 +485,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia, "dias_tnl": dias_descuento,
         "exceso_no_salarial": float(exceso), "alertas": alertas,
         "vacaciones": detalle_vac, "vacaciones_valor": float(vacaciones_valor),
+        "licencias": licencias, "licencias_valor": float(licencias_valor), "dias_licencia": sum(x["dias"] for x in licencias),
         "horas": {c: float(h) for c, h in a.horas.items() if h},
         "valores": {c: float(v) for c, v in valores.items()},
         "recargos": float(recargos), "extras": float(extras),

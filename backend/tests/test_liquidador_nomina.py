@@ -144,7 +144,7 @@ def test_prestamo_con_saldo_y_embargo(admin):
     r = admin.get(f"{API}/periodos/{p1}/nomina")
     assert r.headers["content-disposition"] == 'attachment; filename="nomina_2026_11_Q1.xlsx"'
     libro = load_workbook(BytesIO(r.content))
-    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos embargos y cuotas", "Vacaciones", "Auxilios no prestacionales", "Tarifas usadas"]
+    assert libro.sheetnames == ["Nomina 2026-11-Q1", "Prestamos embargos y cuotas", "Novedades", "Vacaciones", "Auxilios no prestacionales", "Tarifas usadas"]
     filas_x = list(libro.worksheets[0].iter_rows(values_only=True))
     enc = filas_x[0]
     fila = dict(zip(enc, filas_x[1]))

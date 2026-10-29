@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowLeft, Banknote, Download, FileDown, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
+import { ArrowLeft, Banknote, Download, FileDown, FileSpreadsheet, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { NominaPersona } from "@/components/nomina-persona";
+import { NovedadesNomina } from "@/components/novedades-nomina";
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
@@ -25,6 +26,7 @@ export default function DetalleQuincena() {
   const router = useRouter();
   const gestionar = usePermiso("liquidador.periodos.gestionar");
   const verNomina = usePermiso("liquidador.nomina.ver");
+  const gestionarNomina = usePermiso("liquidador.nomina.gestionar");
   const [p, setP] = useState<Periodo | null>(null);
   const [filas, setFilas] = useState<Resultado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
@@ -191,6 +193,10 @@ export default function DetalleQuincena() {
         )}
       </section>
 
+      {verNomina && p.estado !== "borrador" && (
+        <NovedadesNomina periodoId={p.id} editable={gestionarNomina && !cerrada} onCambio={() => cargarResultados().catch(() => {})} />
+      )}
+
       {/* Horas contadas */}
       {p.estado !== "borrador" && (
         <section className="tarjeta overflow-hidden">
@@ -227,6 +233,13 @@ export default function DetalleQuincena() {
                   <Banknote className="h-4 w-4" /> Nómina
                 </a>
               )}
+              {verNomina && (
+                <a className="btn-secundario inline-flex items-center gap-1.5"
+                  href={`/api/liquidador/nominas-del-periodo/excel?anio=${p.anio}&mes=${p.mes}&quincena=${p.quincena}`}
+                  title="Todas las nóminas de este periodo en un solo Excel, con todo lo liquidado">
+                  <FileSpreadsheet className="h-4 w-4" /> Todo el periodo
+                </a>
+              )}
             </div>
           </div>
 
@@ -250,7 +263,7 @@ export default function DetalleQuincena() {
               <Cifra titulo="Horas extras" valor={totales.nomina.extras} />
               <Cifra titulo="Auxilio de transporte" valor={totales.nomina.auxilio} />
               <Cifra titulo="Total devengado" valor={totales.nomina.devengado} fuerte
-                detalle={`Deducciones ${pesos(totales.nomina.deducciones)}: salud ${pesos(totales.nomina.salud)}, pensión ${pesos(totales.nomina.pension)}, embargos ${pesos(totales.nomina.embargos)}, préstamos ${pesos(totales.nomina.prestamos)}, cuotas ${pesos(totales.nomina.cuotas ?? 0)}`} />
+                detalle={`Deducciones ${pesos(totales.nomina.deducciones)}: salud ${pesos(totales.nomina.salud)}, pensión ${pesos(totales.nomina.pension)}, embargos ${pesos(totales.nomina.embargos)}, préstamos ${pesos(totales.nomina.prestamos)}, cuotas ${pesos(totales.nomina.cuotas ?? 0)}, novedades ${pesos(totales.nomina.novedades_deduccion ?? 0)}`} />
               <Cifra titulo="Neto a pagar" valor={totales.nomina.neto} fuerte />
             </div>
           )}

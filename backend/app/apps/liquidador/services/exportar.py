@@ -135,7 +135,8 @@ _CONCEPTOS_NOMINA = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(OR
 ENCABEZADOS_NOMINA: tuple[str, ...] = (
     "DOCUMENTO", "EMPLEADO", "SALARIO", "DIAS PAGADOS", "DIAS INCAPACIDAD", "DIAS SIN PAGO",
     "SUELDO BASICO", "INCAPACIDAD", "VACACIONES DIAS HABILES", "VACACIONES DIAS NO HABILES", *(f"VR {t}" for _, t in _CONCEPTOS_NOMINA), "AUXILIOS NO PRESTACIONALES", "AUXILIO DE TRANSPORTE",
-    "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "TOTAL DEDUCCIONES", "NETO A PAGAR",
+    "NOVEDADES DEVENGO", "TOTAL DEVENGADO", "SALUD", "PENSION", "EMBARGOS", "PRESTAMOS", "CUOTAS", "NOVEDADES DEDUCCION",
+    "TOTAL DEDUCCIONES", "NETO A PAGAR",
 )
 _PRIMERA_MONEDA = 7  # columna G (SUELDO BASICO) en adelante son pesos
 
@@ -147,8 +148,111 @@ def fila_nomina(r: LiqResultado) -> list:
             n.get("dias_sin_pago", 0), n.get("basico", 0), n.get("incapacidad", 0),
             (n.get("vacaciones") or {}).get("valor_habiles", 0), (n.get("vacaciones") or {}).get("valor_no_habiles", 0),
             *(v.get(c, 0) for c, _ in _CONCEPTOS_NOMINA),
-            n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("devengado", 0), n.get("salud", 0), n.get("pension", 0), n.get("embargos", 0),
-            n.get("prestamos", 0), n.get("cuotas", 0), n.get("deducciones", 0), n.get("neto", 0)]
+            n.get("auxilios_no_prestacionales", 0), n.get("auxilio", 0), n.get("novedades_devengo", 0), n.get("devengado", 0), n.get("salud", 0),
+            n.get("pension", 0), n.get("embargos", 0), n.get("prestamos", 0), n.get("cuotas", 0), n.get("novedades_deduccion", 0),
+            n.get("deducciones", 0), n.get("neto", 0)]
+
+
+TIPOS_NOVEDAD = {"mayor_valor": "Mayor valor pagado", "menor_valor": "Menor valor pagado", "horas_extras": "Horas extras pendientes",
+                 "recargos": "Recargos pendientes", "otro_devengo": "Otro devengo", "otra_deduccion": "Otra deducción"}
+
+
+def _hoja_novedades(libro, filas: list[tuple[str | None, LiqResultado]]) -> None:
+    """Detalle de las novedades manuales (con la nómina de cada persona si es el archivo del periodo completo)."""
+    con_nomina = any(n is not None for n, _ in filas)
+    hoja = libro.create_sheet("Novedades")
+    hoja.append([*(["NOMINA"] if con_nomina else []), "DOCUMENTO", "EMPLEADO", "TIPO", "DESCRIPCION", "NOMINA DE ORIGEN", "EFECTO",
+                 "CALCULO", "VALOR", "OBSERVACION"])
+    for nombre, r in filas:
+        for x in (r.nomina or {}).get("novedades", []):
+            efecto = "Deducción" if x["deduccion"] else ("Devengo salarial" if x["salarial"] else "Devengo no salarial")
+            hoja.append([*([nombre] if con_nomina else []), r.empleado.documento, r.empleado.nombre, TIPOS_NOVEDAD.get(x["tipo"], x["tipo"]),
+                         x["descripcion"], x.get("nomina_origen") or "", efecto, x["calculo"], x["valor"], x.get("observacion", "")])
+    for celda in hoja[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    col_valor = 9 if con_nomina else 8
+    for (celda,) in hoja.iter_rows(min_row=2, min_col=col_valor, max_col=col_valor):
+        celda.number_format = "$ #,##0"
+    _autoajustar(hoja, minimo=10, maximo=50)
+
+
+def _formato_nomina(hoja, primera_moneda: int, ultima_col: int) -> None:
+    for celda in hoja[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for col in range(primera_moneda, ultima_col + 1):
+        for (celda,) in hoja.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda.number_format, celda.alignment = "$ #,##0", _DERECHA
+    _autoajustar(hoja, minimo=11, maximo=24)
+    hoja.row_dimensions[1].height = 42
+
+
+def periodo_completo(db: Session, anio: int, mes: int, quincena: int) -> tuple[bytes, str, str] | None:
+    """Todas las nóminas de un periodo (quincena o mes) en un archivo: una fila por persona y nómina con todo lo
+    liquidado, el consolidado por persona, los descuentos y las novedades. Para cruces externos."""
+    from openpyxl.styles import Border, Side
+
+    nominas = list(db.scalars(select(LiqPeriodo).where(LiqPeriodo.anio == anio, LiqPeriodo.mes == mes, LiqPeriodo.quincena == quincena)
+                              .order_by(LiqPeriodo.id)))
+    if not nominas:
+        return None
+    filas: list[tuple[str, LiqResultado]] = []
+    for p in nominas:
+        for r in sorted(db.scalars(select(LiqResultado).where(LiqResultado.periodo_id == p.id)), key=lambda r: r.empleado.documento):
+            if r.nomina:
+                filas.append((f"{p.nombre} ({'cerrada' if p.estado == 'cerrada' else 'abierta'})", r))
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "Nomina"
+    hoja.append(["NOMINA", *ENCABEZADOS_NOMINA])
+    for nombre, r in filas:
+        hoja.append([nombre, *fila_nomina(r)])
+    ultima = hoja.max_row
+    linea = Side(style="thin", color="1E3A5F")
+    if filas:
+        total = ["TOTAL", None, f"{len(filas)} filas", None]
+        for col in range(5, len(ENCABEZADOS_NOMINA) + 2):
+            letra = get_column_letter(col)
+            total.append(f"=SUM({letra}2:{letra}{ultima})")
+        hoja.append(total)
+        for celda in hoja[hoja.max_row]:
+            celda.font, celda.border = Font(bold=True), Border(top=linea)
+    _formato_nomina(hoja, _PRIMERA_MONEDA + 1, len(ENCABEZADOS_NOMINA) + 1)
+    for col in (4, 5, 6, 7):  # salario es pesos; días, número
+        for (celda,) in hoja.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda.number_format = "$ #,##0" if col == 4 else "#,##0"
+    hoja.freeze_panes = "D2"
+
+    # Consolidado por persona: suma de sus nóminas del periodo
+    por_persona: dict[str, dict] = {}
+    numericas = list(range(3, len(ENCABEZADOS_NOMINA)))  # desde SALARIO hasta NETO (índices de fila_nomina)
+    for nombre, r in filas:
+        f = fila_nomina(r)
+        x = por_persona.setdefault(f[0], {"nombre": f[1], "nominas": [], "valores": [0.0] * len(ENCABEZADOS_NOMINA)})
+        x["nominas"].append(nombre)
+        for i in numericas:
+            x["valores"][i] += float(f[i] or 0)
+    con = libro.create_sheet("Por persona")
+    columnas = [i for i in numericas if i >= 3]
+    con.append(["DOCUMENTO", "EMPLEADO", "NOMINAS", *(ENCABEZADOS_NOMINA[i] for i in columnas)])
+    for doc, x in sorted(por_persona.items(), key=lambda t: t[1]["nombre"]):
+        con.append([doc, x["nombre"], " · ".join(x["nominas"]), *(round(x["valores"][i], 2) for i in columnas)])
+    _formato_nomina(con, 4 + columnas.index(_PRIMERA_MONEDA - 1), len(columnas) + 3)
+    con.freeze_panes = "D2"
+
+    desc = libro.create_sheet("Descuentos")
+    desc.append(["NOMINA", "DOCUMENTO", "EMPLEADO", "TIPO", "DESCRIPCION", "CALCULO", "VALOR DESCONTADO", "OBSERVACION"])
+    for nombre, r in filas:
+        for x in (r.nomina or {}).get("descuentos", []):
+            desc.append([nombre, r.empleado.documento, r.empleado.nombre, _TIPOS_DESCUENTO.get(x["tipo"], x["tipo"]), x["descripcion"],
+                         x["calculo"], x["valor"], x.get("observacion", "")])
+    for celda in desc[1]:
+        celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
+    for (celda,) in desc.iter_rows(min_row=2, min_col=7, max_col=7):
+        celda.number_format = "$ #,##0"
+    _autoajustar(desc, minimo=10, maximo=50)
+    _hoja_novedades(libro, filas)
+    etiqueta = f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"
+    return _guardar(libro), XLSX, f"nomina_periodo_{etiqueta}.xlsx"
 
 
 def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
@@ -197,6 +301,7 @@ def nomina(db: Session, periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     for (celda,) in desc.iter_rows(min_row=2, min_col=6, max_col=6):
         celda.number_format = "$ #,##0"
     _autoajustar(desc, minimo=10, maximo=50)
+    _hoja_novedades(libro, [(None, r) for r in resultados])
 
     vac = libro.create_sheet("Vacaciones")
     vac.append(["DOCUMENTO", "EMPLEADO", "DIAS HABILES DEL EMPLEADO", "DIAS HABILES", "DIAS NO HABILES", "SALARIO",

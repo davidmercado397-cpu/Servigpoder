@@ -3,10 +3,11 @@ empleado, préstamos, embargos y cuotas, auxilios no prestacionales, vacaciones 
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import or_, select
 
 from app.api.deps import DbSession, require
+from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.rate_limit import limitar
@@ -17,7 +18,7 @@ from app.apps.liquidador.schemas import (
     AuxilioIn, AuxilioOut, ConfiguracionEmpleadoIn, DescuentoIn, DescuentoOut, FichaEmpleadoIn, PromedioVacacionesIn, SalarioIn, TarifaIn, TarifaOut,
     VacacionesEmpleadoIn,
 )
-from app.apps.liquidador.services import calculo, exportar, reportes
+from app.apps.liquidador.services import calculo, exportar, reportes, siigo
 from app.apps.liquidador.services.nomina import descontado, porcentajes_de_ley
 
 router = APIRouter(tags=["liquidador: nómina"])
@@ -370,6 +371,20 @@ def promedio_vacaciones(periodo_id: int, empleado_id: int, data: PromedioVacacio
 
 # --- Archivo de nómina del periodo ---
 
+@router.get("/nominas-del-periodo/excel", dependencies=[Depends(limitar("exportar", 10, 60))])
+def descargar_periodo_completo(request: Request, db: DbSession, anio: int = Query(ge=2000, le=2100), mes: int = Query(ge=1, le=12),
+                               quincena: int = Query(ge=0, le=2), actual: Usuario = Depends(require(VER))):
+    """Todas las nóminas de la quincena o del mes en un solo Excel, con todo lo liquidado (para cruces externos)."""
+    from app.apps.liquidador.routes.periodos import _archivo
+
+    archivo = exportar.periodo_completo(db, anio, mes, quincena)
+    if archivo is None:
+        raise ApiError(404, "No hay nóminas en ese periodo")
+    auditar(db, request, "liq_periodo_descargado", actual.id, anio=anio, mes=mes, quincena=quincena)
+    db.commit()
+    return _archivo(*archivo)
+
+
 @router.get("/periodos/{periodo_id}/nomina", dependencies=[Depends(limitar("exportar", 10, 60))])
 def descargar_nomina(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     from app.apps.liquidador.routes.periodos import _archivo
@@ -409,3 +424,27 @@ def pagado_por_mes_excel(request: Request, db: DbSession, anio: int = Query(ge=2
     auditar(db, request, "liq_pagado_mes_descargado", actual.id, mes=f"{anio}-{mes:02d}")
     db.commit()
     return _archivo(contenido, tipo, nombre)
+
+
+# --- Comparación con Siigo ---
+
+@router.post("/comparar-siigo", dependencies=[Depends(limitar("liq_siigo", 10, 60))])
+async def comparar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
+                         mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1, ge=0, le=1_000_000),
+                         formato: str = Form("json", pattern="^(json|excel)$"), actual: Usuario = Depends(require(VER))):
+    """Cruza el reporte de netos de Siigo con todas las nóminas del periodo, persona por persona. El archivo no se guarda."""
+    from app.apps.liquidador.routes.periodos import _archivo
+    from app.apps.liquidador.services.personal import ErrorArchivo
+
+    contenido = await leer_xlsx(archivo)
+    try:
+        res = siigo.comparar(db, anio, mes, quincena, contenido, tolerancia)
+    except ErrorArchivo as e:
+        raise ApiError(422, str(e), "EXCEL_INVALIDO") from e
+    r = res["resumen"]
+    auditar(db, request, "liq_comparacion_siigo", actual.id, anio=anio, mes=mes, quincena=quincena, con_diferencia=r["con_diferencia"],
+            solo_siigo=r["solo_siigo"], solo_sistema=r["solo_sistema"], formato=formato)
+    db.commit()
+    if formato == "excel":
+        return _archivo(*siigo.excel(res, f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"))
+    return ok(res)

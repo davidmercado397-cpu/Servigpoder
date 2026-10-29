@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  BadgePercent, BriefcaseMedical, CalendarCheck, CalendarDays, CalendarRange, Calculator, Clock3, Gift, HandCoins, History, PiggyBank, ReceiptText,
+  BadgePercent, BriefcaseMedical, CalendarCheck, CalendarDays, CalendarRange, Calculator, Clock3, Gift, GitCompare, HandCoins, History, PiggyBank, ReceiptText,
   Scale, Stethoscope, TreePalm, Users,
 } from "lucide-react";
 import { ShellApp, type GrupoMenu } from "@/components/shell-app";
@@ -16,6 +16,7 @@ const MENU: GrupoMenu[] = [
       { href: "/liquidador/descuentos", texto: "Préstamos, embargos y cuotas", icono: HandCoins, permiso: "liquidador.nomina.ver" },
       { href: "/liquidador/auxilios", texto: "Auxilios no prestacionales", icono: Gift, permiso: "liquidador.nomina.ver" },
       { href: "/liquidador/vacaciones", texto: "Liquidar vacaciones", icono: TreePalm, permiso: "liquidador.nomina.ver" },
+      { href: "/liquidador/comparar-siigo", texto: "Comparar con Siigo", icono: GitCompare, permiso: "liquidador.nomina.ver" },
     ],
   },
   {

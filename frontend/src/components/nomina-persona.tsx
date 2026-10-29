@@ -2,7 +2,7 @@
 
 import { Fragment } from "react";
 import { pesos } from "@/lib/formato";
-import { CONCEPTOS_PAGO, TIPOS_DESCUENTO, horas, type Nomina } from "@/lib/liquidador";
+import { CONCEPTOS_PAGO, TIPOS_DESCUENTO, TIPOS_NOVEDAD, horas, type Nomina } from "@/lib/liquidador";
 
 /** Devengado, deducciones, neto y alertas de una persona (nómina de un periodo o de un costeo). */
 export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina; titulo?: string }) {
@@ -10,6 +10,14 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
     <tr className={clase}><td>{concepto}</td><td className="text-xs text-slate-500">{detalle}</td><td className="whitespace-nowrap text-right tabular-nums">{pesos(valor)}</td></tr>
   );
   const usados = CONCEPTOS_PAGO.filter(([k]) => n.valores[k]);
+  const tipoNovedad = (t: string) => TIPOS_NOVEDAD.find(([k]) => k === t)?.[1] ?? t;
+  const novedad = (x: NonNullable<Nomina["novedades"]>[number]) => (
+    <Fragment key={`nov-${x.id}`}>
+      {fila(`${tipoNovedad(x.tipo)}: ${x.descripcion}`,
+        <>{x.calculo}{x.nomina_origen && ` · origen: ${x.nomina_origen}`}{!x.deduccion && !x.salarial && " · no salarial"}
+          {x.observacion && <span className="block text-amber-700">{x.observacion}</span>}</>, x.valor)}
+    </Fragment>
+  );
   return (
     <section className="rounded-lg border border-slate-200">
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -36,6 +44,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
               <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
             ))}
             {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
+            {(n.novedades ?? []).filter((x) => !x.deduccion).map(novedad)}
             {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
           </tbody>
         </table>
@@ -50,6 +59,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
                   <>{x.calculo}{x.observacion && <span className="block text-amber-700">{x.observacion}</span>}</>, x.valor)}
               </Fragment>
             ))}
+            {(n.novedades ?? []).filter((x) => x.deduccion).map(novedad)}
             {fila(<b>Total deducciones</b>, "", n.deducciones, "bg-slate-50")}
             {fila(<b>Neto a pagar</b>, "", n.neto, "bg-marca-50 font-bold text-marca-900")}
           </tbody>

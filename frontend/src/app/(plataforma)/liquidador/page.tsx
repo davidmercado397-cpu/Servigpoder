@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, GitCompare, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,6 +31,7 @@ function agrupar(lista: Periodo[]): Grupo[] {
 
 export default function Quincenas() {
   const gestionar = usePermiso("liquidador.periodos.gestionar");
+  const verNomina = usePermiso("liquidador.nomina.ver");
   const router = useRouter();
   const hoy = new Date();
   const [nueva, setNueva] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2, nombre: "General" });
@@ -112,7 +113,7 @@ export default function Quincenas() {
           </thead>
           <tbody>
             {lista && agrupar(lista).map((g) => (
-              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} onAgregar={() => agregarA(g)} />
+              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} verNomina={verNomina} onAgregar={() => agregarA(g)} />
             ))}
           </tbody>
         </table>
@@ -123,7 +124,7 @@ export default function Quincenas() {
   );
 }
 
-function PeriodoFilas({ g, gestionar, onAgregar }: { g: Grupo; gestionar: boolean; onAgregar: () => void }) {
+function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestionar: boolean; verNomina: boolean; onAgregar: () => void }) {
   const personas = g.nominas.reduce((s, p) => s + p.empleados, 0);
   return (
     <>
@@ -135,12 +136,26 @@ function PeriodoFilas({ g, gestionar, onAgregar }: { g: Grupo; gestionar: boolea
         </td>
         <td className="text-right text-sm tabular-nums text-slate-600">{personas.toLocaleString("es-CO")}</td>
         <td className="text-sm text-slate-500">{g.nominas.length} {g.nominas.length === 1 ? "nómina" : "nóminas"}</td>
-        <td className="text-right">
-          {gestionar && (
-            <button onClick={onAgregar} className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline">
-              <Plus className="h-4 w-4" /> Agregar nómina
-            </button>
-          )}
+        <td className="whitespace-nowrap text-right">
+          <div className="inline-flex flex-wrap justify-end gap-3">
+            {verNomina && (
+              <>
+                <a className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline" title="Todas las nóminas del periodo en un Excel"
+                  href={`/api/liquidador/nominas-del-periodo/excel?anio=${g.anio}&mes=${g.mes}&quincena=${g.quincena}`}>
+                  <FileSpreadsheet className="h-4 w-4" /> Excel del periodo
+                </a>
+                <Link className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline"
+                  href={`/liquidador/comparar-siigo?anio=${g.anio}&mes=${g.mes}&quincena=${g.quincena}`}>
+                  <GitCompare className="h-4 w-4" /> Comparar con Siigo
+                </Link>
+              </>
+            )}
+            {gestionar && (
+              <button onClick={onAgregar} className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline">
+                <Plus className="h-4 w-4" /> Agregar nómina
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {g.nominas.map((p) => {

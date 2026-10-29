@@ -13,8 +13,8 @@ from app.apps.liquidador.services.exportar import XLSX, _FUENTE, _RELLENO, _CENT
 CAMPOS = (
     ("basico", "Sueldo básico"), ("incapacidad", "Incapacidad"), ("vacaciones_valor", "Vacaciones"), ("recargos", "Recargos"),
     ("extras", "Horas extras"), ("auxilios_no_prestacionales", "Auxilios no prestacionales"), ("auxilio", "Auxilio de transporte"),
-    ("devengado", "Total devengado"), ("salud", "Salud"), ("pension", "Pensión"), ("embargos", "Embargos"),
-    ("prestamos", "Préstamos"), ("cuotas", "Cuotas"), ("deducciones", "Total deducciones"), ("neto", "Neto pagado"),
+    ("novedades_devengo", "Novedades (devengo)"), ("devengado", "Total devengado"), ("salud", "Salud"), ("pension", "Pensión"), ("embargos", "Embargos"),
+    ("prestamos", "Préstamos"), ("cuotas", "Cuotas"), ("novedades_deduccion", "Novedades (deducción)"), ("deducciones", "Total deducciones"), ("neto", "Neto pagado"),
 )
 
 

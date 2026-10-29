@@ -36,10 +36,10 @@ ROLES_BASE: dict[str, tuple[str, list[str]]] = {
 
 
 def _router() -> APIRouter:
-    from app.apps.liquidador.routes import asistente, configuracion, costeo, gestion, nomina, periodos, personal
+    from app.apps.liquidador.routes import asistente, configuracion, costeo, gestion, nomina, novedades, periodos, personal
 
     router = APIRouter(prefix="/liquidador")
-    for modulo in (configuracion, periodos, nomina, costeo, personal, gestion, asistente):
+    for modulo in (configuracion, periodos, nomina, novedades, costeo, personal, gestion, asistente):
         router.include_router(modulo.router)
     return router
 

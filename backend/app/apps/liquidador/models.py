@@ -363,6 +363,40 @@ class LiqVacacionSalida(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+# Tipos de novedad manual de nómina: corrigen lo que se pagó de más o de menos en nóminas anteriores
+MAYOR_VALOR, MENOR_VALOR = "mayor_valor", "menor_valor"
+HORAS_EXTRAS, RECARGOS_PENDIENTES = "horas_extras", "recargos"
+OTRO_DEVENGO, OTRA_DEDUCCION = "otro_devengo", "otra_deduccion"
+NOVEDADES_DEDUCCION = (MAYOR_VALOR, OTRA_DEDUCCION)
+NOVEDADES_HORAS = (HORAS_EXTRAS, RECARGOS_PENDIENTES)
+
+
+class LiqNovedad(Base):
+    """Novedad manual de una persona en una nómina: mayor valor pagado (se descuenta), menor valor pagado (se paga),
+    horas extras o recargos pendientes de nóminas anteriores (horas por concepto valoradas con la tarifa de la fecha en
+    que se causaron), u otro devengo o deducción."""
+
+    __tablename__ = "liq_novedad"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    periodo_id: Mapped[int] = mapped_column(ForeignKey("liq_periodo.id", ondelete="CASCADE"), index=True)
+    empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
+    tipo: Mapped[str] = mapped_column(String(20))
+    descripcion: Mapped[str] = mapped_column(String(200))
+    # Horas extras y recargos pendientes: horas por concepto y fecha en que se causaron (para la tarifa)
+    horas: Mapped[dict] = mapped_column(JSON, default=dict)
+    fecha_causacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Valor: el de las novedades en pesos; en las de horas, si se escribe, reemplaza el calculado
+    valor: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    salarial: Mapped[bool] = mapped_column(Boolean, default=True)  # hace base de salud y pensión (devengos)
+    nomina_origen: Mapped[str | None] = mapped_column(String(80), nullable=True)  # en qué nómina se pagó de más o de menos
+    origen_registro: Mapped[str] = mapped_column(String(10), default="manual")  # manual | excel
+    creado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
+
+
 # ---------------- Gestión humana: salud y casos jurídicos (repositorio de consulta; no afecta la nómina) ----------------
 # Se registran por documento: la persona puede no estar (o ya no estar) en la base de empleados.
 

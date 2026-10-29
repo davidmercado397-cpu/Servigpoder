@@ -14,7 +14,6 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -159,7 +158,7 @@ def generar(db: Session, periodo: LiqPeriodo, empresa_codigo: str | None) -> tup
             alto = ancho * img.alto / img.ancho if img.ancho else 20 * mm
             if alto > 24 * mm:
                 ancho, alto = ancho * 24 * mm / alto, 24 * mm
-            izquierda.append(Image(ImageReader(BytesIO(img.contenido)), width=ancho, height=alto))
+            izquierda.append(Image(BytesIO(img.contenido), width=ancho, height=alto))
         izquierda.append(Paragraph(escape(razon), _empresa))
         if nit:
             izquierda.append(Paragraph(f"Nit {escape(nit)}", _empresa))

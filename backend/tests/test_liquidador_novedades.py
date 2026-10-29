@@ -178,3 +178,25 @@ def test_excel_del_periodo_y_comparacion_con_siigo(admin, en_empresa):
 
     vacio = admin.post(f"{API}/comparar-siigo", files=archivo(xlsx([["hola"]]), "x.xlsx"), data=datos)
     assert vacio.status_code == 422
+
+
+def test_reporte_de_siigo_solo_con_netos(admin):
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], DIAS)
+    a, b = _nomina(admin, pid, "1001"), _nomina(admin, pid, "2002")
+    libro = Workbook()
+    h = libro.active
+    h.title = "ALCALDIA 1"
+    h.append(["NOMBRE", "CEDULA", "NETO A PAGAR"])
+    h.append(["A", 1001, a["neto"] + 0.37])
+    h.append(["B", 2002, b["neto"] - 9262])
+    buf = BytesIO()
+    libro.save(buf)
+    r = admin.post(f"{API}/comparar-siigo", files=archivo(buf.getvalue(), "netos.xlsx"), data={"anio": "2026", "mes": "11", "quincena": "1"})
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["resumen"]["solo_neto"] and d["resumen"]["tolerancia"] == 1000
+    filas = {f["documento"]: f for f in d["filas"]}
+    # Sin columnas de ingresos ni deducciones no se inventan diferencias: solo el neto
+    assert filas["1001"]["estado"] == "cuadra" and filas["1001"]["siigo"]["ingresos"] is None
+    assert filas["1001"]["diferencia"]["ingresos"] is None and filas["1001"]["diferencia"]["deducciones"] is None
+    assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == 9262

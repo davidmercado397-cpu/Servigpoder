@@ -1,5 +1,5 @@
-"""Comparación con la nómina de Siigo: el reporte de netos (una hoja por nómina con NOMBRE, CEDULA, INGRESOS, DEDUCCIONES y
-NETO A PAGAR) contra lo liquidado aquí en todas las nóminas del mismo periodo. Se cruza persona por persona sumando
+"""Comparación con la nómina de Siigo: el reporte de netos (una hoja por nómina con NOMBRE, CEDULA, NETO A PAGAR y, si vienen,
+INGRESOS y DEDUCCIONES; sin ellas se compara solo el neto) contra lo liquidado aquí en todas las nóminas del mismo periodo. Se cruza persona por persona sumando
 sus nóminas en cada lado, para que no importe cómo se repartieron. El archivo se procesa y se descarta.
 
 Los datos leídos (no el archivo) quedan 24 horas por periodo para volver a comparar contra la nómina actual sin subirlo
@@ -38,8 +38,8 @@ class PersonaSiigo:
     documento: str
     nombre: str
     hojas: list[str] = field(default_factory=list)
-    ingresos: float = 0.0
-    deducciones: float = 0.0
+    ingresos: float | None = 0.0  # None: alguna de sus hojas no trae la columna
+    deducciones: float | None = 0.0
     neto: float = 0.0
     detalle: list[dict] = field(default_factory=list)  # una entrada por hoja (nómina de Siigo) donde aparece
 
@@ -68,9 +68,9 @@ def leer(contenido: bytes) -> tuple[dict[str, PersonaSiigo], list[dict]]:
                 claves = [_norm(c) for c in fila]
                 if "CEDULA" in claves and any(c.startswith("NETO") for c in claves):
                     for i, c in enumerate(claves):
-                        for prefijo, campo in (("NOMBRE", "nombre"), ("CEDULA", "documento"), ("INGRESO", "ingresos"), ("DEVENGADO", "ingresos"),
-                                               ("DEDUCCION", "deducciones"), ("NETO", "neto")):
-                            if c.startswith(prefijo) and campo not in cols:
+                        for clave, campo in (("NOMBRE", "nombre"), ("CEDULA", "documento"), ("INGRESO", "ingresos"), ("DEVENGAD", "ingresos"),
+                                             ("DEDUCCION", "deducciones"), ("NETO", "neto")):
+                            if clave in c and campo not in cols:
                                 cols[campo] = i
                 continue
             v = lambda campo: fila[cols[campo]] if campo in cols and cols[campo] < len(fila) else None  # noqa: E731
@@ -82,11 +82,13 @@ def leer(contenido: bytes) -> tuple[dict[str, PersonaSiigo], list[dict]]:
                 hallazgos.append({"hoja": hoja.title, "fila": num, "documento": doc, "detalle": "Sin neto a pagar: no se comparó"})
                 continue
             p = personas.setdefault(doc, PersonaSiigo(doc, _texto(v("nombre"), 200) or doc))
-            ingresos, deducciones = _num(v("ingresos")) or 0.0, _num(v("deducciones")) or 0.0
+            # Sin la columna en la hoja no se sabe (None); con la columna y la celda vacía es 0
+            ingresos = (_num(v("ingresos")) or 0.0) if "ingresos" in cols else None
+            deducciones = (_num(v("deducciones")) or 0.0) if "deducciones" in cols else None
             p.hojas.append(hoja.title)
             p.detalle.append({"hoja": hoja.title, "ingresos": ingresos, "deducciones": deducciones, "neto": neto})
-            p.ingresos += ingresos
-            p.deducciones += deducciones
+            p.ingresos = None if p.ingresos is None or ingresos is None else p.ingresos + ingresos
+            p.deducciones = None if p.deducciones is None or deducciones is None else p.deducciones + deducciones
             p.neto += neto
     if not personas:
         raise ErrorArchivo("No se encontraron filas con CEDULA y NETO A PAGAR. Use el reporte de netos de nómina de Siigo.")
@@ -120,8 +122,8 @@ def _personas(c: LiqSiigoCarga) -> dict[str, PersonaSiigo]:
     out = {}
     for x in c.personas:
         p = PersonaSiigo(x["documento"], x["nombre"], [h["hoja"] for h in x["hojas"]], detalle=x["hojas"])
-        p.ingresos = sum(h["ingresos"] for h in x["hojas"])
-        p.deducciones = sum(h["deducciones"] for h in x["hojas"])
+        p.ingresos = None if any(h["ingresos"] is None for h in x["hojas"]) else sum(h["ingresos"] for h in x["hojas"])
+        p.deducciones = None if any(h["deducciones"] is None for h in x["hojas"]) else sum(h["deducciones"] for h in x["hojas"])
         p.neto = sum(h["neto"] for h in x["hojas"])
         out[p.documento] = p
     return out
@@ -168,39 +170,54 @@ def comparar(db: Session, carga: LiqSiigoCarga, tolerancia: float = 1000.0) -> d
         por_nomina[p.nombre] = total
     indice = Indice(empleados.values())
 
+    def resta(a: float | None, b: float | None) -> float | None:
+        return None if a is None or b is None else round(a - b, 2)
+
     filas, vistos = [], set()
     for doc, s in siigo.items():
         e = indice.buscar(doc)
         propio = nuestras.get(e.documento) if e else None
+        datos_siigo = {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto, "hojas": s.detalle}
         if propio is None:
             filas.append({"documento": doc, "nombre": s.nombre, "estado": "solo_siigo", "hojas_siigo": s.hojas, "nominas": [],
-                          "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto, "hojas": s.detalle}, "sistema": None,
-                          "diferencia": {"ingresos": -s.ingresos, "deducciones": -s.deducciones, "neto": -s.neto},
+                          "siigo": datos_siigo, "sistema": None,
+                          "diferencia": {"ingresos": resta(0, s.ingresos), "deducciones": resta(0, s.deducciones), "neto": -s.neto},
                           "pistas": ["No está liquidado aquí en este periodo"]})
             continue
         vistos.add(e.documento)
-        dif = {"ingresos": propio["devengado"] - s.ingresos, "deducciones": propio["deducciones"] - s.deducciones,
-               "neto": propio["neto"] - s.neto}
-        cuadra = all(abs(v) <= tolerancia for v in dif.values())
+        # Diferencia = aquí − Siigo; ingresos y deducciones solo si el reporte los trae
+        dif = {"ingresos": resta(propio["devengado"], s.ingresos), "deducciones": resta(propio["deducciones"], s.deducciones),
+               "neto": round(propio["neto"] - s.neto, 2)}
+        cuadra = all(abs(v) <= tolerancia for v in dif.values() if v is not None)
         pistas = []
+        valor_dia = propio["salario"] / 30 if propio["salario"] else 0
         if not cuadra:
-            if abs(dif["ingresos"]) > tolerancia:
+            if dif["ingresos"] is None:  # solo neto: más aquí puede ser un pago; menos aquí, un descuento
+                if dif["neto"] > tolerancia:
+                    pistas += _pistas(dif["neto"], propio, PISTAS_INGRESOS, tolerancia, "pagan")
+                elif dif["neto"] < -tolerancia:
+                    pistas += _pistas(-dif["neto"], propio, PISTAS_DEDUCCIONES, tolerancia, "descuentan")
+                if valor_dia and not pistas:
+                    dias = dif["neto"] / (valor_dia * 0.92)  # un día de salario menos su 8 % de salud y pensión
+                    if abs(dias - round(dias)) < 0.05 and round(dias):
+                        pistas.append(f"La diferencia del neto equivale a {abs(round(dias))} día(s) de salario (menos salud y pensión), "
+                                      f"{'más' if dias > 0 else 'menos'} aquí")
+            elif abs(dif["ingresos"]) > tolerancia:
                 pistas += _pistas(dif["ingresos"], propio, PISTAS_INGRESOS, tolerancia, "pagan")
-                valor_dia = propio["salario"] / 30 if propio["salario"] else 0
                 if valor_dia and not pistas:
                     dias = dif["ingresos"] / valor_dia
                     if abs(dias - round(dias)) < 0.05 and round(dias):
                         pistas.append(f"La diferencia de ingresos equivale a {abs(round(dias))} día(s) de salario "
                                       f"({'más' if dias > 0 else 'menos'} aquí)")
-            if abs(dif["deducciones"]) > tolerancia:
+            if dif["deducciones"] is not None and abs(dif["deducciones"]) > tolerancia:
                 dp = _pistas(dif["deducciones"], propio, PISTAS_DEDUCCIONES, tolerancia, "descuentan")
-                if not dp and abs(dif["ingresos"]) > tolerancia and abs(dif["deducciones"] - 0.08 * dif["ingresos"]) <= max(tolerancia, 100):
+                if not dp and dif["ingresos"] is not None and abs(dif["ingresos"]) > tolerancia \
+                        and abs(dif["deducciones"] - 0.08 * dif["ingresos"]) <= max(tolerancia, 100):
                     dp.append("La diferencia de deducciones es el 8 % (salud y pensión) de la diferencia de ingresos")
                 pistas += dp
         filas.append({"documento": e.documento, "nombre": propio["nombre"], "empleado_id": propio["empleado_id"],
                       "estado": "cuadra" if cuadra else "diferencia", "hojas_siigo": s.hojas, "nominas": propio["nominas"],
-                      "siigo": {"ingresos": s.ingresos, "deducciones": s.deducciones, "neto": s.neto, "hojas": s.detalle},
-                      "sistema": {c: round(propio[c], 2) for c in CAMPOS_SISTEMA}, "diferencia": {k: round(v, 2) for k, v in dif.items()},
+                      "siigo": datos_siigo, "sistema": {c: round(propio[c], 2) for c in CAMPOS_SISTEMA}, "diferencia": dif,
                       "pistas": pistas})
     for doc, propio in nuestras.items():
         if doc not in vistos:
@@ -220,6 +237,7 @@ def comparar(db: Session, carga: LiqSiigoCarga, tolerancia: float = 1000.0) -> d
         "resumen": {"personas_siigo": len(siigo), "personas_sistema": len(nuestras), "cuadran": conteo["cuadra"],
                     "con_diferencia": conteo["diferencia"], "solo_siigo": conteo["solo_siigo"], "solo_sistema": conteo["solo_sistema"],
                     "neto_siigo": round(neto_siigo, 2), "neto_sistema": round(neto_sistema, 2),
+                    "solo_neto": all(x.ingresos is None and x.deducciones is None for x in siigo.values()),
                     "diferencia_neto": round(neto_sistema - neto_siigo, 2), "tolerancia": tolerancia},
         "hojas_siigo": {k: round(v, 2) for k, v in por_hoja.items()},
         "nominas_sistema": {k: round(v, 2) for k, v in por_nomina.items()},

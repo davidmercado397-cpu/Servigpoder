@@ -9,7 +9,8 @@ import { ApiError, api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/ap
 import { MESES, pesos } from "@/lib/formato";
 import type { Hallazgo, Resultado as ResultadoPersona } from "@/lib/liquidador";
 
-type Valores = { ingresos: number; deducciones: number; neto: number };
+/** Ingresos y deducciones son null si el reporte de Siigo no trae esas columnas (solo el neto) */
+type Valores = { ingresos: number | null; deducciones: number | null; neto: number };
 type HojaSiigo = Valores & { hoja: string };
 type Fila = {
   documento: string; nombre: string; empleado_id?: number; estado: "cuadra" | "diferencia" | "solo_siigo" | "solo_sistema";
@@ -19,7 +20,7 @@ type Fila = {
 };
 type Resultado = {
   resumen: { personas_siigo: number; personas_sistema: number; cuadran: number; con_diferencia: number; solo_siigo: number; solo_sistema: number;
-    neto_siigo: number; neto_sistema: number; diferencia_neto: number; tolerancia: number };
+    neto_siigo: number; neto_sistema: number; diferencia_neto: number; tolerancia: number; solo_neto?: boolean };
   hojas_siigo: Record<string, number>; nominas_sistema: Record<string, number>; filas: Fila[]; hallazgos: Hallazgo[];
   /** Reporte guardado 24 horas para volver a comparar sin subirlo */
   carga: { archivo: string; cargado_en: string; vence_en: string };
@@ -46,7 +47,7 @@ function DetallePersona({ f, tolerancia }: { f: Fila; tolerancia: number }) {
   }, [f]);
 
   const color = (v: number) => (Math.abs(v) <= tolerancia ? "text-slate-500" : v > 0 ? "text-sky-700" : "text-red-700");
-  const filas: [string, number | undefined, number | undefined, number][] = [
+  const filas: [string, number | null | undefined, number | undefined, number | null][] = [
     ["Ingresos (devengado)", f.siigo?.ingresos, f.sistema?.devengado, f.diferencia.ingresos],
     ["Deducciones", f.siigo?.deducciones, f.sistema?.deducciones, f.diferencia.deducciones],
     ["Neto a pagar", f.siigo?.neto, f.sistema?.neto, f.diferencia.neto],
@@ -61,9 +62,10 @@ function DetallePersona({ f, tolerancia }: { f: Fila; tolerancia: number }) {
             <tbody>
               {filas.map(([t, s, a, d]) => (
                 <tr key={t} className={t === "Neto a pagar" ? "font-semibold" : ""}>
-                  <td>{t}</td><td className="text-right tabular-nums">{s !== undefined ? pesos(s) : "—"}</td>
+                  <td>{t}</td>
+                  <td className="text-right tabular-nums">{s === null ? <span className="text-xs text-slate-400">no viene en el reporte</span> : s !== undefined ? pesos(s) : "—"}</td>
                   <td className="text-right tabular-nums">{a !== undefined ? pesos(a) : "—"}</td>
-                  <td className={`text-right tabular-nums ${color(d)}`}>{d > 0 ? "+" : ""}{pesos(d)}</td>
+                  <td className={`text-right tabular-nums ${d === null ? "text-slate-400" : color(d)}`}>{d === null ? "—" : `${d > 0 ? "+" : ""}${pesos(d)}`}</td>
                 </tr>
               ))}
             </tbody>
@@ -79,15 +81,15 @@ function DetallePersona({ f, tolerancia }: { f: Fila; tolerancia: number }) {
               <thead><tr><th>Hoja</th><th className="text-right">Ingresos</th><th className="text-right">Deducciones</th><th className="text-right">Neto</th></tr></thead>
               <tbody>
                 {f.siigo.hojas.map((h, i) => (
-                  <tr key={i}><td>{h.hoja}</td><td className="text-right tabular-nums">{pesos(h.ingresos)}</td>
-                    <td className="text-right tabular-nums">{pesos(h.deducciones)}</td><td className="text-right tabular-nums">{pesos(h.neto)}</td></tr>
+                  <tr key={i}><td>{h.hoja}</td><td className="text-right tabular-nums">{h.ingresos === null ? "—" : pesos(h.ingresos)}</td>
+                    <td className="text-right tabular-nums">{h.deducciones === null ? "—" : pesos(h.deducciones)}</td><td className="text-right tabular-nums">{pesos(h.neto)}</td></tr>
                 ))}
               </tbody>
             </table>
           ) : <p className="text-sm text-slate-500">No está en el archivo de Siigo.</p>}
           <p className="text-xs text-slate-500">
-            El reporte de netos de Siigo solo trae ingresos, deducciones y neto. Para ver qué concepto difiere, compare con el detalle de Siigo
-            («Ver detalle») la liquidación de aquí que está abajo.
+            {f.siigo?.ingresos === null ? "Este reporte de Siigo solo trae el neto a pagar." : "El reporte de netos de Siigo trae ingresos, deducciones y neto, no el detalle por concepto."}{" "}
+            Para ver qué concepto difiere, compare con el detalle de la persona en Siigo («Ver detalle») la liquidación de aquí que está abajo.
           </p>
         </div>
       </div>
@@ -190,6 +192,17 @@ export default function CompararSiigo() {
   const dif = (v: number) => (
     <span className={Math.abs(v) <= (r?.tolerancia ?? 0) ? "text-slate-400" : v > 0 ? "text-sky-700" : "text-red-700"}>{v > 0 ? "+" : ""}{pesos(v)}</span>
   );
+  /** Siigo, aquí y diferencia rotulados en una celda */
+  const celda = (siigo: number | null | undefined, aqui: number | undefined, d: number | null | undefined) => (
+    <td className="whitespace-nowrap text-right text-xs tabular-nums">
+      <span className="grid grid-cols-[auto_1fr] gap-x-2">
+        <span className="text-left text-slate-400">Siigo</span>
+        <span>{siigo === null ? <span className="text-slate-400">no viene</span> : siigo === undefined ? "—" : pesos(siigo)}</span>
+        <span className="text-left text-slate-400">Aquí</span><span>{aqui === undefined ? "—" : pesos(aqui)}</span>
+        {d !== null && d !== undefined && siigo !== undefined && aqui !== undefined && <><span className="text-left text-slate-400">Dif.</span>{dif(d)}</>}
+      </span>
+    </td>
+  );
 
   return (
     <div className="space-y-5">
@@ -273,6 +286,9 @@ export default function CompararSiigo() {
               ))}
             </div>
           </details>
+          {r.solo_neto && (
+            <Alerta tipo="info">Este reporte de Siigo trae solo el neto a pagar: se comparan los netos. Ingresos y deducciones aparecen como «no viene».</Alerta>
+          )}
           {res.hallazgos.length > 0 && (
             <Alerta tipo="info">{res.hallazgos.length} filas de Siigo no se pudieron comparar: {res.hallazgos.slice(0, 5).map((h) => `${h.hoja} fila ${h.fila}`).join(", ")}</Alerta>
           )}
@@ -290,8 +306,8 @@ export default function CompararSiigo() {
             <div className="overflow-auto">
               <table className="tabla text-sm">
                 <thead>
-                  <tr><th /><th>Persona</th><th>Nóminas</th><th className="text-right">Ingresos Siigo / aquí</th><th className="text-right">Deducciones Siigo / aquí</th>
-                    <th className="text-right">Neto Siigo / aquí</th><th className="text-right">Diferencia neto</th><th>Posibles causas</th></tr>
+                  <tr><th /><th>Persona</th><th>Nóminas</th><th className="text-right">Ingresos</th><th className="text-right">Deducciones</th>
+                    <th className="text-right">Neto</th><th className="text-right">Diferencia neto</th><th>Posibles causas</th></tr>
                 </thead>
                 <tbody>
                   {filas.map((f) => (
@@ -307,11 +323,9 @@ export default function CompararSiigo() {
                           <span key={n.periodo_id} className="block">Aquí: {n.nombre}</span>
                         ))}
                       </td>
-                      <td className="whitespace-nowrap text-right text-xs tabular-nums">{f.siigo ? pesos(f.siigo.ingresos) : "—"}<br />{f.sistema ? pesos(f.sistema.devengado) : "—"}
-                        {f.siigo && f.sistema && <span className="block">{dif(f.diferencia.ingresos)}</span>}</td>
-                      <td className="whitespace-nowrap text-right text-xs tabular-nums">{f.siigo ? pesos(f.siigo.deducciones) : "—"}<br />{f.sistema ? pesos(f.sistema.deducciones) : "—"}
-                        {f.siigo && f.sistema && <span className="block">{dif(f.diferencia.deducciones)}</span>}</td>
-                      <td className="whitespace-nowrap text-right text-xs tabular-nums">{f.siigo ? pesos(f.siigo.neto) : "—"}<br />{f.sistema ? pesos(f.sistema.neto) : "—"}</td>
+                      {celda(f.siigo ? f.siigo.ingresos : undefined, f.sistema?.devengado, f.diferencia.ingresos)}
+                      {celda(f.siigo ? f.siigo.deducciones : undefined, f.sistema?.deducciones, f.diferencia.deducciones)}
+                      {celda(f.siigo?.neto, f.sistema?.neto, null)}
                       <td className="whitespace-nowrap text-right font-medium tabular-nums">{dif(f.diferencia.neto)}</td>
                       <td className="min-w-[220px] text-xs text-slate-600">
                         {f.pistas.length ? f.pistas.map((p, i) => <span key={i} className="block">{p}</span>) : f.estado === "diferencia" ? "Abra el detalle de la persona" : ""}

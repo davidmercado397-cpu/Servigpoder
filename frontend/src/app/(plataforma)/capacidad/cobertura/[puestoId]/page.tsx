@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import { ESTADOS, EstadoInsignia, num } from "@/components/estado";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError, type DetallePuesto } from "@/lib/api";
-import { DIAS, franjaTexto } from "@/lib/formato";
+import { DIAS, hora } from "@/lib/formato";
 
 const CLASE_CELDA: Record<string, string> = {
   trabajo: "bg-marca-100 text-marca-900",
@@ -23,6 +23,16 @@ function corto(codigo: string) {
   const m = c.match(/^(\d{1,2}):(\d{2}) - (\d{1,2}):\d{2}/);
   if (m) return `${Number(m[1])}-${Number(m[3])}`;
   return c.length > 5 ? c.slice(0, 5) : c;
+}
+
+const NOMBRES_DIA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+/** Franja vendida con los días escritos (en la tabla «D» es el turno 06–18; aquí no se abrevian los días para no confundir). */
+function franjaLarga(f: { dias: number; inicio: string; fin: string; cantidad: number }) {
+  const dias = f.dias === 127 ? "Lun a Dom" : f.dias === 31 ? "Lun a Vie" : f.dias === 63 ? "Lun a Sáb"
+    : NOMBRES_DIA.filter((_, i) => f.dias & (1 << i)).join(", ");
+  const rango = f.inicio === f.fin ? "24 h" : `${hora(f.inicio)}–${hora(f.fin)}`;
+  return `${dias}: ${rango}${f.cantidad > 1 ? ` ×${f.cantidad}` : ""}`;
 }
 
 function Detalle() {
@@ -56,13 +66,20 @@ function Detalle() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Dato t="Vendido" v={d.franjas.length ? d.franjas.map(franjaTexto).join(" · ") : "Sin matriz"} />
+        <Dato t="Vendido" v={d.franjas.length ? d.franjas.map(franjaLarga).join("\n") : "Sin matriz"} />
         <Dato t="¿Incluye festivos?" v={d.incluye_festivos == null ? "—" : d.incluye_festivos ? "Sí" : "No"} />
         <Dato t="Hombres / titulares" v={`${num(r.hombres, 1)} / ${r.fijos}`} alerta={r.fijos > Number(r.hombres) + 0.5 || r.fijos < Number(r.hombres) - 0.5} />
         <Dato t="Personas programadas" v={String(r.personas)} />
         <Dato t="Horas descubiertas" v={num(r.horas_descubiertas)} />
         <Dato t="Horas en exceso" v={num(r.horas_exceso)} />
       </div>
+
+      {d.personas.some((per) => Object.values(per.clases).includes("desconocido")) && (
+        <Alerta tipo="info">
+          Hay códigos de turno que no están en el catálogo de turnos (en rojo): sus horas no cuentan como cubiertas y el día puede salir con
+          hueco. Importe el catálogo de turnos actualizado en Maestros y vuelva a generar el análisis.
+        </Alerta>
+      )}
 
       <section className="tarjeta overflow-x-auto">
         <table className="w-max border-separate border-spacing-0.5 text-center text-xs">
@@ -89,7 +106,9 @@ function Detalle() {
                 {dias.map((x) => {
                   const cod = per.dias[x.fecha];
                   return (
-                    <td key={x.fecha} className={`h-7 rounded px-1 ${cod ? CLASE_CELDA[per.clases[x.fecha]] ?? "" : ""}`} title={cod ?? ""}>
+                    <td key={x.fecha} className={`h-7 rounded px-1 ${cod ? CLASE_CELDA[per.clases[x.fecha]] ?? "" : ""}`} title={cod ? (per.clases[x.fecha] === "desconocido"
+                      ? `${cod}: este código no está en el catálogo de turnos, así que no cuenta como cubierto. Impórtelo en Maestros → Turnos.`
+                      : cod) : ""}>
                       {cod ? corto(cod) : ""}
                     </td>
                   );
@@ -115,6 +134,7 @@ function Detalle() {
           <span className="rounded bg-marca-100 px-1">turno</span>
           <span className="rounded bg-slate-100 px-1">descanso</span>
           <span className="rounded bg-[#fab219]/25 px-1">novedad</span>
+          <span className="rounded bg-red-100 px-1 text-red-700">código fuera del catálogo de turnos (no cuenta)</span>
           {Object.entries(ESTADOS).map(([k, e]) => <span key={k}>{e.icono} {e.texto}</span>)}
           <span className="text-[#a32525]">* festivo</span>
         </div>
@@ -152,7 +172,7 @@ function Dato({ t, v, alerta }: { t: string; v: string; alerta?: boolean }) {
   return (
     <div className={`tarjeta p-3 ${alerta ? "border-l-4 border-l-[#ec835a]" : ""}`}>
       <p className="text-xs text-slate-500">{t}</p>
-      <p className="text-sm font-semibold text-slate-800">{v}{alerta && " ⚠"}</p>
+      <p className="whitespace-pre-line text-sm font-semibold text-slate-800">{v}{alerta && " ⚠"}</p>
     </div>
   );
 }

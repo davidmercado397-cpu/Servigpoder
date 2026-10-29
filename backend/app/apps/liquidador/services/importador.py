@@ -223,8 +223,18 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
     return leidas, res
 
 
+def mismo_nombre(a: str, b: str) -> bool:
+    """Dos nombres de la misma persona aunque cambie el orden o falte un apellido: comparten al menos dos palabras
+    (o todas, si alguno tiene una sola)."""
+    from app.apps.liquidador.services.personal import _norm
+
+    pa, pb = set(_norm(a).split()), set(_norm(b).split())
+    return len(pa & pb) >= min(2, len(pa), len(pb))
+
+
 def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
-    """Reemplaza los días de la nómina; crea o actualiza los empleados del archivo."""
+    """Reemplaza los días de la nómina y crea a quien no exista. A los empleados que ya existen no les cambia nada (nombre,
+    cargo…): la ficha manda. Si el nombre del Excel no coincide con el de la ficha, lo advierte (cédula mal digitada)."""
     leidas, res = leer(db, periodo, contenido)
     from app.apps.liquidador.services.personal import Indice
 
@@ -236,10 +246,9 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
             emp = LiqEmpleado(documento=f.documento, nombre=f.nombre, cargo=f.cargo)
             db.add(emp)
             empleados[f.documento] = emp
-        elif emp.tipo_personal is None:  # quien viene de la base de personal conserva su nombre y cargo
-            emp.nombre = f.nombre
-            if f.con_cargo:
-                emp.cargo = f.cargo
+        elif f.nombre != f.documento and not f.nombre.isdigit() and not mismo_nombre(f.nombre, emp.nombre):
+            res.advertencias.append(f"Fila {f.num}: la cédula {f.documento} es de {emp.nombre} en la ficha, pero el Excel dice "
+                                    f"«{f.nombre}». Se cargó a {emp.nombre}; si la cédula está mal digitada, corríjala y vuelva a cargar")
         db.flush()
         for fecha, turno in f.dias:
             extra = res.adicionales.get((f.documento, fecha), [])

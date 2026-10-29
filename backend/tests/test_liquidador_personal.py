@@ -210,3 +210,21 @@ def test_exportar_base_y_volver_a_importar(admin):
     luis = _ficha(admin, "5004")["personal"]
     assert luis["pensionado"] and luis["fondo_pensiones"] == "COLPENSIONES"
     assert not _ficha(admin, "PPT 1234567")["personal"]["pensionado"]
+
+
+def test_controles_de_nombres_en_la_base_y_en_la_nomina(admin):
+    from tests.test_liquidador_nomina import _periodo_con
+
+    admin.post(f"{API}/personal/importar-base", files=archivo(_base(), "base.xlsx"))
+    # Base con el nombre de otra persona copiado en la cédula 5002 (como pasó con la fila 130)
+    base = _libro({"ADMINISTRATIVOS": [ACTIVOS, _activo(1, 5001.0, "ANA ADMINISTRATIVA", cargo="COORDINADOR DE PUESTO"),
+                                       _activo(2, 5002.0, "ANA ADMINISTRATIVA", cargo="ANALISTA")]})
+    d = admin.post(f"{API}/personal/importar-base", files=archivo(base, "base.xlsx")).json()["data"]
+    detalles = [h["detalle"] for h in d["hallazgos"] if h["documento"] == "5002"]
+    assert any("El nombre cambió de «EVA ADMIN»" in x for x in detalles) and any("mismo nombre" in x for x in detalles)
+
+    # El Excel de la nómina no cambia el nombre de quien ya existe; avisa si no coincide
+    pid = _periodo_con(admin, 2026, 11, 1, [[5004, "PEDRO EQUIVOCADO", *(["A"] * 15)], [5004.0, "LUIS PENSIONADO", *([""] * 15)]], list(range(1, 16)))
+    assert _ficha(admin, "5004")["nombre"] == "LUIS PENSIONADO"
+    avisos = admin.get(f"{API}/periodos/{pid}").json()["data"]["advertencias"]
+    assert any("es de LUIS PENSIONADO en la ficha" in a for a in avisos)

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { BuscarCie, ImportarAusentismo, Soportes } from "@/components/gestion-humana";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Pestanas, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Pestanas, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import {
   NOVEDADES, ORIGEN_CORTO, ORIGENES, SOPORTES, etiqueta, fechaCorta, qInicial, type Incapacidad, type ResumenIncapacidades,
@@ -205,8 +205,10 @@ export default function Incapacidades() {
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
       {importar && <ImportarAusentismo onCerrar={() => setImportar(false)} onImportado={() => cargar().catch(() => {})} />}
       {edicion && (
-        <FormularioIncapacidad key={edicion.registro?.id ?? "nueva"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={(m) => { setEdicion(null); setAviso(m); cargar().catch(() => {}); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioIncapacidad key={edicion.registro?.id ?? "nueva"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={(m) => { setEdicion(null); setAviso(m); cargar().catch(() => {}); }} />
+        </Modal>
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

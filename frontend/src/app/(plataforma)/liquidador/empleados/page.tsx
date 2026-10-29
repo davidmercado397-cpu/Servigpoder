@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ImportarPersonal } from "@/components/importar-personal";
 import { NuevoEmpleado } from "@/components/nuevo-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { CLASES_ARL, DIAS_SEMANA, type Empleado } from "@/lib/liquidador";
@@ -62,7 +62,7 @@ export default function Empleados() {
         nóminas en que aparece. También se crean al cargar el Excel de una nómina o al importar la base de personal.
       </p>
       {error && <Alerta>{error}</Alerta>}
-      {nuevo && <NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} />}
+      {nuevo && <Modal onCerrar={() => setNuevo(false)}><NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} /></Modal>}
       {importar && <ImportarPersonal onImportado={() => cargar().catch(() => {})} />}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { BuscarCie, Soportes } from "@/components/gestion-humana";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { TIPOS_RESTRICCION, etiqueta, fechaCorta, qInicial, type Restriccion } from "@/lib/gestion";
 import { usePermiso } from "@/lib/sesion";
@@ -149,8 +149,10 @@ export default function Restricciones() {
       {error && <Alerta>{error}</Alerta>}
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
       {edicion && (
-        <FormularioRestriccion key={edicion.registro?.id ?? "nueva"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={() => { setEdicion(null); setAviso("Registro guardado."); cargar().catch(() => {}); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioRestriccion key={edicion.registro?.id ?? "nueva"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={() => { setEdicion(null); setAviso("Registro guardado."); cargar().catch(() => {}); }} />
+        </Modal>
       )}
       <div className="tarjeta overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">

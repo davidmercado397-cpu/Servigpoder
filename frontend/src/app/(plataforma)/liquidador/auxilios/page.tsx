@@ -4,7 +4,7 @@ import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { FormularioAuxilio } from "@/components/formulario-auxilio";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { QUINCENAS, type Auxilio } from "@/lib/liquidador";
@@ -66,8 +66,10 @@ export default function Auxilios() {
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 
       {edicion && (
-        <FormularioAuxilio key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={() => { setEdicion(null); setAviso("Auxilio guardado. Se aplica al calcular o recalcular cada periodo."); cargar().catch(() => {}); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioAuxilio key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={() => { setEdicion(null); setAviso("Auxilio guardado. Se aplica al calcular o recalcular cada periodo."); cargar().catch(() => {}); }} />
+        </Modal>
       )}
 
       <div className="tarjeta overflow-hidden">

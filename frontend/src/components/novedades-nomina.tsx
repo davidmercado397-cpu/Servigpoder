@@ -3,7 +3,7 @@
 import { FileDown, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BuscarEmpleado } from "@/components/buscar-empleado";
-import { Alerta } from "@/components/ui";
+import { Alerta, Modal } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { CONCEPTOS_PAGO, TIPOS_NOVEDAD, type Hallazgo, type Novedad } from "@/lib/liquidador";
@@ -167,8 +167,10 @@ export function NovedadesNomina({ periodoId, editable, onCambio }: { periodoId: 
       </div>
       {error && <Alerta>{error}</Alerta>}
       {edicion && (
-        <FormularioNovedad key={edicion.registro?.id ?? "nueva"} periodoId={periodoId} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={() => { setEdicion(null); listo(); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioNovedad key={edicion.registro?.id ?? "nueva"} periodoId={periodoId} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={() => { setEdicion(null); listo(); }} />
+        </Modal>
       )}
       {editable && (
         <div className="flex flex-wrap items-center gap-2 text-sm">

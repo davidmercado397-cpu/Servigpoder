@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function Titulo({ children, accion }: { children: React.ReactNode; accion?: React.ReactNode }) {
   return (
@@ -63,4 +63,21 @@ export function SubirArchivo({ texto, onArchivo, deshabilitado }: { texto: strin
 
 export function Insignia({ children, color = "bg-slate-100 text-slate-700" }: { children: React.ReactNode; color?: string }) {
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{children}</span>;
+}
+
+/** Ventana sobre la página para crear o editar sin perder el lugar en la lista. Se cierra con Esc o con su propio
+ * botón de cerrar (un clic afuera no la cierra, para no perder lo escrito). */
+export function Modal({ children, onCerrar }: { children: React.ReactNode; onCerrar: () => void }) {
+  useEffect(() => {
+    const previo = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") onCerrar(); };
+    window.addEventListener("keydown", tecla);
+    return () => { document.body.style.overflow = previo; window.removeEventListener("keydown", tecla); };
+  }, [onCerrar]);
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 px-4 py-10" role="dialog" aria-modal="true">
+      <div className="mx-auto w-full max-w-5xl [&>*]:shadow-2xl">{children}</div>
+    </div>
+  );
 }

@@ -4,7 +4,7 @@ import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { FormularioDescuento } from "@/components/formulario-descuento";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { QUINCENAS, TIPOS_DESCUENTO, type Descuento } from "@/lib/liquidador";
@@ -65,8 +65,10 @@ export default function Descuentos() {
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 
       {edicion && (
-        <FormularioDescuento key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={() => { setEdicion(null); setAviso("Descuento guardado. Se aplica al calcular o recalcular cada periodo."); cargar().catch(() => {}); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioDescuento key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={() => { setEdicion(null); setAviso("Descuento guardado. Se aplica al calcular o recalcular cada periodo."); cargar().catch(() => {}); }} />
+        </Modal>
       )}
 
       <div className="tarjeta overflow-hidden">

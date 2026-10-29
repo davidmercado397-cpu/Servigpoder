@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { BuscarEmpleado } from "@/components/buscar-empleado";
 import { Soportes } from "@/components/gestion-humana";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { ESTADOS_CASO, TIPOS_CASO, etiqueta, fechaCorta, qInicial, type Caso } from "@/lib/gestion";
 import { usePermiso } from "@/lib/sesion";
@@ -206,8 +206,10 @@ export default function Tutelas() {
         <Alerta tipo="info">{resumen.abiertos} casos abiertos{resumen.vencidos ? `, ${resumen.vencidos} con el plazo vencido` : ""}.</Alerta>
       )}
       {edicion && (
-        <FormularioCaso key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
-          onGuardado={() => { setEdicion(null); setAviso("Caso guardado."); cargar().catch(() => {}); }} />
+        <Modal onCerrar={() => setEdicion(null)}>
+          <FormularioCaso key={edicion.registro?.id ?? "nuevo"} registro={edicion.registro} onCancelar={() => setEdicion(null)}
+            onGuardado={() => { setEdicion(null); setAviso("Caso guardado."); cargar().catch(() => {}); }} />
+        </Modal>
       )}
       <div className="tarjeta overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">

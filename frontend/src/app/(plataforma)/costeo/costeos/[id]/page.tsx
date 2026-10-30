@@ -15,19 +15,21 @@ type Personal = { nombre: string; hombres: number; salario?: number | null; hora
 type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string };
 type Datos = {
   duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual: number; donaciones: number;
+  pct_comision_vendedor?: number | null;
   servicios: Servicio[]; personal: Personal[]; otros: Elemento[]; dotacion_tarifa: Elemento[]; dotacion_puesto: Elemento[];
 };
 type Resultado = {
   meses: number; tarifa_decreto: number; descuento_nota_credito: number; tarifa_neta: number; hombres_servicios: number; hombres_personal: number;
   costo_por_hombre: number; mfp: { pct_nota_credito: number; pct_cupo_inversion: number; pct_otros: number; pct_total: number; cupo_inversion_vp: number };
   bolsas: { publicidad: number; representacion: number; horas_anuales: number; valor_hora: number };
-  comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number };
+  comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean };
   facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number };
   personal: { nombre: string; hombres: number; costo_hombre: number; costo_total: number; neto_hombre: number }[];
   costos: Record<string, number>; total_costos: number; antes_renta: number; margen_mensual: number; margen_por_hombre: number; margen_total: number;
-  pct_margen: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: { mensual: number }[]; dotacion_puesto: { mensual: number }[];
+  pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: { mensual: number }[]; dotacion_puesto: { mensual: number }[];
 };
 type Costeo = { id: number; cliente: Cliente; nombre: string; version: number; estado: string; datos: Datos; resultado: Resultado; mfp_id: number | null; parametros_aprobados: boolean };
+type RangoComision = { id: number; hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type CatServicio = { id: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
 type CatElemento = { id: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean; activo: boolean };
 
@@ -54,6 +56,7 @@ export default function EditorCosteo() {
   const [r, setR] = useState<Resultado | null>(null);
   const [servicios, setServicios] = useState<CatServicio[]>([]);
   const [catalogo, setCatalogo] = useState<CatElemento[]>([]);
+  const [rangos, setRangos] = useState<RangoComision[]>([]);
   const [cambios, setCambios] = useState(false);
   const [crearMfp, setCrearMfp] = useState(false);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
@@ -71,6 +74,7 @@ export default function EditorCosteo() {
     cargar();
     api<CatServicio[]>("/costeo/servicios").then((s) => setServicios(s.filter((x) => x.activo))).catch(() => {});
     api<CatElemento[]>("/costeo/catalogo").then((s) => setCatalogo(s.filter((x) => x.activo))).catch(() => {});
+    api<RangoComision[]>("/costeo/comisiones").then(setRangos).catch(() => {});
   }, [cargar]);
 
   // Resultado en vivo mientras se edita
@@ -85,6 +89,8 @@ export default function EditorCosteo() {
   const editable = costear && c.estado !== "aprobado";
   const cambiar = (x: Partial<Datos>) => { setD({ ...d, ...x }); setCambios(true); };
   const hombres = d.personal.reduce((s, p) => s + Number(p.hombres || 0), 0) || r.hombres_servicios;
+  // Comisiones que se pueden escoger: las de los rangos configurados (y la ya guardada, si ese rango cambió)
+  const comisiones = [...new Set([...rangos.map((x) => x.pct_comision), ...(d.pct_comision_vendedor != null ? [d.pct_comision_vendedor] : [])])].sort((a, b) => b - a);
 
   async function guardar() {
     try {
@@ -134,12 +140,18 @@ export default function EditorCosteo() {
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="space-y-5">
           <Seccion titulo="Condiciones">
-            <div className="grid gap-3 sm:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Num etiqueta="Duración (meses)" v={d.duracion_meses} on={(v) => cambiar({ duracion_meses: v })} off={!editable} />
               <Num etiqueta="Nota crédito (%)" v={+(d.pct_nota_credito * 100).toFixed(4)} on={(v) => cambiar({ pct_nota_credito: v / 100 })} off={!editable} />
               <Num etiqueta="Cupo de inversión (%)" v={+(d.pct_cupo_inversion * 100).toFixed(4)} on={(v) => cambiar({ pct_cupo_inversion: v / 100 })} off={!editable} />
               <Num etiqueta="Horas de obsequio por año" v={d.horas_bolsa_anual} on={(v) => cambiar({ horas_bolsa_anual: v })} off={!editable} />
               <Num etiqueta="Donaciones (total)" v={d.donaciones} on={(v) => cambiar({ donaciones: v })} off={!editable} />
+              <div><label className="label">Comisión del vendedor</label>
+                <select className="input" disabled={!editable} value={d.pct_comision_vendedor ?? ""}
+                  onChange={(e) => cambiar({ pct_comision_vendedor: e.target.value === "" ? null : Number(e.target.value) })}>
+                  <option value="">Automática según % MFP ({pct(r.comision.pct, 1)})</option>
+                  {comisiones.map((x) => <option key={x} value={x}>{pct(x, 1)}</option>)}
+                </select></div>
             </div>
           </Seccion>
 
@@ -158,7 +170,7 @@ export default function EditorCosteo() {
                     <td><input className="input w-28" disabled={!editable} value={s.puesto} onChange={(e) => set({ puesto: e.target.value })} /></td>
                     <td><input className="input w-16" type="number" disabled={!editable} value={s.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
                     <td><input className="input w-32" type="number" disabled={!editable} value={s.tarifa} onChange={(e) => set({ tarifa: n(e.target.value) })} /></td>
-                    <td><input className="input w-20" type="number" disabled={!editable} value={s.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
+                    <td><input className="input w-20" type="number" min={0} step="0.5" disabled={!editable} value={s.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
                     <td>{editable && <Quitar on={() => cambiar({ servicios: d.servicios.filter((_, j) => j !== i) })} />}</td>
                   </tr>
                 );
@@ -174,7 +186,7 @@ export default function EditorCosteo() {
                 return (
                   <tr key={i}>
                     <td><input className="input w-28" disabled={!editable} value={p.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
-                    <td><input className="input w-16" type="number" disabled={!editable} value={p.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
+                    <td><input className="input w-20" type="number" min={0} step="0.5" disabled={!editable} value={p.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
                     <td><input className="input w-28" type="number" disabled={!editable} placeholder="Mínimo" value={p.salario ?? ""} onChange={(e) => set({ salario: e.target.value === "" ? null : n(e.target.value) })} /></td>
                     <td><input className="input w-28" type="number" disabled={!editable} value={p.horas_extras} onChange={(e) => set({ horas_extras: n(e.target.value) })} /></td>
                     <td className="text-center"><input type="checkbox" disabled={!editable} checked={p.auxilio_transporte} onChange={(e) => set({ auxilio_transporte: e.target.checked })} /></td>
@@ -220,6 +232,10 @@ function PanelResultado({ r }: { r: Resultado }) {
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Margen mensual del negocio</p>
         <p className={`text-2xl font-bold ${r.margen_mensual < 0 ? "text-red-700" : "text-green-700"}`}>{pesos(r.margen_mensual)} <span className="text-base">({pct(r.pct_margen)})</span></p>
         <p className="text-sm text-slate-600">Por hombre {pesos(r.margen_por_hombre)} · total del contrato {pesos(r.margen_total)}</p>
+        <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
+          <div><p className="text-xs text-slate-500">Rentabilidad mensual</p><p className="font-semibold tabular-nums">{pct(r.pct_rentabilidad_mensual ?? r.pct_margen)}</p></div>
+          <div><p className="text-xs text-slate-500">Rentabilidad total del contrato</p><p className="font-semibold tabular-nums">{pct(r.pct_rentabilidad_total ?? r.pct_margen)}</p></div>
+        </div>
         {r.alertas.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-red-700">{r.alertas.map((a) => <li key={a}>• {a}</li>)}</ul>}
       </div>
       <div className="tarjeta p-4 text-sm">
@@ -233,7 +249,8 @@ function PanelResultado({ r }: { r: Resultado }) {
         {fila("MFP total", pct(r.mfp.pct_total), true)}
         <p className="text-xs text-slate-500">Nota crédito {pct(r.mfp.pct_nota_credito)} · cupo {pct(r.mfp.pct_cupo_inversion)} · otros {pct(r.mfp.pct_otros)}</p>
         <p className="text-xs text-slate-500">Cupo de inversión (valor presente): {pesos(r.mfp.cupo_inversion_vp)}</p>
-        <p className="text-xs text-slate-500">Comisión {pct(r.comision.pct, 1)} · carga {r.comision.carga_prestacional} · vendedor {pesos(r.comision.vendedor_total)} · director {pesos(r.comision.director_total)}</p>
+        <p className="text-xs text-slate-500">Comisión vendedor {pct(r.comision.pct_vendedor ?? r.comision.pct, 1)}{r.comision.vendedor_elegida ? " (escogida)" : ""} · carga {r.comision.carga_vendedor ?? r.comision.carga_prestacional} · {pesos(r.comision.vendedor_total)}</p>
+        <p className="text-xs text-slate-500">Comisión director {pct(r.comision.pct, 1)} (según % MFP) · carga {r.comision.carga_prestacional} · {pesos(r.comision.director_total)}</p>
         <p className="text-xs text-slate-500">Bolsas del contrato: publicidad {pesos(r.bolsas.publicidad)} · representación {pesos(r.bolsas.representacion)}
           {r.bolsas.horas_anuales ? ` · ${r.bolsas.horas_anuales} h/año a ${pesos(r.bolsas.valor_hora)} la hora` : ""}</p>
         <div className="my-2 border-t border-slate-100" />
@@ -267,7 +284,7 @@ function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, on, mens
             <tr key={i}>
               <td><input className="input w-48" disabled={!editable} value={x.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
               <td><input className="input w-28" type="number" disabled={!editable} value={x.valor_unitario} onChange={(e) => set({ valor_unitario: n(e.target.value) })} /></td>
-              <td><input className="input w-16" type="number" disabled={!editable} value={x.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
+              <td><input className="input w-16" type="number" step="any" disabled={!editable} value={x.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
               <td><input className="input w-20" type="number" disabled={!editable} placeholder="Contrato" value={x.vida_util_meses ?? ""} onChange={(e) => set({ vida_util_meses: e.target.value === "" ? null : n(e.target.value) })} /></td>
               <td><input className="input w-20" type="number" disabled={!editable} value={x.entregas_anio ?? ""} onChange={(e) => set({ entregas_anio: e.target.value === "" ? null : n(e.target.value) })} /></td>
               {conTipo && (

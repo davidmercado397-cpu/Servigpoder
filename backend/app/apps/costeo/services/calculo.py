@@ -164,10 +164,17 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     donaciones = _n(datos.get("donaciones"))
     donaciones_m = donaciones / meses
 
-    # Comisiones (la carga prestacional depende del rango en que se vende)
+    # Comisiones (la carga prestacional depende del rango en que se vende). La del vendedor se puede escoger en el
+    # costeo (con la carga de ese rango); vacía, o para el director, sale del rango del % de MFP.
     r = rango_comision(pct_mfp, rangos)
+    elegida = datos.get("pct_comision_vendedor")
+    if elegida in (None, ""):
+        rv = r
+    else:
+        pct_v = max(0.0, _n(elegida))
+        rv = next((x for x in rangos if abs(x.pct - pct_v) < 1e-9), Rango(None, pct_v, r.carga))
     base_comision = (tarifa * p["comision_factor_base"]) - (pct_mfp / (meses / 12)) * neta
-    com_vendedor = max(0.0, base_comision * meses * p["comision_part_vendedor"] * r.pct * r.carga)
+    com_vendedor = max(0.0, base_comision * meses * p["comision_part_vendedor"] * rv.pct * rv.carga)
     com_director = max(0.0, base_comision * meses * p["comision_part_director"] * r.pct * r.carga)
     com_vendedor_m, com_director_m = com_vendedor / meses, com_director / meses
 
@@ -190,6 +197,7 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     renta = max(0.0, antes_renta) * p["pct_renta"] / 100
     costos["renta"] = renta
     margen = antes_renta - renta
+    margen_total, neta_total = margen * meses, neta * meses
     total_costos = sum(costos.values())
 
     alertas = []
@@ -207,10 +215,14 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
                 "nota_credito_total": descuento * meses, "cupo_inversion_vp": cupo_vp, "otros_total": otros_m * meses},
         "bolsas": {"publicidad": publicidad_bolsa, "representacion": representacion_bolsa, "horas_anuales": horas_bolsa,
                    "valor_hora": valor_hora, "pct_publicidad": pct_publicidad},
-        "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director},
+        "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director,
+                     "pct_vendedor": rv.pct, "carga_vendedor": rv.carga, "vendedor_elegida": rv is not r},
         "facturacion": {"aiu": aiu, "iva": iva, "reteica": reteica, "total_a_pagar": total_a_pagar},
         "personal": personal, "dotacion_tarifa": dot_tarifa, "dotacion_puesto": dot_puesto, "otros": otros,
         "costos": costos, "total_costos": total_costos, "antes_renta": antes_renta,
         "margen_mensual": margen, "margen_por_hombre": margen / hombres_personal if hombres_personal else 0.0,
-        "margen_total": margen * meses, "pct_margen": margen / neta if neta else 0.0, "alertas": alertas,
+        "margen_total": margen_total, "pct_margen": margen / neta if neta else 0.0,
+        # Rentabilidad: margen después de renta sobre la facturación neta, del mes y de todo el contrato
+        "facturacion_neta_total": neta_total, "pct_rentabilidad_mensual": margen / neta if neta else 0.0,
+        "pct_rentabilidad_total": margen_total / neta_total if neta_total else 0.0, "alertas": alertas,
     }

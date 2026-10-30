@@ -84,6 +84,30 @@ def test_parametros_cambian_el_resultado():
     assert horas["costos"]["horas_adicionales"] == pytest.approx(horas["costo_por_hombre"] / 30 / 12 * 60 / 12)
 
 
+def test_comision_escogida_medios_hombres_y_rentabilidad():
+    base = calculo.calcular(PALMASECA, P, RANGOS)
+    # Comisión del vendedor escogida (1 %): 5 veces la automática del 0,2 %; el director sigue el rango del % de MFP
+    r = calculo.calcular({**PALMASECA, "pct_comision_vendedor": 0.01}, P, RANGOS)
+    assert r["comision"]["pct_vendedor"] == 0.01 and r["comision"]["vendedor_elegida"] and r["comision"]["pct"] == 0.002
+    assert r["comision"]["vendedor_total"] == pytest.approx(base["comision"]["vendedor_total"] * 5)
+    assert r["comision"]["director_total"] == pytest.approx(base["comision"]["director_total"])
+    assert r["margen_mensual"] < base["margen_mensual"]
+    # Una comisión que no está en los rangos usa la carga del rango automático; vacía = automática
+    otra = calculo.calcular({**PALMASECA, "pct_comision_vendedor": 0.007}, P, RANGOS)
+    assert otra["comision"]["carga_vendedor"] == calculo.CARGA_PRESTACIONAL
+    assert calculo.calcular({**PALMASECA, "pct_comision_vendedor": ""}, P, RANGOS)["comision"] == base["comision"]
+    # Medio hombre: 7,5 hombres en un servicio y en el personal
+    medio = {**PALMASECA, "servicios": [{**PALMASECA["servicios"][0], "hombres": 7.5}],
+             "personal": [{**PALMASECA["personal"][0], "hombres": 7.5}]}
+    m = calculo.calcular(medio, P, RANGOS)
+    assert m["hombres_servicios"] == 7.5 and m["hombres_personal"] == 7.5 and not any("no coinciden" in a for a in m["alertas"])
+    assert m["costos"]["laboral"] == pytest.approx(m["personal"][0]["costo_hombre"] * 7.5)
+    # Rentabilidad: margen ÷ facturación neta, del mes y del contrato
+    assert base["pct_rentabilidad_mensual"] == pytest.approx(base["margen_mensual"] / base["tarifa_neta"])
+    assert base["facturacion_neta_total"] == pytest.approx(base["tarifa_neta"] * 41)
+    assert base["pct_rentabilidad_total"] == pytest.approx(base["margen_total"] / base["facturacion_neta_total"])
+
+
 def test_fechas_de_contrato():
     assert sumar_meses(date(2026, 1, 31), 1) == date(2026, 2, 28)
     assert meses_entre(date(2026, 3, 1), date(2027, 3, 1)) == 12

@@ -222,6 +222,30 @@ def test_auxilios_no_prestacionales_y_quincena(admin):
     assert "AUXILIOS NO PRESTACIONALES" in enc
 
 
+def test_tope_40_por_ciento_sobre_el_mes(admin):
+    filas = [[1001, "1001", *(["A"] * 15)], [3003, "3003", *(["A"] * 15)]]
+    p1 = _periodo_con(admin, 2026, 12, 1, filas, list(range(1, 16)))
+    # 1001: auxilio de 1.000.000 solo en la 2.ª quincena; 3003: bonificación de 2.000.000 (la mitad en cada quincena)
+    for doc, desc, valor, q in (("1001", "Cumplimiento", 1000000, "segunda"), ("3003", "Bonificación", 2000000, "ambas")):
+        r = admin.post(f"{API}/auxilios", json={"documento": doc, "descripcion": desc, "valor_mensual": valor, "desde": "2026-12-01", "quincena": q})
+        assert r.status_code == 201, r.text
+    admin.post(f"{API}/periodos/{p1}/recalcular")
+    a1, b1 = _nomina(admin, p1, "1001"), _nomina(admin, p1, "3003")
+    assert a1["exceso_no_salarial"] == 0
+    assert b1["exceso_no_salarial"] == round(1000000 - 0.4 * (b1["salarial"] + 1000000)) > 0
+
+    filas = [[1001, "1001", *(["A"] * 16)], [3003, "3003", *(["A"] * 16)]]
+    p2 = _periodo_con(admin, 2026, 12, 2, filas, list(range(16, 32)))
+    a2, b2 = _nomina(admin, p2, "1001"), _nomina(admin, p2, "3003")
+    # Sola, la 2.ª quincena de 1001 pasaría del 40 %; con la 1.ª, el mes no pasa: la base es solo lo salarial
+    assert a2["no_salarial"] == 1000000 and 1000000 > 0.4 * (a2["salarial"] + 1000000)
+    assert a2["exceso_no_salarial"] == 0 and a2["ibc"] == a2["salarial"] and any("sobre el mes" in x for x in a2["alertas"])
+    # 3003: el exceso del mes menos el que ya entró en la base de la 1.ª quincena
+    sal_mes = b1["salarial"] + b2["salarial"]
+    exceso_mes = round(2000000 - 0.4 * (sal_mes + 2000000))
+    assert b2["exceso_no_salarial"] == exceso_mes - b1["exceso_no_salarial"] and b2["ibc"] == b2["salarial"] + b2["exceso_no_salarial"]
+
+
 def test_vacaciones_habiles_promedio_y_saldo(admin):
     # Septiembre Q1 previa: 3003 hace 3 turnos N → recargo nocturno que alimenta el promedio sugerido (medio mes)
     p1 = _periodo_con(admin, 2026, 9, 1, [["3003", "3003", *(["N"] * 3)]], [1, 2, 3])

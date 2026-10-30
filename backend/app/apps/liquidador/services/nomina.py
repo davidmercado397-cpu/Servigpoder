@@ -256,9 +256,10 @@ def provision_codigo_180(empleado: LiqEmpleado, dias: list[LiqDia], tarifas: Tar
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
                       descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None,
                       vacaciones: dict | None = None, novedades: list[LiqNovedad] | None = None,
-                      aux_en_otra: dict[date, str] | None = None) -> dict:
+                      aux_en_otra: dict[date, str] | None = None, mes_previo: dict | None = None) -> dict:
     """`vacaciones` (solo si tiene días de vacaciones): festivos, promedio sugerido y meses, promedio manual y
-    días hábiles ya disfrutados antes del periodo."""
+    días hábiles ya disfrutados antes del periodo. `mes_previo`: lo salarial, lo no salarial y el exceso de las nóminas
+    del mismo mes liquidadas antes (el tope del 40 % es sobre el mes)."""
     a = Acumulado()
     por_horas = getattr(periodo, "tipo_nomina", "normal") == "horas"
     aux_en_otra = aux_en_otra or {}
@@ -398,11 +399,22 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     licencias_valor = sum((Decimal(str(x["valor"])) for x in licencias), Decimal("0"))
     salarial = basico + incapacidad + recargos + extras + vacaciones_valor + licencias_valor + nov_salarial
     devengado = salarial + no_prestacional + nov_no_salarial + auxilio
-    # Lo no salarial que pase del 40 % de la remuneración total sí entra en la base de salud y pensión
+    # Lo no salarial que pase del 40 % de la remuneración total del mes sí entra en la base de salud y pensión. Con
+    # nóminas anteriores en el mes (la 1.ª quincena) se suman a esta y aquí entra lo que falte del exceso del mes.
     no_salarial = no_prestacional + nov_no_salarial
-    exceso = _pesos(max(no_salarial - TOPE_NO_SALARIAL * (salarial + no_salarial), Decimal("0")))
+    previo = mes_previo or {}
+    sal_mes = salarial + previo.get("salarial", Decimal("0"))
+    no_sal_mes = no_salarial + previo.get("no_salarial", Decimal("0"))
+    exceso_mes = _pesos(max(no_sal_mes - TOPE_NO_SALARIAL * (sal_mes + no_sal_mes), Decimal("0")))
+    exceso = max(exceso_mes - previo.get("exceso", Decimal("0")), Decimal("0"))
     ibc = salarial + exceso
-    if exceso:
+    if previo and (no_sal_mes or exceso_mes):
+        alertas.append(f"Tope del 40 % sobre el mes (con {', '.join(f'«{x}»' for x in previo['nominas'])}): no salariales "
+                       f"{no_sal_mes:,.0f} de una remuneración de {sal_mes + no_sal_mes:,.0f} (tope "
+                       f"{_pesos(TOPE_NO_SALARIAL * (sal_mes + no_sal_mes)):,.0f}); exceso del mes {exceso_mes:,.0f}"
+                       + (f", {previo['exceso']:,.0f} ya en la base de esas nóminas" if previo["exceso"] else "")
+                       + f": {exceso:,.0f} entran en la base de salud y pensión de esta")
+    elif exceso:
         alertas.append(f"Los pagos no salariales superan el 40 % de la remuneración: {exceso:,.0f} entran en la base de salud y pensión")
 
     t_cierre = tarifas.en(periodo.hasta)
@@ -483,7 +495,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "dias_auxilio": a.dias_auxilio, "dias_sin_pago": a.dias_sin_pago,
         "basico": float(basico), "incapacidad": float(incapacidad), "auxilio": float(auxilio),
         "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia, "dias_tnl": dias_descuento,
-        "exceso_no_salarial": float(exceso), "alertas": alertas,
+        "exceso_no_salarial": float(exceso), "salarial": float(salarial), "no_salarial": float(no_salarial), "alertas": alertas,
         "vacaciones": detalle_vac, "vacaciones_valor": float(vacaciones_valor),
         "licencias": licencias, "licencias_valor": float(licencias_valor), "dias_licencia": sum(x["dias"] for x in licencias),
         "horas": {c: float(h) for c, h in a.horas.items() if h},
@@ -527,6 +539,7 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
     contexto_vac = _contexto_vacaciones(db, periodo, por_empleado, empleados)
     otras = _otras_nominas(db, periodo, por_empleado)
     aux_otra = _auxilio_en_otras(db, periodo, por_empleado) if getattr(periodo, "tipo_nomina", "normal") == "horas" else {}
+    mes_previo = _mes_previo(db, periodo, list(resultados))
     for empleado_id, r in resultados.items():
         avisos, aplica = [], True
         if empleado_id in otras:
@@ -534,13 +547,45 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
             aplica = duenia is None
         n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas,
                               descuentos[empleado_id] if aplica else [], ya, auxilios[empleado_id] if aplica else [],
-                              contexto_vac.get(empleado_id), novedades[empleado_id], aux_otra.get(empleado_id))
+                              contexto_vac.get(empleado_id), novedades[empleado_id], aux_otra.get(empleado_id),
+                              mes_previo.get(empleado_id))
         e = empleados[empleado_id]
         if e.estado == "retirado" and e.fecha_retiro and any(d.fecha > e.fecha_retiro for d in por_empleado[empleado_id]):
             avisos = [f"Está retirado desde el {e.fecha_retiro:%d/%m/%Y} y tiene turnos después de esa fecha", *avisos]
         n["alertas"] = avisos + n["alertas"]
         n["otras_nominas"] = any("nómina «" in a for a in avisos)
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
+
+
+def _orden_en_mes(p: LiqPeriodo) -> tuple[int, int]:
+    """Orden de las nóminas de un mes: la 1.ª quincena antes que la 2.ª y la mensual; entre iguales, la creada primero."""
+    return (1 if p.quincena == 1 else 2, p.id)
+
+
+def _mes_previo(db: Session, periodo: LiqPeriodo, ids: list[int]) -> dict[int, dict]:
+    """{empleado: salarial, no salarial y exceso del 40 % de las nóminas del mismo mes anteriores a esta}."""
+    previas = {p.id: p for p in db.scalars(select(LiqPeriodo).where(LiqPeriodo.anio == periodo.anio, LiqPeriodo.mes == periodo.mes,
+                                                                    LiqPeriodo.id != periodo.id))
+               if _orden_en_mes(p) < _orden_en_mes(periodo)}
+    if not previas or not ids:
+        return {}
+    salida: dict[int, dict] = {}
+    for r in db.scalars(select(LiqResultado).where(LiqResultado.periodo_id.in_(list(previas)), LiqResultado.empleado_id.in_(ids))):
+        n = r.nomina or {}
+        if "devengado" not in n:
+            continue
+        d = lambda c: Decimal(str(n.get(c) or 0))  # noqa: E731
+        exceso = d("exceso_no_salarial")
+        # Las nóminas calculadas antes de guardar lo salarial y lo no salarial: se deducen del IBC y del devengado
+        salarial = d("salarial") if "salarial" in n else d("ibc") - exceso
+        no_salarial = d("no_salarial") if "no_salarial" in n else d("devengado") - d("auxilio") - salarial
+        x = salida.setdefault(r.empleado_id, {"salarial": Decimal("0"), "no_salarial": Decimal("0"), "exceso": Decimal("0"), "nominas": []})
+        x["salarial"] += salarial
+        x["no_salarial"] += no_salarial
+        x["exceso"] += exceso
+        p = previas[r.periodo_id]
+        x["nominas"].append(f"{'1.ª quincena' if p.quincena == 1 else '2.ª quincena' if p.quincena == 2 else 'mes'} {p.nombre}")
+    return salida
 
 
 def _auxilio_en_otras(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]]) -> dict[int, dict[date, str]]:

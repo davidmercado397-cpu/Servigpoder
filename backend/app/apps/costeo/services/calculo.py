@@ -4,7 +4,8 @@ Reproduce la hoja de costeo de Servigpoder (COSTEO_PALMASECA) con las correccion
 - la dotación adicional del puesto sí entra al costo (en el Excel la celda de prorrateo estaba vacía);
 - cada elemento de dotación es mensual por vida útil o anual por entregas, sin dividir dos veces;
 - los auxilios no salariales (productividad, rodamiento, auxilio del motorizado) son costo y afectan el margen;
-- el gasto administrativo se calcula sobre el costo laboral de todo el personal;
+- el gasto administrativo es una provisión mensual: el % sobre la tarifa mensual;
+- la reserva de representación es el % mensual sobre la tarifa (no un solo mes repartido en el contrato);
 - la renta nunca es negativa.
 Todo valor sale de los parámetros (editables) o de las entradas del costeo: nada queda fijo en el código.
 Función pura: recibe datos y parámetros y devuelve el resultado.
@@ -31,14 +32,13 @@ PARAMETROS: dict[str, tuple[float, str, str, str]] = {
                           "Valor hora = costo mensual por hombre ÷ 30 ÷ este valor"),
     "tasa_cupo_inversion": (1, "Tasa mensual del cupo de inversión (%)", "MFP",
                             "El cupo se lleva a valor presente con esta tasa y se reparte en los meses del contrato"),
-    "pct_admin": (10, "Gasto administrativo (%)", "Gastos", "Sobre costo laboral, dotación del puesto, otros costos, cupo, publicidad, comisión y donaciones"),
+    "pct_admin": (10, "Gasto administrativo (%)", "Gastos", "Provisión mensual sobre la tarifa mensual (tarifa decreto)"),
     "publicidad_gasto": (120373349, "Gasto en publicidad", "Gastos", "Junto con la facturación contratada da el % de publicidad"),
     "publicidad_facturacion": (50567261418, "Facturación total contratada", "Gastos", "Base del % de publicidad"),
     "publicidad_sobre_contrato": (0, "Bolsa de publicidad sobre el contrato completo (1 = sí, 0 = sobre la facturación mensual)",
                                   "Gastos", "La bolsa se amortiza en los meses del contrato"),
-    "pct_representacion": (1, "Reserva de gastos de representación (%)", "Gastos", ""),
-    "representacion_sobre_contrato": (0, "Reserva de representación sobre el contrato completo (1 = sí, 0 = sobre la facturación mensual)",
-                                      "Gastos", "La bolsa se amortiza en los meses del contrato"),
+    "pct_representacion": (1, "Reserva de gastos de representación (%)", "Gastos",
+                           "Mensual sobre la tarifa mensual; la bolsa del contrato es ese valor por los meses"),
     "pct_renta": (35, "Impuesto de renta (%)", "Impuestos", "Sobre el margen antes de impuestos (nunca negativo)"),
     "ica_por_mil": (6.6, "ICA (por mil)", "Impuestos", "Sobre el AIU"),
     "pct_aiu": (10, "AIU (%)", "Impuestos", "Base del IVA y del ICA"),
@@ -159,26 +159,31 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     # Bolsas que se amortizan en el contrato
     pct_publicidad = p["publicidad_gasto"] / p["publicidad_facturacion"] if p["publicidad_facturacion"] else 0.0
     publicidad_bolsa = pct_publicidad * tarifa * (meses if p["publicidad_sobre_contrato"] else 1)
-    representacion_bolsa = p["pct_representacion"] / 100 * tarifa * (meses if p["representacion_sobre_contrato"] else 1)
-    publicidad_m, representacion_m = publicidad_bolsa / meses, representacion_bolsa / meses
+    representacion_m = p["pct_representacion"] / 100 * tarifa
+    representacion_bolsa = representacion_m * meses
+    publicidad_m = publicidad_bolsa / meses
     donaciones = _n(datos.get("donaciones"))
     donaciones_m = donaciones / meses
 
-    # Comisiones (la carga prestacional depende del rango en que se vende). La del vendedor se puede escoger en el
-    # costeo (con la carga de ese rango); vacía, o para el director, sale del rango del % de MFP.
+    # Comisiones (la carga prestacional depende del rango en que se vende). La del vendedor y la del director se
+    # pueden digitar en el costeo (con la carga del rango de ese %, o la del rango automático); vacías salen del
+    # rango del % de MFP.
     r = rango_comision(pct_mfp, rangos)
-    elegida = datos.get("pct_comision_vendedor")
-    if elegida in (None, ""):
-        rv = r
-    else:
-        pct_v = max(0.0, _n(elegida))
-        rv = next((x for x in rangos if abs(x.pct - pct_v) < 1e-9), Rango(None, pct_v, r.carga))
+
+    def comision(clave: str) -> Rango:
+        digitada = datos.get(clave)
+        if digitada in (None, ""):
+            return r
+        pct_c = max(0.0, _n(digitada))
+        return next((x for x in rangos if abs(x.pct - pct_c) < 1e-9), Rango(None, pct_c, r.carga))
+
+    rv, rd = comision("pct_comision_vendedor"), comision("pct_comision_director")
     base_comision = (tarifa * p["comision_factor_base"]) - (pct_mfp / (meses / 12)) * neta
     com_vendedor = max(0.0, base_comision * meses * p["comision_part_vendedor"] * rv.pct * rv.carga)
-    com_director = max(0.0, base_comision * meses * p["comision_part_director"] * r.pct * r.carga)
+    com_director = max(0.0, base_comision * meses * p["comision_part_director"] * rd.pct * rd.carga)
     com_vendedor_m, com_director_m = com_vendedor / meses, com_director / meses
 
-    admin_m = p["pct_admin"] / 100 * (laboral + dot_puesto_m + horas_m + publicidad_m + cupo_m + com_vendedor_m + donaciones_m + otros_m)
+    admin_m = p["pct_admin"] / 100 * tarifa  # provisión para gasto administrativo
 
     # Facturación con impuestos (informativa) e ICA
     aiu = tarifa * p["pct_aiu"] / 100
@@ -216,10 +221,12 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
         "bolsas": {"publicidad": publicidad_bolsa, "representacion": representacion_bolsa, "horas_anuales": horas_bolsa,
                    "valor_hora": valor_hora, "pct_publicidad": pct_publicidad},
         "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director,
-                     "pct_vendedor": rv.pct, "carga_vendedor": rv.carga, "vendedor_elegida": rv is not r},
+                     "pct_vendedor": rv.pct, "carga_vendedor": rv.carga, "vendedor_elegida": rv is not r,
+                     "pct_director": rd.pct, "carga_director": rd.carga, "director_elegida": rd is not r},
         "facturacion": {"aiu": aiu, "iva": iva, "reteica": reteica, "total_a_pagar": total_a_pagar},
         "personal": personal, "dotacion_tarifa": dot_tarifa, "dotacion_puesto": dot_puesto, "otros": otros,
-        "costos": costos, "total_costos": total_costos, "antes_renta": antes_renta,
+        # La dotación (de la tarifa y del puesto) es gasto operativo: no suma en el % de MFP ni pasa a la MFP
+        "costos": costos, "gasto_operativo": dot_tarifa_m + dot_puesto_m, "total_costos": total_costos, "antes_renta": antes_renta,
         "margen_mensual": margen, "margen_por_hombre": margen / hombres_personal if hombres_personal else 0.0,
         "margen_total": margen_total, "pct_margen": margen / neta if neta else 0.0,
         # Rentabilidad: margen después de renta sobre la facturación neta, del mes y de todo el contrato

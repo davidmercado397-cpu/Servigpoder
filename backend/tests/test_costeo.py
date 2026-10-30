@@ -64,7 +64,9 @@ def test_motor_reproduce_el_excel():
     assert r["comision"]["vendedor_total"] == pytest.approx(5249913.39, abs=0.01)
     assert r["comision"]["director_total"] == pytest.approx(3387040.90, abs=0.01)
     assert r["costos"]["publicidad"] == pytest.approx(5095.97, abs=0.01)
-    assert r["costos"]["representacion"] == pytest.approx(21407.52, abs=0.01)
+    # Corregidos frente al Excel: provisión administrativa 10 % y representación 1 %, mensuales sobre la tarifa
+    assert r["costos"]["gasto_administrativo"] == pytest.approx(87770812 * 0.10)
+    assert r["costos"]["representacion"] == pytest.approx(87770812 * 0.01) and r["bolsas"]["representacion"] == pytest.approx(87770812 * 0.01 * 41)
     assert r["costos"]["ica"] == pytest.approx(56674.00, abs=0.01)
     # Dotación: anual ÷ 12 por entregas o mensual por vida útil, sin dividir dos veces
     assert r["costos"]["dotacion_tarifa"] == pytest.approx(44030 * 15 * 3 / 12 + 987700 * 6 / 36)
@@ -86,12 +88,17 @@ def test_parametros_cambian_el_resultado():
 
 def test_comision_escogida_medios_hombres_y_rentabilidad():
     base = calculo.calcular(PALMASECA, P, RANGOS)
-    # Comisión del vendedor escogida (1 %): 5 veces la automática del 0,2 %; el director sigue el rango del % de MFP
+    # Comisión del vendedor digitada (1 %): 5 veces la automática del 0,2 %; el director sin digitar sigue el rango del % de MFP
     r = calculo.calcular({**PALMASECA, "pct_comision_vendedor": 0.01}, P, RANGOS)
     assert r["comision"]["pct_vendedor"] == 0.01 and r["comision"]["vendedor_elegida"] and r["comision"]["pct"] == 0.002
     assert r["comision"]["vendedor_total"] == pytest.approx(base["comision"]["vendedor_total"] * 5)
     assert r["comision"]["director_total"] == pytest.approx(base["comision"]["director_total"])
     assert r["margen_mensual"] < base["margen_mensual"]
+    # Comisión del director digitada (0,5 %): 2,5 veces la automática; el vendedor no cambia
+    d = calculo.calcular({**PALMASECA, "pct_comision_director": 0.005}, P, RANGOS)
+    assert d["comision"]["pct_director"] == 0.005 and d["comision"]["director_elegida"] and not d["comision"]["vendedor_elegida"]
+    assert d["comision"]["director_total"] == pytest.approx(base["comision"]["director_total"] * 2.5)
+    assert d["comision"]["vendedor_total"] == pytest.approx(base["comision"]["vendedor_total"])
     # Una comisión que no está en los rangos usa la carga del rango automático; vacía = automática
     otra = calculo.calcular({**PALMASECA, "pct_comision_vendedor": 0.007}, P, RANGOS)
     assert otra["comision"]["carga_vendedor"] == calculo.CARGA_PRESTACIONAL
@@ -106,6 +113,11 @@ def test_comision_escogida_medios_hombres_y_rentabilidad():
     assert base["pct_rentabilidad_mensual"] == pytest.approx(base["margen_mensual"] / base["tarifa_neta"])
     assert base["facturacion_neta_total"] == pytest.approx(base["tarifa_neta"] * 41)
     assert base["pct_rentabilidad_total"] == pytest.approx(base["margen_total"] / base["facturacion_neta_total"])
+    # La dotación es gasto operativo: baja el margen pero no cambia el % de MFP
+    assert base["gasto_operativo"] == pytest.approx(base["costos"]["dotacion_tarifa"] + base["costos"]["dotacion_puesto"])
+    sin_dotacion = calculo.calcular({**PALMASECA, "dotacion_tarifa": [], "dotacion_puesto": []}, P, RANGOS)
+    assert sin_dotacion["gasto_operativo"] == 0 and sin_dotacion["mfp"]["pct_total"] == base["mfp"]["pct_total"]
+    assert sin_dotacion["margen_mensual"] > base["margen_mensual"]
 
 
 def test_fechas_de_contrato():

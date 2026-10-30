@@ -15,29 +15,32 @@ type Personal = { nombre: string; hombres: number; salario?: number | null; hora
 type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string };
 type Datos = {
   duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual: number; donaciones: number;
-  pct_comision_vendedor?: number | null;
+  pct_comision_vendedor?: number | null; pct_comision_director?: number | null;
   servicios: Servicio[]; personal: Personal[]; otros: Elemento[]; dotacion_tarifa: Elemento[]; dotacion_puesto: Elemento[];
 };
 type Resultado = {
   meses: number; tarifa_decreto: number; descuento_nota_credito: number; tarifa_neta: number; hombres_servicios: number; hombres_personal: number;
   costo_por_hombre: number; mfp: { pct_nota_credito: number; pct_cupo_inversion: number; pct_otros: number; pct_total: number; cupo_inversion_vp: number };
   bolsas: { publicidad: number; representacion: number; horas_anuales: number; valor_hora: number };
-  comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean };
+  comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean;
+    pct_director?: number; carga_director?: number; director_elegida?: boolean };
   facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number };
   personal: { nombre: string; hombres: number; costo_hombre: number; costo_total: number; neto_hombre: number }[];
   costos: Record<string, number>; total_costos: number; antes_renta: number; margen_mensual: number; margen_por_hombre: number; margen_total: number;
   pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: { mensual: number }[]; dotacion_puesto: { mensual: number }[];
 };
 type Costeo = { id: number; cliente: Cliente; nombre: string; version: number; estado: string; datos: Datos; resultado: Resultado; mfp_id: number | null; parametros_aprobados: boolean };
-type RangoComision = { id: number; hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type CatServicio = { id: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
 type CatElemento = { id: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean; activo: boolean };
 
-const COSTOS: [string, string][] = [
-  ["laboral", "Costo laboral"], ["dotacion_tarifa", "Dotación de la tarifa"], ["dotacion_puesto", "Dotación adicional del puesto"],
-  ["horas_adicionales", "Bolsa de horas adicionales"], ["otros_directos", "Otros costos directos"], ["publicidad", "Publicidad"],
-  ["cupo_inversion", "Cupo de inversión"], ["comisiones", "Comisiones vendedor y director"], ["donaciones", "Donaciones"],
-  ["gasto_administrativo", "Gasto administrativo"], ["representacion", "Reserva de representación"], ["ica", "Industria y comercio"], ["renta", "Impuesto de renta"],
+// Costos del resultado agrupados: la dotación es gasto operativo, aparte de lo que se entrega en la MFP
+const GRUPOS_COSTO: { titulo: string; costos: [string, string][] }[] = [
+  { titulo: "Costo laboral", costos: [["laboral", "Costo laboral"]] },
+  { titulo: "Gasto operativo", costos: [["dotacion_tarifa", "Dotación de la tarifa"], ["dotacion_puesto", "Dotación adicional del puesto"]] },
+  { titulo: "Entregado en la MFP", costos: [["otros_directos", "Otros costos directos"], ["cupo_inversion", "Cupo de inversión"], ["horas_adicionales", "Bolsa de horas adicionales"]] },
+  { titulo: "Gastos", costos: [["publicidad", "Publicidad"], ["comisiones", "Comisiones vendedor y director"], ["donaciones", "Donaciones"],
+    ["gasto_administrativo", "Gasto administrativo"], ["representacion", "Reserva de representación"]] },
+  { titulo: "Impuestos", costos: [["ica", "Industria y comercio"], ["renta", "Impuesto de renta"]] },
 ];
 const TIPOS_MFP: [string, string][] = [["OTROS", "Otros"], ["ACCES_TOO", "Acces Too"], ["EQUIPOS", "Equipos"], ["NOTA_CREDITO", "Nota crédito / bono tarifa"],
   ["CAPACITACION", "Capacitación"], ["REINVERSION", "Reinversión"]];
@@ -56,7 +59,6 @@ export default function EditorCosteo() {
   const [r, setR] = useState<Resultado | null>(null);
   const [servicios, setServicios] = useState<CatServicio[]>([]);
   const [catalogo, setCatalogo] = useState<CatElemento[]>([]);
-  const [rangos, setRangos] = useState<RangoComision[]>([]);
   const [cambios, setCambios] = useState(false);
   const [crearMfp, setCrearMfp] = useState(false);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
@@ -74,7 +76,6 @@ export default function EditorCosteo() {
     cargar();
     api<CatServicio[]>("/costeo/servicios").then((s) => setServicios(s.filter((x) => x.activo))).catch(() => {});
     api<CatElemento[]>("/costeo/catalogo").then((s) => setCatalogo(s.filter((x) => x.activo))).catch(() => {});
-    api<RangoComision[]>("/costeo/comisiones").then(setRangos).catch(() => {});
   }, [cargar]);
 
   // Resultado en vivo mientras se edita
@@ -89,8 +90,6 @@ export default function EditorCosteo() {
   const editable = costear && c.estado !== "aprobado";
   const cambiar = (x: Partial<Datos>) => { setD({ ...d, ...x }); setCambios(true); };
   const hombres = d.personal.reduce((s, p) => s + Number(p.hombres || 0), 0) || r.hombres_servicios;
-  // Comisiones que se pueden escoger: las de los rangos configurados (y la ya guardada, si ese rango cambió)
-  const comisiones = [...new Set([...rangos.map((x) => x.pct_comision), ...(d.pct_comision_vendedor != null ? [d.pct_comision_vendedor] : [])])].sort((a, b) => b - a);
 
   async function guardar() {
     try {
@@ -146,12 +145,10 @@ export default function EditorCosteo() {
               <Num etiqueta="Cupo de inversión (%)" v={+(d.pct_cupo_inversion * 100).toFixed(4)} on={(v) => cambiar({ pct_cupo_inversion: v / 100 })} off={!editable} />
               <Num etiqueta="Horas de obsequio por año" v={d.horas_bolsa_anual} on={(v) => cambiar({ horas_bolsa_anual: v })} off={!editable} />
               <Num etiqueta="Donaciones (total)" v={d.donaciones} on={(v) => cambiar({ donaciones: v })} off={!editable} />
-              <div><label className="label">Comisión del vendedor</label>
-                <select className="input" disabled={!editable} value={d.pct_comision_vendedor ?? ""}
-                  onChange={(e) => cambiar({ pct_comision_vendedor: e.target.value === "" ? null : Number(e.target.value) })}>
-                  <option value="">Automática según % MFP ({pct(r.comision.pct, 1)})</option>
-                  {comisiones.map((x) => <option key={x} value={x}>{pct(x, 1)}</option>)}
-                </select></div>
+              <Comision etiqueta="Comisión del vendedor (%)" v={d.pct_comision_vendedor} automatica={r.comision.pct} off={!editable}
+                on={(v) => cambiar({ pct_comision_vendedor: v })} />
+              <Comision etiqueta="Comisión del director (%)" v={d.pct_comision_director} automatica={r.comision.pct} off={!editable}
+                on={(v) => cambiar({ pct_comision_director: v })} />
             </div>
           </Seccion>
 
@@ -203,10 +200,10 @@ export default function EditorCosteo() {
           <Elementos titulo="Otros costos directos (MFP)" ayuda="Se reparten en la vida útil indicada (vacía = los meses del contrato). Al crear la MFP, cada uno queda como un ítem del tipo elegido."
             filas={d.otros} catalogo={catalogo.filter((x) => x.grupo === "otros")} hombres={hombres} editable={editable} conTipo
             on={(f) => cambiar({ otros: f })} mensuales={r.otros?.map((x) => x.mensual) ?? []} />
-          <Elementos titulo="Dotación de la tarifa" ayuda="Con entregas al año: valor × cantidad × entregas ÷ 12. Con vida útil: valor × cantidad ÷ vida útil."
+          <Elementos titulo="Dotación de la tarifa" ayuda="Gasto operativo: no suma en el % de MFP. Con entregas al año: valor × cantidad × entregas ÷ 12. Con vida útil: valor × cantidad ÷ vida útil."
             filas={d.dotacion_tarifa} catalogo={catalogo.filter((x) => x.grupo === "dotacion_tarifa")} hombres={hombres} editable={editable}
             on={(f) => cambiar({ dotacion_tarifa: f })} mensuales={r.dotacion_tarifa?.map((x) => x.mensual) ?? []} />
-          <Elementos titulo="Dotación adicional del puesto" ayuda="Elementos que no hacen parte de la tarifa mínima, repartidos en su vida útil."
+          <Elementos titulo="Dotación adicional del puesto" ayuda="Gasto operativo: no suma en el % de MFP. Elementos que no hacen parte de la tarifa mínima, repartidos en su vida útil."
             filas={d.dotacion_puesto} catalogo={catalogo.filter((x) => x.grupo === "dotacion_puesto")} hombres={hombres} editable={editable}
             on={(f) => cambiar({ dotacion_puesto: f })} mensuales={r.dotacion_puesto?.map((x) => x.mensual) ?? []} />
         </div>
@@ -243,14 +240,24 @@ function PanelResultado({ r }: { r: Resultado }) {
         {fila(`Nota crédito (${pct(r.mfp.pct_nota_credito)})`, `−${pesos(r.descuento_nota_credito)}`)}
         {fila("Tarifa neta", pesos(r.tarifa_neta), true)}
         <div className="my-2 border-t border-slate-100" />
-        {COSTOS.map(([k, t]) => r.costos[k] ? <div key={k}>{fila(t, pesos(r.costos[k]))}</div> : null)}
+        {GRUPOS_COSTO.map((g) => {
+          const filas = g.costos.filter(([k]) => r.costos[k]);
+          if (!filas.length) return null;
+          if (g.costos.length === 1) return <div key={g.titulo}>{fila(g.titulo, pesos(r.costos[g.costos[0][0]]), true)}</div>;
+          return (
+            <div key={g.titulo} className="mb-1">
+              {fila(g.titulo, pesos(filas.reduce((s, [k]) => s + r.costos[k], 0)), true)}
+              <div className="pl-3 text-slate-600">{filas.map(([k, t]) => <div key={k}>{fila(t, pesos(r.costos[k]))}</div>)}</div>
+            </div>
+          );
+        })}
         {fila("Costos totales", pesos(r.total_costos), true)}
         <div className="my-2 border-t border-slate-100" />
         {fila("MFP total", pct(r.mfp.pct_total), true)}
         <p className="text-xs text-slate-500">Nota crédito {pct(r.mfp.pct_nota_credito)} · cupo {pct(r.mfp.pct_cupo_inversion)} · otros {pct(r.mfp.pct_otros)}</p>
         <p className="text-xs text-slate-500">Cupo de inversión (valor presente): {pesos(r.mfp.cupo_inversion_vp)}</p>
-        <p className="text-xs text-slate-500">Comisión vendedor {pct(r.comision.pct_vendedor ?? r.comision.pct, 1)}{r.comision.vendedor_elegida ? " (escogida)" : ""} · carga {r.comision.carga_vendedor ?? r.comision.carga_prestacional} · {pesos(r.comision.vendedor_total)}</p>
-        <p className="text-xs text-slate-500">Comisión director {pct(r.comision.pct, 1)} (según % MFP) · carga {r.comision.carga_prestacional} · {pesos(r.comision.director_total)}</p>
+        <p className="text-xs text-slate-500">Comisión vendedor {pct(r.comision.pct_vendedor ?? r.comision.pct, 2)} ({r.comision.vendedor_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_vendedor ?? r.comision.carga_prestacional} · {pesos(r.comision.vendedor_total)}</p>
+        <p className="text-xs text-slate-500">Comisión director {pct(r.comision.pct_director ?? r.comision.pct, 2)} ({r.comision.director_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_director ?? r.comision.carga_prestacional} · {pesos(r.comision.director_total)}</p>
         <p className="text-xs text-slate-500">Bolsas del contrato: publicidad {pesos(r.bolsas.publicidad)} · representación {pesos(r.bolsas.representacion)}
           {r.bolsas.horas_anuales ? ` · ${r.bolsas.horas_anuales} h/año a ${pesos(r.bolsas.valor_hora)} la hora` : ""}</p>
         <div className="my-2 border-t border-slate-100" />
@@ -345,6 +352,15 @@ function Tabla({ columnas, children }: { columnas: string[]; children: React.Rea
 
 function Num({ etiqueta, v, on, off }: { etiqueta: string; v: number; on: (v: number) => void; off?: boolean }) {
   return <div><label className="label">{etiqueta}</label><input className="input" type="number" disabled={off} value={v} onChange={(e) => on(n(e.target.value))} /></div>;
+}
+
+// % digitado como fracción (0,2 % → 0.002); vacío = automática según el rango del % de MFP
+function Comision({ etiqueta, v, automatica, on, off }: { etiqueta: string; v?: number | null; automatica: number; on: (v: number | null) => void; off?: boolean }) {
+  return (
+    <div><label className="label">{etiqueta}</label>
+      <input className="input" type="number" min={0} step="any" disabled={off} placeholder={`Automática ${pct(automatica, 2)}`}
+        value={v == null ? "" : +(v * 100).toFixed(4)} onChange={(e) => on(e.target.value === "" ? null : Number(e.target.value) / 100)} /></div>
+  );
 }
 
 function Quitar({ on }: { on: () => void }) {

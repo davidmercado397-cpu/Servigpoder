@@ -31,7 +31,9 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
         <table className="tabla text-xs">
           <thead><tr><th>Devengado</th><th /><th className="text-right">Valor</th></tr></thead>
           <tbody>
-            {fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
+            {n.por_horas
+              ? fila("Sueldo (por horas)", `${horas(n.horas_pagadas ?? 0)} h trabajadas × ${pesos(n.valor_hora)} en ${n.dias_trabajados ?? 0} día(s)`, n.basico)
+              : fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
             {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
             {n.vacaciones && (
               <>
@@ -39,11 +41,14 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
                 {n.vacaciones.dias_no_habiles > 0 && fila("Vacaciones días no hábiles", `${n.vacaciones.dias_no_habiles} días × ${pesos(n.vacaciones.valor_dia)}`, n.vacaciones.valor_no_habiles)}
               </>
             )}
+            {(n.licencias ?? []).map((x) => (
+              <Fragment key={`lic-${x.codigo}`}>{fila(`Licencia remunerada: ${x.nombre}`, `${x.dias} día(s) × ${pesos(n.valor_dia)} (${x.codigo})`, x.valor)}</Fragment>
+            ))}
             {usados.map(([k, largo]) => <Fragment key={k}>{fila(largo, `${horas(n.horas[k])} h`, n.valores[k])}</Fragment>)}
             {(n.auxilios ?? []).map((x) => (
               <Fragment key={`aux-${x.id}`}>{fila(`Auxilio no prestacional: ${x.descripcion}`, x.calculo, x.valor)}</Fragment>
             ))}
-            {fila("Auxilio de transporte", `${n.dias_auxilio} días`, n.auxilio)}
+            {fila("Auxilio de transporte", `${n.dias_auxilio} días${n.por_horas ? " trabajados" : ""}${n.dias_auxilio_otra_nomina ? ` (${n.dias_auxilio_otra_nomina} se pagan en otra nómina)` : ""}`, n.auxilio)}
             {(n.novedades ?? []).filter((x) => !x.deduccion).map(novedad)}
             {fila(<b>Total devengado</b>, "", n.devengado, "bg-slate-50")}
           </tbody>
@@ -51,8 +56,8 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
         <table className="tabla text-xs">
           <thead><tr><th>Deducciones</th><th /><th className="text-right">Valor</th></tr></thead>
           <tbody>
-            {fila("Salud", `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
-            {fila("Pensión", `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
+            {fila("Salud", n.por_horas && !n.salud_pct ? "esta nómina por horas no descuenta salud" : `${n.salud_pct} % de ${pesos(n.ibc)}`, n.salud)}
+            {fila("Pensión", n.pensionado ? "pensionado: no descuenta pensión" : n.por_horas && !n.pension_pct ? "esta nómina por horas no descuenta pensión" : `${n.pension_pct} % de ${pesos(n.ibc)}`, n.pension)}
             {n.descuentos.map((x) => (
               <Fragment key={x.id}>
                 {fila(`${TIPOS_DESCUENTO[x.tipo]?.[0] ?? x.tipo}: ${x.descripcion}`,
@@ -65,6 +70,17 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
           </tbody>
         </table>
       </div>
+      {n.seguridad_social_180 && (
+        <div className="border-t border-slate-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-900">
+          <b>Código 180 (incapacidad de más de 180 días):</b> {n.seguridad_social_180.dias} día(s) que no se pagan en nómina. SERA provisiona{" "}
+          <b>{pesos(n.seguridad_social_180.total)}</b> de seguridad social sobre {pesos(n.seguridad_social_180.base)}: salud empleado{" "}
+          {pesos(n.seguridad_social_180.salud_empleado)} ({n.seguridad_social_180.porcentajes.salud_empleado} %), pensión empleado{" "}
+          {pesos(n.seguridad_social_180.pension_empleado)} ({n.seguridad_social_180.porcentajes.pension_empleado} %), pensión empleador{" "}
+          {pesos(n.seguridad_social_180.pension_empleador)} ({n.seguridad_social_180.porcentajes.pension_empleador} %), salud empleador{" "}
+          {n.seguridad_social_180.exonerado ? "exonerada" : `${pesos(n.seguridad_social_180.salud_empleador)} (${n.seguridad_social_180.porcentajes.salud_empleador} %)`}.
+          No se descuenta del neto.
+        </div>
+      )}
       {n.vacaciones && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
           Base de vacaciones {pesos(n.vacaciones.base)}: salario {pesos(n.vacaciones.salario)} + promedio variable {pesos(n.vacaciones.promedio)}{" "}
@@ -75,7 +91,7 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
       {(n.alertas ?? []).map((a) => <p key={a} className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{a}</p>)}
       {n.dias_sin_pago > 0 && (
         <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
-          {n.dias_sin_pago} días sin pago en esta nómina: ausencias y novedades (licencias…, que se pagan en otro proceso).
+          {n.dias_sin_pago} días sin pago en esta nómina: ausencias, licencias no remuneradas y demás novedades que no se pagan.
         </p>
       )}
     </section>

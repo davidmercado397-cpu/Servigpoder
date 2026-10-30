@@ -1,7 +1,7 @@
 """Novedades manuales de nómina: plantilla de Excel e importación (el archivo se procesa y se descarta).
 
 Plantilla: una fila por novedad con la cédula, el tipo, la descripción, el valor o las horas por concepto (horas extras y
-recargos pendientes), la fecha en que se causaron, la nómina de origen y si es salarial (solo «otro devengo»).
+recargos pendientes), la fecha en que se causaron y si es salarial (solo «otro devengo»).
 Importar reemplaza las novedades cargadas antes por Excel en esa nómina; las registradas a mano se conservan.
 """
 
@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.apps.liquidador.models import (
-    HORAS_EXTRAS, MAYOR_VALOR, MENOR_VALOR, NOVEDADES_HORAS, OTRA_DEDUCCION, OTRO_DEVENGO, RECARGOS_PENDIENTES, LiqNovedad,
+    AUXILIO_INTERMUNICIPAL, AUXILIO_VARIABLE, AUXILIOS_VARIABLES, HORAS_EXTRAS, MAYOR_VALOR, MENOR_VALOR, NOVEDADES_HORAS, OTRA_DEDUCCION, OTRO_DEVENGO, RECARGOS_PENDIENTES, LiqNovedad,
     LiqPeriodo, LiqResultado,
 )
 from app.apps.liquidador.services.exportar import (
@@ -19,17 +19,17 @@ from app.apps.liquidador.services.exportar import (
 from app.apps.liquidador.services.personal import ErrorArchivo, Indice, _abrir, _fecha, _norm, _texto, documento
 from app.apps.liquidador.dominio.tipos import HourConcept
 
-TIPOS = {MAYOR_VALOR: "Mayor valor pagado", MENOR_VALOR: "Menor valor pagado", HORAS_EXTRAS: "Horas extras pendientes",
+TIPOS = {AUXILIO_INTERMUNICIPAL: "Auxilio intermunicipal", AUXILIO_VARIABLE: "Auxilio no prestacional variable", MAYOR_VALOR: "Mayor valor pagado", MENOR_VALOR: "Menor valor pagado", HORAS_EXTRAS: "Horas extras pendientes",
          RECARGOS_PENDIENTES: "Recargos pendientes", OTRO_DEVENGO: "Otro devengo", OTRA_DEDUCCION: "Otra deducción"}
 # Concepto de horas → encabezado de la plantilla (los mismos nombres del archivo de liquidación)
 COLUMNAS_HORAS = tuple((c.value, ENCABEZADOS[2 + i]) for i, c in enumerate(ORDEN_CONCEPTOS) if c != HourConcept.ORDINARY_DAY)
-ENCABEZADO = ("CEDULA", "NOMBRE", "TIPO", "DESCRIPCION", "VALOR", "FECHA CAUSACION", "NOMINA ORIGEN", "SALARIAL",
+ENCABEZADO = ("CEDULA", "NOMBRE", "TIPO", "DESCRIPCION", "VALOR", "FECHA CAUSACION", "SALARIAL",
               *(t for _, t in COLUMNAS_HORAS))
 
 
 def tipo_de(texto: object) -> str | None:
     t = _norm(texto)
-    for clave, tipo in (("MAYOR", MAYOR_VALOR), ("MENOR", MENOR_VALOR), ("EXTRA", HORAS_EXTRAS), ("RECARGO", RECARGOS_PENDIENTES),
+    for clave, tipo in (("INTERMUNICIPAL", AUXILIO_INTERMUNICIPAL), ("RODAMIENTO", AUXILIO_INTERMUNICIPAL), ("AUXILIO", AUXILIO_VARIABLE), ("MAYOR", MAYOR_VALOR), ("MENOR", MENOR_VALOR), ("EXTRA", HORAS_EXTRAS), ("RECARGO", RECARGOS_PENDIENTES),
                         ("DEDUCCION", OTRA_DEDUCCION), ("DESCUENTO", OTRA_DEDUCCION), ("DEVENGO", OTRO_DEVENGO), ("PAGO", OTRO_DEVENGO)):
         if clave in t:
             return tipo
@@ -43,13 +43,15 @@ def plantilla(periodo: LiqPeriodo) -> tuple[bytes, str, str]:
     hoja.append(list(ENCABEZADO))
     for celda in hoja[1]:
         celda.fill, celda.font, celda.alignment = _RELLENO, _FUENTE, _CENTRO
-    hoja.append(["", "", "", "", "", "", "", ""] + [""] * len(COLUMNAS_HORAS))
+    hoja.append([""] * len(ENCABEZADO))
     _autoajustar(hoja, minimo=12, maximo=26)
     hoja.freeze_panes = "C2"
     hoja.row_dimensions[1].height = 42
     ayuda = libro.create_sheet("Instrucciones")
     for fila in (
         ["TIPO", "EFECTO", "QUÉ LLENAR"],
+        ["AUXILIO INTERMUNICIPAL", "Se paga como auxilio no prestacional (rodamiento por transporte intermunicipal); no hace base salvo el exceso del 40 %", "VALOR"],
+        ["AUXILIO NO PRESTACIONAL VARIABLE", "Se paga como auxilio no prestacional (otros auxilios de una sola nómina); no hace base salvo el exceso del 40 %", "VALOR"],
         ["MAYOR VALOR PAGADO", "Se descuenta del neto (no cambia salud y pensión)", "VALOR"],
         ["MENOR VALOR PAGADO", "Se paga; hace base de salud y pensión", "VALOR"],
         ["HORAS EXTRAS PENDIENTES", "Se paga; hace base de salud y pensión", "Horas en las columnas de cada concepto y FECHA CAUSACION (la tarifa de esa fecha). VALOR opcional: reemplaza el calculado"],
@@ -114,7 +116,7 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes, usuario_id: int
         salarial = _norm(v(fila, "SALARIAL")) not in ("NO", "N", "0", "FALSO")
         nuevas.append(LiqNovedad(periodo_id=periodo.id, empleado_id=e.id, tipo=tipo, descripcion=_texto(v(fila, "DESCRIPCION"), 200) or TIPOS[tipo],
                                  horas=horas if tipo in NOVEDADES_HORAS else {}, fecha_causacion=fecha if tipo in NOVEDADES_HORAS else None,
-                                 valor=valor, salarial=salarial if tipo == OTRO_DEVENGO else True,
+                                 valor=valor, salarial=(salarial if tipo == OTRO_DEVENGO else tipo not in AUXILIOS_VARIABLES),
                                  nomina_origen=_texto(v(fila, "NOMINA ORIGEN"), 80), origen_registro="excel", creado_por=usuario_id))
     reemplazadas = db.execute(delete(LiqNovedad).where(LiqNovedad.periodo_id == periodo.id, LiqNovedad.origen_registro == "excel")).rowcount
     db.add_all(nuevas)

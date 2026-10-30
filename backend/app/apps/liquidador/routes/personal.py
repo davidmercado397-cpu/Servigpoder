@@ -320,6 +320,19 @@ def eliminar_salida(salida_id: int, request: Request, db: DbSession, actual: Usu
     return ok({"eliminado": salida_id})
 
 
+@router.get("/personal/exportar-base", dependencies=[Depends(limitar("exportar", 10, 60))])
+def exportar_base(request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Base de personal con el formato de la importación (para corregirla en Excel y volver a subirla). El salario solo
+    va con el permiso de nómina. Se genera en memoria y no se guarda."""
+    from app.apps.liquidador.routes.periodos import _archivo
+    from app.apps.liquidador.services.exportar_personal import exportar_base as generar
+
+    contenido, tipo, nombre = generar(db, con_salario="liquidador.nomina.ver" in actual.permisos)
+    auditar(db, request, "liq_base_personal_exportada", actual.id)
+    db.commit()
+    return _archivo(contenido, tipo, nombre)
+
+
 @router.post("/personal/importar-base", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_personal", 5, 60))])
 async def importar_base(request: Request, db: DbSession, archivo: UploadFile = File(...), actual: Usuario = Depends(require(GESTIONAR))):
     """Base de personal de gestión humana (OPERATIVOS, ADMINISTRATIVOS, RETIROS OP, RETIROS ADMIN)."""

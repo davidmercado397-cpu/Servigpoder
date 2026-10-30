@@ -138,7 +138,7 @@ def _incapacidad_out(x: LiqIncapacidad, ac: dict, docs: dict, desconocidos: set[
 
 
 @router.get("/incapacidades", response_model=ApiResponse[list[dict]])
-def listar_incapacidades(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), anio: int | None = Query(None, ge=2000, le=2100),
+def listar_incapacidades(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), anio: str = Query("", pattern=r"^(|\d{4})$"),
                          origen: str = Query("", max_length=30), novedad: str = Query("", max_length=30),
                          vista: str = Query("todas", pattern="^(todas|vigentes|prolongadas)$"),
                          _=Depends(require(SALUD_VER))):
@@ -147,8 +147,8 @@ def listar_incapacidades(db: DbSession, p: Paginacion, q: str = Query("", max_le
     todas = list(db.scalars(select(LiqIncapacidad)))
     ac = gestion.acumulados(todas)
     lista = list(db.scalars(_filtro_texto(select(LiqIncapacidad), LiqIncapacidad, q, LiqIncapacidad.cie, LiqIncapacidad.diagnostico)))
-    if anio:
-        lista = [x for x in lista if x.desde.year == anio or x.hasta.year == anio]
+    if anio:  # vacío = todos los años
+        lista = [x for x in lista if int(anio) in (x.desde.year, x.hasta.year)]
     if origen:
         lista = [x for x in lista if (x.origen or "") == origen]
     if novedad:
@@ -556,7 +556,7 @@ def cuotas_pendientes(db: DbSession, p: Paginacion, q: str = Query("", max_lengt
 
 
 @router.get("/personal/salidas", response_model=ApiResponse[list[dict]])
-def salidas_vacaciones(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), anio: int | None = Query(None, ge=2000, le=2100),
+def salidas_vacaciones(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), anio: str = Query("", pattern=r"^(|\d{4})$"),
                        estado: str = Query("", pattern="^(|historico|programada|cancelada)$"), _=Depends(require(PERSONAL_VER))):
     """Histórico de vacaciones de todo el personal (libro de vacaciones y registros manuales)."""
     consulta = select(LiqVacacionSalida, LiqEmpleado).join(LiqEmpleado, LiqEmpleado.id == LiqVacacionSalida.empleado_id) \
@@ -567,8 +567,8 @@ def salidas_vacaciones(db: DbSession, p: Paginacion, q: str = Query("", max_leng
     if estado:
         consulta = consulta.where(LiqVacacionSalida.estado == estado)
     filas = db.execute(consulta).all()
-    if anio:
-        filas = [(s, e) for s, e in filas if s.desde and s.desde.year == anio]
+    if anio:  # vacío = todos los años
+        filas = [(s, e) for s, e in filas if s.desde and s.desde.year == int(anio)]
     pagina, meta = paginar_lista(filas, p)
     return ok([{"id": s.id, "empleado_id": e.id, "documento": e.documento, "nombre": e.nombre, "puesto": e.puesto, "tipo": s.tipo,
                 "desde": s.desde.isoformat() if s.desde else None, "hasta": s.hasta.isoformat() if s.hasta else None,

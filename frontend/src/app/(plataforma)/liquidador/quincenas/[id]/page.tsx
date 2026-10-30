@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, Banknote, Download, FileDown, FileSpreadsheet, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
+import { ArrowLeft, Banknote, Download, FileDown, FileSpreadsheet, FileText, Lock, LockOpen, Pencil, RefreshCw, Search, Trash2, TriangleAlert, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { NominaPersona } from "@/components/nomina-persona";
 import { NovedadesNomina } from "@/components/novedades-nomina";
+import { ProgramacionDias } from "@/components/programacion-dias";
 import { Alerta, Insignia, SubirArchivo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
@@ -20,6 +21,57 @@ type Carga = { periodo: Periodo; empleados: number; dias: number; fechas: number
 type Totales = { horas: Record<string, number>; dias: Record<string, number>; nomina?: TotalesNomina };
 const TIPO_DIA = Object.fromEntries(TIPOS_DIA);
 const DIA_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+/** Nómina normal o por horas (y qué descuenta la de horas); cambiarla recalcula la nómina. */
+function TipoNomina({ p, editable, onGuardado, onError }: {
+  p: Periodo; editable: boolean; onGuardado: (p: Periodo) => void; onError: (m: string) => void;
+}) {
+  const [edicion, setEdicion] = useState<{ tipo_nomina: string; descuenta_salud: boolean; descuenta_pension: boolean } | null>(null);
+  const horasNomina = (p.tipo_nomina ?? "normal") === "horas";
+  const descuenta = [p.descuenta_salud !== false && "salud", p.descuenta_pension !== false && "pensión"].filter(Boolean).join(" y ") || "ni salud ni pensión";
+
+  async function guardar() {
+    if (!edicion) return;
+    try {
+      onGuardado(await api<Periodo>(`/liquidador/periodos/${p.id}/tipo`, { method: "PUT", json: edicion }));
+      setEdicion(null);
+    } catch (e) {
+      onError(mensajeError(e));
+    }
+  }
+
+  if (!edicion) {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm">
+        <Insignia color={horasNomina ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>
+          {horasNomina ? `Por horas · descuenta ${descuenta}` : "Nómina normal"}
+        </Insignia>
+        {editable && (
+          <button className="text-xs text-marca-600 hover:underline" onClick={() => setEdicion({
+            tipo_nomina: p.tipo_nomina ?? "normal", descuenta_salud: p.descuenta_salud !== false, descuenta_pension: p.descuenta_pension !== false })}>
+            Cambiar
+          </button>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">
+      <select className="input w-36 py-1" value={edicion.tipo_nomina} onChange={(e) => setEdicion({ ...edicion, tipo_nomina: e.target.value })} aria-label="Tipo de nómina">
+        <option value="normal">Normal</option>
+        <option value="horas">Por horas</option>
+      </select>
+      {edicion.tipo_nomina === "horas" && (
+        <>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={edicion.descuenta_salud} onChange={(e) => setEdicion({ ...edicion, descuenta_salud: e.target.checked })} /> Descuenta salud</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={edicion.descuenta_pension} onChange={(e) => setEdicion({ ...edicion, descuenta_pension: e.target.checked })} /> Descuenta pensión</label>
+        </>
+      )}
+      <button className="btn-primario py-1" onClick={guardar}>Guardar y recalcular</button>
+      <button className="text-xs text-slate-500 hover:underline" onClick={() => setEdicion(null)}>Cancelar</button>
+    </span>
+  );
+}
 
 export default function DetalleQuincena() {
   const { id } = useParams<{ id: string }>();
@@ -146,6 +198,10 @@ export default function DetalleQuincena() {
           </p>
         </div>
         <Insignia color={estadoColor}>{estadoTexto}</Insignia>
+        <TipoNomina p={p} editable={gestionar && !cerrada} onError={setError}
+          onGuardado={(x) => { setP(x); setAviso((x.tipo_nomina ?? "normal") === "horas"
+            ? "Nómina por horas: se pagan las horas trabajadas y el auxilio de transporte por día trabajado. Se recalculó."
+            : "Nómina normal. Se recalculó."); cargarResultados().catch(() => {}); }} />
         {gestionar && !cerrada && (
           <button onClick={eliminar} className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-red-50 hover:text-red-700">
             <Trash2 className="h-4 w-4" /> Eliminar nómina
@@ -233,6 +289,17 @@ export default function DetalleQuincena() {
                   <Banknote className="h-4 w-4" /> Nómina
                 </a>
               )}
+              {verNomina && (cerrada ? (
+                <a className="btn-secundario inline-flex items-center gap-1.5" href={`/api/liquidador/periodos/${id}/comprobantes`}
+                  title="Comprobantes de nómina en PDF, uno por página, con lo que se pagó">
+                  <FileText className="h-4 w-4" /> Comprobantes de pago
+                </a>
+              ) : (
+                <span className="btn-secundario inline-flex cursor-not-allowed items-center gap-1.5 opacity-50"
+                  title="Los comprobantes de pago se generan cuando la nómina está cerrada">
+                  <FileText className="h-4 w-4" /> Comprobantes de pago
+                </span>
+              ))}
               {verNomina && (
                 <a className="btn-secundario inline-flex items-center gap-1.5"
                   href={`/api/liquidador/nominas-del-periodo/excel?anio=${p.anio}&mes=${p.mes}&quincena=${p.quincena}`}
@@ -339,7 +406,7 @@ export default function DetalleQuincena() {
         </section>
       )}
 
-      {detalle && <DetallePersona detalle={detalle} onCerrar={() => setDetalle(null)} />}
+      {detalle && <DetallePersona detalle={detalle} desde={p.desde} hasta={p.hasta} onCerrar={() => setDetalle(null)} />}
     </div>
   );
 }
@@ -390,7 +457,7 @@ function UmbralSemanal({ p, editable, onGuardado, onError }: {
   );
 }
 
-function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado; dias: Dia[] }; onCerrar: () => void }) {
+function DetallePersona({ detalle, desde, hasta, onCerrar }: { detalle: { empleado: Resultado; dias: Dia[] }; desde: string; hasta: string; onCerrar: () => void }) {
   const { empleado: e, dias } = detalle;
   const usados = CONCEPTOS.filter(([k]) => e.horas[k]);
   return (
@@ -409,6 +476,7 @@ function DetallePersona({ detalle, onCerrar }: { detalle: { empleado: Resultado;
               <span key={k} className={`rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{texto}: <b>{e.dias[k]}</b></span>
             ))}
           </div>
+          <ProgramacionDias dias={dias} desde={desde} hasta={hasta} diasAuxilio={e.nomina?.dias_auxilio} />
           {e.nomina && <NominaPersona n={e.nomina} />}
           {e.umbral_semanas && e.umbral_semanas.length > 0 && (
             <div className="overflow-auto rounded-lg border border-slate-200">

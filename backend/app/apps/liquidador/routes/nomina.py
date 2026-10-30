@@ -136,6 +136,28 @@ def listar_descuentos(db: DbSession, p: Paginacion, q: str = Query("", max_lengt
     return ok([_descuento_out(x, ya) for x in lista], **meta)
 
 
+@router.post("/descuentos/importar-cuotas", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_cuotas", 10, 60))])
+async def importar_cuotas(request: Request, db: DbSession, archivo: UploadFile = File(...),
+                          descripcion: str = Form(..., min_length=2, max_length=200), columna_valor: str = Form(..., pattern=r"^[A-Za-z]{1,3}$"),
+                          quincena: str = Form("segunda", pattern="^(ambas|primera|segunda)$"), desde: date = Form(...),
+                          desactivar_ausentes: bool = Form(True), actual: Usuario = Depends(require(GESTIONAR))):
+    """Cuotas desde la lista de una entidad (mutual, plan exequial…): crea o actualiza la cuota de cada cédula. El archivo
+    se procesa y se descarta."""
+    from app.apps.liquidador.services import cuotas
+    from app.apps.liquidador.services.personal import ErrorArchivo
+
+    contenido = await leer_xlsx(archivo)
+    try:
+        res = cuotas.importar(db, contenido, " ".join(descripcion.split()), columna_valor, quincena, desde, desactivar_ausentes)
+    except ErrorArchivo as e:
+        db.rollback()
+        raise ApiError(422, str(e), "EXCEL_INVALIDO") from e
+    auditar(db, request, "liq_cuotas_importadas", actual.id, archivo=(archivo.filename or "")[:255], descripcion=descripcion,
+            **{k: v for k, v in res.items() if k != "hallazgos"}, hallazgos=len(res["hallazgos"]))
+    db.commit()
+    return ok(res, aviso=AVISO)
+
+
 def _empleado_por_documento(db: DbSession, documento: str) -> LiqEmpleado:
     e = db.scalar(select(LiqEmpleado).where(LiqEmpleado.documento == documento.strip()))
     if e is None:
@@ -385,6 +407,23 @@ def descargar_periodo_completo(request: Request, db: DbSession, anio: int = Quer
     return _archivo(*archivo)
 
 
+@router.get("/periodos/{periodo_id}/comprobantes", dependencies=[Depends(limitar("exportar", 10, 60))])
+def descargar_comprobantes(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Comprobantes de nómina (desprendibles) en PDF, uno por página, con lo que se pagó: solo de nóminas cerradas."""
+    from app.apps.liquidador.routes.periodos import _archivo
+    from app.apps.liquidador.services import desprendibles
+
+    p = db.get(LiqPeriodo, periodo_id)
+    if p is None:
+        raise ApiError(404, "Periodo no encontrado")
+    if p.estado != CERRADA:
+        raise ApiError(409, "Los comprobantes de pago se generan de nóminas cerradas: cierre la nómina primero", "NOMINA_ABIERTA")
+    contenido, tipo, nombre = desprendibles.generar(db, p, getattr(request.state, "empresa", None))
+    auditar(db, request, "liq_comprobantes_descargados", actual.id, periodo=p.etiqueta, nomina=p.nombre)
+    db.commit()
+    return _archivo(contenido, tipo, nombre)
+
+
 @router.get("/periodos/{periodo_id}/nomina", dependencies=[Depends(limitar("exportar", 10, 60))])
 def descargar_nomina(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     from app.apps.liquidador.routes.periodos import _archivo
@@ -428,23 +467,66 @@ def pagado_por_mes_excel(request: Request, db: DbSession, anio: int = Query(ge=2
 
 # --- Comparación con Siigo ---
 
-@router.post("/comparar-siigo", dependencies=[Depends(limitar("liq_siigo", 10, 60))])
-async def comparar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
-                         mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1, ge=0, le=1_000_000),
-                         formato: str = Form("json", pattern="^(json|excel)$"), actual: Usuario = Depends(require(VER))):
-    """Cruza el reporte de netos de Siigo con todas las nóminas del periodo, persona por persona. El archivo no se guarda."""
-    from app.apps.liquidador.routes.periodos import _archivo
+def _etiqueta(anio: int, mes: int, quincena: int) -> str:
+    return f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"
+
+
+@router.post("/comparar-siigo", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_siigo", 10, 60))])
+async def cargar_siigo(request: Request, db: DbSession, archivo: UploadFile = File(...), anio: int = Form(..., ge=2020, le=2100),
+                       mes: int = Form(..., ge=1, le=12), quincena: int = Form(..., ge=0, le=2), tolerancia: float = Form(1000, ge=0, le=1_000_000),
+                       actual: Usuario = Depends(require(VER))):
+    """Lee el reporte de netos de Siigo del periodo y lo compara con todas las nóminas liquidadas aquí. Los datos leídos
+    quedan 24 horas para volver a comparar sin subirlo; el archivo no se guarda."""
     from app.apps.liquidador.services.personal import ErrorArchivo
 
     contenido = await leer_xlsx(archivo)
     try:
-        res = siigo.comparar(db, anio, mes, quincena, contenido, tolerancia)
+        carga = siigo.guardar(db, anio, mes, quincena, contenido, archivo.filename or "siigo.xlsx", actual.id)
+        res = siigo.comparar(db, carga, tolerancia)
     except ErrorArchivo as e:
+        db.rollback()
         raise ApiError(422, str(e), "EXCEL_INVALIDO") from e
     r = res["resumen"]
     auditar(db, request, "liq_comparacion_siigo", actual.id, anio=anio, mes=mes, quincena=quincena, con_diferencia=r["con_diferencia"],
-            solo_siigo=r["solo_siigo"], solo_sistema=r["solo_sistema"], formato=formato)
+            solo_siigo=r["solo_siigo"], solo_sistema=r["solo_sistema"])
     db.commit()
-    if formato == "excel":
-        return _archivo(*siigo.excel(res, f"{anio}_{mes:02d}_{'MES' if quincena == 0 else f'Q{quincena}'}"))
     return ok(res)
+
+
+def _carga(db, anio: int, mes: int, quincena: int):
+    c = siigo.vigente(db, anio, mes, quincena)
+    if c is None:
+        db.commit()
+        raise ApiError(404, "No hay un reporte de Siigo cargado para ese periodo en las últimas 24 horas", "SIN_CARGA")
+    return c
+
+
+@router.get("/comparar-siigo", response_model=ApiResponse[dict])
+def comparar_siigo(db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12), quincena: int = Query(ge=0, le=2),
+                   tolerancia: float = Query(1000, ge=0, le=1_000_000), _=Depends(require(VER))):
+    """Vuelve a comparar el reporte guardado del periodo contra la nómina actual."""
+    res = siigo.comparar(db, _carga(db, anio, mes, quincena), tolerancia)
+    db.commit()
+    return ok(res)
+
+
+@router.get("/comparar-siigo/excel", dependencies=[Depends(limitar("exportar", 10, 60))])
+def comparar_siigo_excel(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                         quincena: int = Query(ge=0, le=2), tolerancia: float = Query(1000, ge=0, le=1_000_000),
+                         actual: Usuario = Depends(require(VER))):
+    from app.apps.liquidador.routes.periodos import _archivo
+
+    res = siigo.comparar(db, _carga(db, anio, mes, quincena), tolerancia)
+    auditar(db, request, "liq_comparacion_siigo_descargada", actual.id, anio=anio, mes=mes, quincena=quincena)
+    db.commit()
+    return _archivo(*siigo.excel(res, _etiqueta(anio, mes, quincena)))
+
+
+@router.delete("/comparar-siigo", response_model=ApiResponse[dict])
+def quitar_siigo(request: Request, db: DbSession, anio: int = Query(ge=2020, le=2100), mes: int = Query(ge=1, le=12),
+                 quincena: int = Query(ge=0, le=2), actual: Usuario = Depends(require(VER))):
+    c = _carga(db, anio, mes, quincena)
+    db.delete(c)
+    auditar(db, request, "liq_comparacion_siigo_quitada", actual.id, anio=anio, mes=mes, quincena=quincena)
+    db.commit()
+    return ok({"quitada": True})

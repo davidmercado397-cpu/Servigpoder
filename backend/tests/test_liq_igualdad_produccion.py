@@ -36,6 +36,6 @@ def test_matrices_de_los_129_turnos_iguales_a_produccion():
         codigo, _, inicio, _, ordinarias, extras, _, incapacidad = linea.split("|")
         o, e = (Decimal(0), Decimal(0)) if incapacidad == "1" else (Decimal(ordinarias), Decimal(extras))
         calculadas[codigo] = _huella(build_shift_matrix(o, e, time.fromisoformat(inicio), 19))
-    assert len(esperadas) == 129 and set(calculadas) - set(esperadas) == {"AA", "CC"}
+    assert len(esperadas) == 129 and set(calculadas) - set(esperadas) == {"AA", "CC", "180"}
     distintas = {c: (calculadas[c], esperadas[c]) for c in esperadas if calculadas.get(c) != esperadas[c]}
     assert distintas == {}

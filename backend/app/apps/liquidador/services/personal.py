@@ -225,7 +225,7 @@ def _aplicar_datos(e: LiqEmpleado, v: dict, hoja: str, num: int, doc: str, infor
         e.extranjero = str(v["extranjero"]).strip() in ("1", "1.0", "SI", "Si", "si")
     if v.get("fondo_pensiones") not in (None, ""):
         fondo = _texto(v["fondo_pensiones"], 120) or ""
-        if "PENSION" in _norm(fondo):  # «PENSIONADA VEJEZ - COLPENSIONES»: pensionado y su fondo
+        if "PENSIONAD" in _norm(fondo):  # «PENSIONADA VEJEZ - COLPENSIONES»: pensionado y su fondo (COLPENSIONES solo es afiliado)
             e.pensionado = True
             partes = [p.strip() for p in fondo.split("-") if p.strip()]
             poner("fondo_pensiones", partes[-1][:80] if len(partes) > 1 else None)
@@ -281,11 +281,26 @@ def importar_base(db: Session, contenido: bytes) -> dict:
             informe(hoja, num, doc, "El documento tiene letras (p. ej. PPT): se cargó tal cual; verifique que coincida con el de la nómina")
         return doc
 
+    from app.apps.liquidador.services.importador import mismo_nombre
+
+    nombres_vistos: dict[str, tuple[str, str, int]] = {}  # nombre normalizado → (documento, hoja, fila)
     for hoja, tipo in activos:
         for num, v in _filas(hoja):
             doc = leer_doc(hoja.title, num, v.get("documento"))
             if not doc:
                 continue
+            nombre_archivo = _texto(v.get("nombre"), 200)
+            previo = empleados.buscar(doc)
+            if previo is not None and nombre_archivo and doc not in tocados and not mismo_nombre(previo.nombre, nombre_archivo):
+                informe(hoja.title, num, doc, f"El nombre cambió de «{previo.nombre}» a «{nombre_archivo}»: revise que la cédula y el nombre "
+                        "de esta fila sean de la misma persona")
+            if nombre_archivo:
+                clave = " ".join(sorted(_norm(nombre_archivo).split()))
+                otro = nombres_vistos.get(clave)
+                if otro and otro[0] != doc:
+                    informe(hoja.title, num, doc, f"Tiene el mismo nombre ({nombre_archivo}) que la cédula {otro[0]} ({otro[1]}, fila {otro[2]}): "
+                            "revise si a alguna de las dos filas le copiaron el nombre")
+                nombres_vistos.setdefault(clave, (doc, hoja.title, num))
             if doc in activos_en and activos_en[doc] != hoja.title:
                 informe(hoja.title, num, doc, f"También está en {activos_en[doc]}: se toma la información de {hoja.title}")
             activos_en[doc] = hoja.title

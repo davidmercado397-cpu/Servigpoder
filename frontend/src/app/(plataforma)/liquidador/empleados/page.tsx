@@ -1,12 +1,12 @@
 "use client";
 
-import { ChevronRight, FileUp, Search, UserPlus } from "lucide-react";
+import { ChevronRight, FileDown, FileUp, Search, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ImportarPersonal } from "@/components/importar-personal";
 import { NuevoEmpleado } from "@/components/nuevo-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
-import { Alerta, Insignia, Titulo } from "@/components/ui";
+import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { apiEnvelope, mensajeError } from "@/lib/api";
 import { pesos } from "@/lib/formato";
 import { CLASES_ARL, DIAS_SEMANA, type Empleado } from "@/lib/liquidador";
@@ -21,6 +21,7 @@ const habilesTexto = (d: number[]) => {
 export default function Empleados() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const gestionarPersonal = usePermiso("liquidador.personal.gestionar");
+  const verPersonal = usePermiso("liquidador.personal.ver");
   const router = useRouter();
   const [estado, setEstado] = useState("activo");
   const [tipo, setTipo] = useState("todos");
@@ -45,12 +46,20 @@ export default function Empleados() {
 
   return (
     <div className="space-y-5">
-      <Titulo accion={gestionarPersonal && (
+      <Titulo accion={(verPersonal || gestionarPersonal) && (
         <div className="flex flex-wrap gap-2">
+          {verPersonal && (
+            <a className="btn-secundario inline-flex items-center gap-1.5" href="/api/liquidador/personal/exportar-base"
+              title="Todos los empleados con su ficha, en el mismo formato de la base de personal (se puede corregir y volver a importar)">
+              <FileDown className="h-4 w-4" /> Exportar base de personal
+            </a>
+          )}
+          {gestionarPersonal && (
           <button className="btn-secundario inline-flex items-center gap-1.5" onClick={() => setImportar(!importar)}>
             <FileUp className="h-4 w-4" /> Importar base de personal o libro de vacaciones
           </button>
-          {!nuevo && (
+          )}
+          {gestionarPersonal && !nuevo && (
             <button className="btn-primario inline-flex items-center gap-1.5" onClick={() => setNuevo(true)}>
               <UserPlus className="h-4 w-4" /> Nuevo empleado
             </button>
@@ -62,7 +71,7 @@ export default function Empleados() {
         nóminas en que aparece. También se crean al cargar el Excel de una nómina o al importar la base de personal.
       </p>
       {error && <Alerta>{error}</Alerta>}
-      {nuevo && <NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} />}
+      {nuevo && <Modal onCerrar={() => setNuevo(false)}><NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} /></Modal>}
       {importar && <ImportarPersonal onImportado={() => cargar().catch(() => {})} />}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">

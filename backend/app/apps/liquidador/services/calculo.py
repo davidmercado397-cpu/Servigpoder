@@ -72,9 +72,16 @@ def contar(db: Session, periodo, dias: list) -> tuple[dict, dict, dict]:
     fest = festivos.conjunto(db, periodo.desde, periodo.hasta + timedelta(days=1))
     horas_por_empleado: dict[int, dict[HourConcept, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
     conteo_por_empleado: dict[int, dict[str, int]] = defaultdict(lambda: dict.fromkeys(CLASES, 0))
+    # Nómina por horas: otros turnos del mismo día (varias líneas en el Excel); sus horas se suman al día
+    ids_extra = {i for d in dias for i in (getattr(d, "turnos_extra", None) or [])}
+    extra = {t.id: t for t in db.scalars(select(LiqTurno).where(LiqTurno.id.in_(ids_extra)))} if ids_extra else {}
     for d in dias:
         tipo = classify(d.fecha, holiday_today=d.fecha in fest, holiday_tomorrow=d.fecha + timedelta(days=1) in fest)
         conceptos = expand_workday_to_concepts(d.turno.matriz or {}, tipo)
+        for tid in getattr(d, "turnos_extra", None) or []:
+            if tid in extra:
+                for c, h in expand_workday_to_concepts(extra[tid].matriz or {}, tipo).items():
+                    conceptos[c] = conceptos.get(c, Decimal("0")) + h
         d.tipo_dia = tipo.value
         d.clase = clase_de(d.turno)
         d.horas = {c.value: float(h) for c, h in conceptos.items()}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, FileSpreadsheet, GitCompare, Plus } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, GitCompare, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,10 +34,13 @@ export default function Quincenas() {
   const verNomina = usePermiso("liquidador.nomina.ver");
   const router = useRouter();
   const hoy = new Date();
-  const [nueva, setNueva] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2, nombre: "General" });
+  const [nueva, setNueva] = useState({ anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, quincena: hoy.getDate() <= 15 ? 1 : 2, nombre: "General",
+    tipo_nomina: "normal", descuenta_salud: true, descuenta_pension: true });
   const [lista, setLista] = useState<Periodo[] | null>(null);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [recalculando, setRecalculando] = useState<string | null>(null);
   const pag = usePaginacion();
   const campoNombre = useRef<HTMLInputElement>(null);
 
@@ -62,8 +65,30 @@ export default function Quincenas() {
     }
   }
 
+  async function recalcularTodo(g: Grupo) {
+    if (!window.confirm(`¿Recalcular todas las nóminas abiertas de ${MESES[g.mes - 1]} ${g.anio} · ${nombrePeriodo(g)}? `
+      + "Se vuelven a calcular con los turnos, préstamos, cuotas, auxilios y novedades vigentes. Las cerradas no cambian.")) return;
+    setError("");
+    setAviso("");
+    setRecalculando(g.clave);
+    try {
+      const r = await api<{ recalculadas: string[]; cerradas: string[]; sin_excel: string[] }>("/liquidador/nominas-del-periodo/recalcular",
+        { method: "POST", json: { anio: g.anio, mes: g.mes, quincena: g.quincena } });
+      setAviso([
+        r.recalculadas.length ? `Recalculadas: ${r.recalculadas.join(", ")}.` : "No había nóminas abiertas con Excel para recalcular.",
+        r.cerradas.length ? `Cerradas (no cambian): ${r.cerradas.join(", ")}.` : "",
+        r.sin_excel.length ? `Sin Excel cargado: ${r.sin_excel.join(", ")}.` : "",
+      ].filter(Boolean).join(" "));
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err));
+    } finally {
+      setRecalculando(null);
+    }
+  }
+
   function agregarA(g: Grupo) {
-    setNueva({ anio: g.anio, mes: g.mes, quincena: g.quincena, nombre: "" });
+    setNueva({ ...nueva, anio: g.anio, mes: g.mes, quincena: g.quincena, nombre: "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
     setTimeout(() => campoNombre.current?.focus(), 300);
   }
@@ -101,10 +126,27 @@ export default function Quincenas() {
             <input ref={campoNombre} className="input w-56" required maxLength={80} placeholder="Cliente 1, Administrativa…" value={nueva.nombre}
               onChange={(e) => setNueva({ ...nueva, nombre: e.target.value })} />
           </div>
+          <div>
+            <label className="label">Tipo de nómina</label>
+            <select className="input w-40" value={nueva.tipo_nomina} onChange={(e) => setNueva({ ...nueva, tipo_nomina: e.target.value })}>
+              <option value="normal">Normal</option>
+              <option value="horas">Por horas</option>
+            </select>
+          </div>
+          {nueva.tipo_nomina === "horas" && (
+            <div className="flex flex-col gap-1 pb-1 text-sm">
+              <span className="label mb-0">Descuenta</span>
+              <span className="flex gap-3">
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={nueva.descuenta_salud} onChange={(e) => setNueva({ ...nueva, descuenta_salud: e.target.checked })} /> Salud</label>
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={nueva.descuenta_pension} onChange={(e) => setNueva({ ...nueva, descuenta_pension: e.target.checked })} /> Pensión</label>
+              </span>
+            </div>
+          )}
           <button className="btn-primario inline-flex items-center gap-1.5"><Plus className="h-4 w-4" /> Crear nómina</button>
         </form>
       )}
       {error && <Alerta>{error}</Alerta>}
+      {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 
       <div className="tarjeta overflow-auto">
         <table className="tabla">
@@ -113,7 +155,8 @@ export default function Quincenas() {
           </thead>
           <tbody>
             {lista && agrupar(lista).map((g) => (
-              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} verNomina={verNomina} onAgregar={() => agregarA(g)} />
+              <PeriodoFilas key={g.clave} g={g} gestionar={gestionar} verNomina={verNomina} onAgregar={() => agregarA(g)}
+                ocupado={recalculando === g.clave} onRecalcular={() => recalcularTodo(g)} />
             ))}
           </tbody>
         </table>
@@ -124,7 +167,9 @@ export default function Quincenas() {
   );
 }
 
-function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestionar: boolean; verNomina: boolean; onAgregar: () => void }) {
+function PeriodoFilas({ g, gestionar, verNomina, onAgregar, onRecalcular, ocupado }: {
+  g: Grupo; gestionar: boolean; verNomina: boolean; onAgregar: () => void; onRecalcular: () => void; ocupado: boolean;
+}) {
   const personas = g.nominas.reduce((s, p) => s + p.empleados, 0);
   return (
     <>
@@ -150,6 +195,12 @@ function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestio
                 </Link>
               </>
             )}
+            {gestionar && g.nominas.some((p) => p.estado === "calculada") && (
+              <button onClick={onRecalcular} disabled={ocupado} title="Recalcula todas las nóminas abiertas de este periodo"
+                className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${ocupado ? "animate-spin" : ""}`} /> {ocupado ? "Recalculando…" : "Recalcular todas"}
+              </button>
+            )}
             {gestionar && (
               <button onClick={onAgregar} className="inline-flex items-center gap-1 text-sm font-medium text-marca-600 hover:underline">
                 <Plus className="h-4 w-4" /> Agregar nómina
@@ -162,7 +213,7 @@ function PeriodoFilas({ g, gestionar, verNomina, onAgregar }: { g: Grupo; gestio
         const [texto, color] = ESTADO_PERIODO[p.estado] ?? [p.estado, ""];
         return (
           <tr key={p.id}>
-            <td className="pl-8 font-medium">{p.nombre}</td>
+            <td className="pl-8 font-medium">{p.nombre}{p.tipo_nomina === "horas" && <Insignia color="ml-2 bg-violet-100 text-violet-800">Por horas</Insignia>}</td>
             <td><Insignia color={color}>{texto}</Insignia></td>
             <td className="max-w-xs truncate text-sm text-slate-600" title={p.archivo ?? ""}>{p.archivo ?? "—"}</td>
             <td className="text-right tabular-nums">{p.empleados.toLocaleString("es-CO")}</td>

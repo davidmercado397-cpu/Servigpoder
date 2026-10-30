@@ -143,6 +143,11 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
     puestos = {p.id: p for p in db.scalars(select(Puesto))}
     matriz = {mp.puesto_id: mp for mp in db.scalars(select(MatrizPuesto).where(MatrizPuesto.periodo_id == periodo.id))}
 
+    # Los códigos se clasifican de nuevo con el catálogo vigente: un turno creado en el maestro después de subir la
+    # programación deja de contar como desconocido al recalcular
+    from app.apps.capacidad.services.programacion import reclasificar
+
+    reclasificar(db, carga)
     # Todo lo programado en la carga; los días trabajados en puestos del maestro alimentan la cobertura
     registros = cubrimientos.registros_carga(db, carga.id)
     en_puesto = [(r.cedula, r.puesto_id, r.fecha, r.codigo) for r in registros if r.clase == TRABAJO and r.puesto_id]

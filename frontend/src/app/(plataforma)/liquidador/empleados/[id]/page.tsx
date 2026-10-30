@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DatosPersonalesForm, HistorialLaboral, HistorialVacaciones } from "@/components/ficha-personal";
 import { FormularioAuxilio } from "@/components/formulario-auxilio";
 import { FormularioDescuento } from "@/components/formulario-descuento";
-import { Alerta, Insignia } from "@/components/ui";
+import { Alerta, Insignia, Modal } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
 import {
@@ -236,9 +236,11 @@ export default function FichaEmpleado() {
             )}
           </div>
           {editDesc && (
-            <FormularioDescuento key={editDesc.registro?.id ?? "nuevo"} registro={editDesc.registro} documento={f.documento}
-              onCancelar={() => setEditDesc(null)}
-              onGuardado={() => { setEditDesc(null); setAviso("Descuento guardado."); cargarDescuentos().catch(() => {}); }} />
+            <Modal onCerrar={() => setEditDesc(null)}>
+              <FormularioDescuento key={editDesc.registro?.id ?? "nuevo"} registro={editDesc.registro} documento={f.documento}
+                onCancelar={() => setEditDesc(null)}
+                onGuardado={() => { setEditDesc(null); setAviso("Descuento guardado."); cargarDescuentos().catch(() => {}); }} />
+            </Modal>
           )}
           <div className="tarjeta overflow-auto">
             <table className="tabla text-sm">
@@ -286,9 +288,11 @@ export default function FichaEmpleado() {
             )}
           </div>
           {editAux && (
-            <FormularioAuxilio key={editAux.registro?.id ?? "nuevo"} registro={editAux.registro} documento={f.documento}
-              onCancelar={() => setEditAux(null)}
-              onGuardado={() => { setEditAux(null); setAviso("Auxilio guardado."); cargarDescuentos().catch(() => {}); }} />
+            <Modal onCerrar={() => setEditAux(null)}>
+              <FormularioAuxilio key={editAux.registro?.id ?? "nuevo"} registro={editAux.registro} documento={f.documento}
+                onCancelar={() => setEditAux(null)}
+                onGuardado={() => { setEditAux(null); setAviso("Auxilio guardado."); cargarDescuentos().catch(() => {}); }} />
+            </Modal>
           )}
           <div className="tarjeta overflow-auto">
             <table className="tabla text-sm">

@@ -179,3 +179,27 @@ def cargar(db: Session, contenido: bytes, archivo: str, usuario_id: int | None) 
     }
     db.commit()
     return carga
+
+
+def reclasificar(db: Session, carga: ProgramacionCarga) -> int:
+    """Vuelve a clasificar cada día de la carga con el catálogo vigente (p. ej. un turno creado en el maestro después
+    de subir la programación) y actualiza el resumen de la carga. Devuelve cuántos días cambiaron de clase."""
+    clasif = Clasificador(novedades=set(db.scalars(select(Novedad.codigo))), turnos={t.codigo: t.clase for t in db.scalars(select(Turno))})
+    if not clasif.turnos:
+        return 0
+    dias = db.scalars(select(ProgramacionDia).join(ProgramacionFila, ProgramacionFila.id == ProgramacionDia.fila_id)
+                      .where(ProgramacionFila.carga_id == carga.id)).all()
+    cambios, clases, desconocidos = 0, Counter(), Counter()
+    for d in dias:
+        clase = clasif.clase(d.codigo)
+        if clase != d.clase:
+            d.clase = clase
+            cambios += 1
+        clases[clase] += 1
+        if clase == DESCONOCIDO:
+            desconocidos[d.codigo] += 1
+    if cambios:
+        carga.resumen = {**(carga.resumen or {}), "dias_por_clase": dict(clases),
+                         "codigos_desconocidos": [{"codigo": c, "veces": n} for c, n in desconocidos.most_common()]}
+        db.flush()
+    return cambios

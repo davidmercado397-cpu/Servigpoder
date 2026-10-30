@@ -14,9 +14,10 @@ from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
+from pydantic import BaseModel, Field
 from app.apps.liquidador.models import CALCULADA, CERRADA, LiqDia, LiqEmpleado, LiqPeriodo, LiqResultado
 from app.apps.liquidador.schemas import (
-    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, UmbralIn,
+    CargaOut, DetalleEmpleado, DiaOut, EmpleadoOut, NombreNominaIn, PeriodoIn, PeriodoOut, ResultadoOut, TipoNominaIn, UmbralIn,
 )
 from app.apps.liquidador.services import calculo, exportar, importador, vacaciones
 
@@ -65,8 +66,10 @@ def listar(db: DbSession, p: Paginacion, _=Depends(require(VER))):
 @router.post("/periodos", response_model=ApiResponse[PeriodoOut], status_code=201)
 def crear(data: PeriodoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     desde, hasta = calculo.rango_quincena(data.anio, data.mes, data.quincena)
+    horas = data.tipo_nomina == "horas"
     p = LiqPeriodo(anio=data.anio, mes=data.mes, quincena=data.quincena, nombre=data.nombre, desde=desde, hasta=hasta,
-                   advertencias=[])
+                   advertencias=[], tipo_nomina=data.tipo_nomina, descuenta_salud=data.descuenta_salud or not horas,
+                   descuenta_pension=data.descuenta_pension or not horas)
     _nombre_libre(db, p, data.nombre)
     db.add(p)
     db.flush()
@@ -80,6 +83,23 @@ def _nombre_libre(db: DbSession, p: LiqPeriodo, nombre: str) -> None:
                                               func.lower(LiqPeriodo.nombre) == nombre.lower()))
     if otra is not None and otra.id != p.id:
         raise ApiError(409, f"El periodo {p.etiqueta} ya tiene una nómina «{otra.nombre}»")
+
+
+@router.put("/periodos/{periodo_id}/tipo", response_model=ApiResponse[PeriodoOut])
+def cambiar_tipo(periodo_id: int, data: TipoNominaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Nómina normal o por horas (y qué descuenta la de horas). Si ya tiene el Excel cargado, se recalcula."""
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    horas = data.tipo_nomina == "horas"
+    p.tipo_nomina = data.tipo_nomina
+    p.descuenta_salud, p.descuenta_pension = data.descuenta_salud or not horas, data.descuenta_pension or not horas
+    db.flush()
+    if p.cargado_en is not None:
+        calculo.calcular(db, p)
+    auditar(db, request, "liq_nomina_tipo", actual.id, periodo=p.etiqueta, nomina=p.nombre, tipo=p.tipo_nomina,
+            salud=p.descuenta_salud, pension=p.descuenta_pension)
+    db.commit()
+    return ok(_periodo_out(db, p))
 
 
 @router.put("/periodos/{periodo_id}/nombre", response_model=ApiResponse[PeriodoOut])
@@ -152,6 +172,35 @@ def recalcular(periodo_id: int, request: Request, db: DbSession, actual: Usuario
     return ok(_periodo_out(db, p))
 
 
+class PeriodoClaveIn(BaseModel):
+    anio: int = Field(ge=2020, le=2100)
+    mes: int = Field(ge=1, le=12)
+    quincena: int = Field(ge=0, le=2)
+
+
+@router.post("/nominas-del-periodo/recalcular", response_model=ApiResponse[dict], dependencies=[Depends(limitar("liq_recalcular", 10, 60))])
+def recalcular_periodo(data: PeriodoClaveIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Recalcula todas las nóminas abiertas y con Excel del periodo (p. ej. después de cargar cuotas o cambiar tarifas).
+    Las cerradas y las que aún no tienen Excel no se tocan."""
+    nominas = list(db.scalars(select(LiqPeriodo).where(LiqPeriodo.anio == data.anio, LiqPeriodo.mes == data.mes,
+                                                       LiqPeriodo.quincena == data.quincena).order_by(LiqPeriodo.id)))
+    if not nominas:
+        raise ApiError(404, "No hay nóminas en ese periodo")
+    recalculadas, cerradas, sin_excel = [], [], []
+    for p in nominas:
+        if p.estado == CERRADA:
+            cerradas.append(p.nombre)
+        elif p.cargado_en is None:
+            sin_excel.append(p.nombre)
+        else:
+            calculo.calcular(db, p, con_hermanas=False)
+            recalculadas.append(p.nombre)
+    auditar(db, request, "liq_periodo_recalculado_todo", actual.id, anio=data.anio, mes=data.mes, quincena=data.quincena,
+            recalculadas=len(recalculadas), cerradas=len(cerradas))
+    db.commit()
+    return ok({"recalculadas": recalculadas, "cerradas": cerradas, "sin_excel": sin_excel})
+
+
 @router.put("/periodos/{periodo_id}/umbral", response_model=ApiResponse[PeriodoOut])
 def umbral_semanal(periodo_id: int, data: UmbralIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     """Marca o desmarca el umbral semanal del periodo. Queda guardado para la siguiente carga del Excel y, si el
@@ -216,9 +265,9 @@ def resultados(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("",
             totales["dias"][k] = totales["dias"].get(k, 0) + v
     pendiente = any(not r.nomina for r in lista)
     if ve_nomina and not pendiente:
-        claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
+        claves_nomina = ("basico", "incapacidad", "vacaciones_valor", "licencias_valor", "recargos", "extras", "auxilio", "devengado", "salud", "pension",
                          "embargos", "prestamos", "cuotas", "novedades_devengo", "novedades_deduccion",
-                         "deducciones", "neto")
+                         "deducciones", "neto", "provision_ss_180")
         totales["nomina"] = {k: round(sum((r.nomina or {}).get(k, 0) for r in lista)) for k in claves_nomina}
     return ok([_resultado_out(r, ve_nomina) for r in pagina], **meta, totales=totales, nomina_pendiente=ve_nomina and pendiente,
               en_otras_nominas=sum(1 for r in lista if (r.nomina or {}).get("otras_nominas")))

@@ -147,6 +147,11 @@ class LiqPeriodo(Base):
     umbral_activo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     umbral_horas: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("42"), server_default="42")
     umbral_horas_novedad: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("7"), server_default="7")
+    # Nómina por horas: se pagan solo las horas trabajadas (salario ÷ horas del mes), el auxilio de transporte por día
+    # trabajado (una vez por día aunque trabaje en dos nóminas) y descuenta salud y/o pensión según se marque
+    tipo_nomina: Mapped[str] = mapped_column(String(10), default="normal", server_default="normal")  # normal | horas
+    descuenta_salud: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    descuenta_pension: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     cargado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     calculado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cerrado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -177,7 +182,9 @@ class LiqDia(Base):
     empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id"), index=True)
     fecha: Mapped[date] = mapped_column(Date)
     turno_id: Mapped[int] = mapped_column(ForeignKey("liq_turno.id"))
-    codigo: Mapped[str] = mapped_column(String(8))  # código tal como se cargó
+    codigo: Mapped[str] = mapped_column(String(40))  # código tal como se cargó («H4+H4» si son varios turnos el mismo día)
+    # Solo en nóminas por horas: otros turnos del mismo día (otra línea del Excel, otro puesto); sus horas se suman
+    turnos_extra: Mapped[list] = mapped_column(JSON, default=list)
     tipo_dia: Mapped[str] = mapped_column(String(24), default="")  # columna de la matriz (weekday, sunday…)
     clase: Mapped[str] = mapped_column(String(20), default="")  # trabajado, descanso_pago, libre, ausencia…
     horas: Mapped[dict] = mapped_column(JSON, default=dict)  # {concepto: horas} solo los que aplican
@@ -367,6 +374,9 @@ class LiqVacacionSalida(Base):
 MAYOR_VALOR, MENOR_VALOR = "mayor_valor", "menor_valor"
 HORAS_EXTRAS, RECARGOS_PENDIENTES = "horas_extras", "recargos"
 OTRO_DEVENGO, OTRA_DEDUCCION = "otro_devengo", "otra_deduccion"
+AUXILIO_VARIABLE = "auxilio_variable"  # auxilio no prestacional de una sola nómina
+AUXILIO_INTERMUNICIPAL = "auxilio_intermunicipal"  # rodamiento por transporte intermunicipal: no prestacional, de una sola nómina
+AUXILIOS_VARIABLES = (AUXILIO_VARIABLE, AUXILIO_INTERMUNICIPAL)  # se pagan con los auxilios no prestacionales
 NOVEDADES_DEDUCCION = (MAYOR_VALOR, OTRA_DEDUCCION)
 NOVEDADES_HORAS = (HORAS_EXTRAS, RECARGOS_PENDIENTES)
 
@@ -381,7 +391,7 @@ class LiqNovedad(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     periodo_id: Mapped[int] = mapped_column(ForeignKey("liq_periodo.id", ondelete="CASCADE"), index=True)
     empleado_id: Mapped[int] = mapped_column(ForeignKey("liq_empleado.id", ondelete="CASCADE"), index=True)
-    tipo: Mapped[str] = mapped_column(String(20))
+    tipo: Mapped[str] = mapped_column(String(30))
     descripcion: Mapped[str] = mapped_column(String(200))
     # Horas extras y recargos pendientes: horas por concepto y fecha en que se causaron (para la tarifa)
     horas: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -395,6 +405,25 @@ class LiqNovedad(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     empleado: Mapped[LiqEmpleado] = relationship(lazy="joined")
+
+
+class LiqSiigoCarga(Base):
+    """Datos leídos del reporte de netos de Siigo de un periodo, para volver a comparar sin subir el archivo otra vez.
+    Se guardan los datos (no el archivo) y se borran solos al vencer (24 horas); subir otro reporte los reemplaza."""
+
+    __tablename__ = "liq_siigo_carga"
+    __table_args__ = (UniqueConstraint("anio", "mes", "quincena"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anio: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    quincena: Mapped[int] = mapped_column(Integer)
+    archivo: Mapped[str] = mapped_column(String(255))
+    personas: Mapped[list] = mapped_column(JSON, default=list)  # [{documento, nombre, hojas: [{hoja, ingresos, deducciones, neto}]}]
+    hallazgos: Mapped[list] = mapped_column(JSON, default=list)
+    cargado_por: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    vence_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 # ---------------- Gestión humana: salud y casos jurídicos (repositorio de consulta; no afecta la nómina) ----------------

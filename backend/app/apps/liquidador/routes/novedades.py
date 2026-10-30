@@ -14,7 +14,7 @@ from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
-from app.apps.liquidador.models import CERRADA, NOVEDADES_HORAS, OTRO_DEVENGO, LiqNovedad, LiqPeriodo, LiqResultado
+from app.apps.liquidador.models import AUXILIOS_VARIABLES, CERRADA, NOVEDADES_HORAS, OTRO_DEVENGO, LiqNovedad, LiqPeriodo, LiqResultado
 from app.apps.liquidador.services import calculo, novedades
 from app.apps.liquidador.services.nomina import CONCEPTOS_PAGO
 from app.apps.liquidador.services.personal import ErrorArchivo, Indice
@@ -71,6 +71,9 @@ def _calculadas(db, periodo_id: int) -> dict[int, dict]:
     for n in db.scalars(select(LiqResultado.nomina).where(LiqResultado.periodo_id == periodo_id)):
         for x in (n or {}).get("novedades", []):
             out[x["id"]] = x
+        for x in (n or {}).get("auxilios", []):  # los auxilios variables se aplican con los auxilios no prestacionales
+            if str(x["id"]).startswith("nov-"):
+                out[int(str(x["id"])[4:])] = {**x, "deduccion": False, "salarial": False}
     return out
 
 
@@ -93,7 +96,7 @@ def _guardar(db, p: LiqPeriodo, x: LiqNovedad, data: NovedadIn) -> None:
     x.empleado_id, x.tipo, x.descripcion = e.id, data.tipo, data.descripcion.strip()
     x.horas, x.valor = data.horas, data.valor
     x.fecha_causacion = data.fecha_causacion if data.tipo in NOVEDADES_HORAS else None
-    x.salarial = data.salarial if data.tipo == OTRO_DEVENGO else True
+    x.salarial = data.salarial if data.tipo == OTRO_DEVENGO else data.tipo not in AUXILIOS_VARIABLES
     x.nomina_origen = (data.nomina_origen or "").strip() or None
 
 

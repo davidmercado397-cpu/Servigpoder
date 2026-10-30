@@ -116,7 +116,7 @@ def _siigo(hojas: dict[str, list[list]]) -> bytes:
     return buf.getvalue()
 
 
-def test_excel_del_periodo_y_comparacion_con_siigo(admin):
+def test_excel_del_periodo_y_comparacion_con_siigo(admin, en_empresa):
     general = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], DIAS)
     otra = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Cliente 2"}).json()["data"]["id"]
     _cargar(admin, otra, xlsx([["documento", "NOVIEMBRE", 1, 2], [3003, "3003", "A", "A"]]))
@@ -146,11 +146,243 @@ def test_excel_del_periodo_y_comparacion_con_siigo(admin):
     filas = {f["documento"]: f for f in d["filas"]}
     assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == round(b["auxilio"], 2)
     assert any("auxilio de transporte" in p for p in filas["2002"]["pistas"])
+    assert filas["2002"]["siigo"]["hojas"] == [{"hoja": "UNIDADES", "ingresos": b["devengado"] - b["auxilio"], "deducciones": b["deducciones"],
+                                                "neto": b["neto"] - b["auxilio"]}]
     assert filas["4004"]["estado"] == "solo_siigo" and filas["3003"]["estado"] == "solo_sistema"
     assert d["hojas_siigo"]["CVC"] == 460000 and set(d["nominas_sistema"]) == {"General", "Cliente 2"}
     assert round(d["resumen"]["neto_sistema"], 2) == round(a["neto"] + b["neto"] + c["neto"], 2)
 
-    r = admin.post(f"{API}/comparar-siigo", files=archivo(siigo, "netos.xlsx"), data={**datos, "formato": "excel"})
+    assert d["carga"]["archivo"] == "netos.xlsx"
+
+    # Los datos quedan 24 horas: se vuelve a comparar sin subir el archivo, contra la nómina actual
+    consulta = "anio=2026&mes=11&quincena=1"
+    r = admin.get(f"{API}/comparar-siigo/excel?{consulta}")
     assert r.status_code == 200 and load_workbook(BytesIO(r.content)).sheetnames == ["Comparacion", "Resumen"]
+    admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "cuota", "descripcion": "Exequial", "valor_mensual": 20000,
+                                          "desde": "2026-11-01"})
+    admin.post(f"{API}/periodos/{general}/recalcular")
+    otra_vez = admin.get(f"{API}/comparar-siigo?{consulta}").json()["data"]
+    assert {f["documento"]: f for f in otra_vez["filas"]}["1001"]["estado"] == "diferencia"
+    assert admin.get(f"{API}/comparar-siigo?anio=2026&mes=11&quincena=2").status_code == 404
+
+    # Vencidos (más de 24 horas) se borran solos
+    from datetime import datetime, timedelta, timezone
+
+    from app.apps.liquidador.models import LiqSiigoCarga
+
+    s = en_empresa("sera")
+    s.query(LiqSiigoCarga).update({"vence_en": datetime.now(timezone.utc) - timedelta(minutes=1)})
+    s.commit()
+    assert admin.get(f"{API}/comparar-siigo?{consulta}").status_code == 404
+    assert s.query(LiqSiigoCarga).count() == 0
+
     vacio = admin.post(f"{API}/comparar-siigo", files=archivo(xlsx([["hola"]]), "x.xlsx"), data=datos)
     assert vacio.status_code == 422
+
+
+def test_reporte_de_siigo_solo_con_netos(admin):
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], DIAS)
+    a, b = _nomina(admin, pid, "1001"), _nomina(admin, pid, "2002")
+    libro = Workbook()
+    h = libro.active
+    h.title = "ALCALDIA 1"
+    h.append(["NOMBRE", "CEDULA", "NETO A PAGAR"])
+    h.append(["A", 1001, a["neto"] + 0.37])
+    h.append(["B", 2002, b["neto"] - 9262])
+    buf = BytesIO()
+    libro.save(buf)
+    r = admin.post(f"{API}/comparar-siigo", files=archivo(buf.getvalue(), "netos.xlsx"), data={"anio": "2026", "mes": "11", "quincena": "1"})
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["resumen"]["solo_neto"] and d["resumen"]["tolerancia"] == 1000
+    filas = {f["documento"]: f for f in d["filas"]}
+    # Sin columnas de ingresos ni deducciones no se inventan diferencias: solo el neto
+    assert filas["1001"]["estado"] == "cuadra" and filas["1001"]["siigo"]["ingresos"] is None
+    assert filas["1001"]["diferencia"]["ingresos"] is None and filas["1001"]["diferencia"]["deducciones"] is None
+    assert filas["2002"]["estado"] == "diferencia" and filas["2002"]["diferencia"]["neto"] == 9262
+    hoja = load_workbook(BytesIO(admin.get(f"{API}/comparar-siigo/excel?anio=2026&mes=11&quincena=1").content))["Comparacion"]
+    enc = [c.value for c in hoja[1]]
+    assert "INGRESOS SIIGO" not in enc and "DIF INGRESOS" not in enc and "NETO SIIGO" in enc and "INGRESOS SISTEMA" in enc
+
+
+def test_codigo_180_y_auxilio_variable(admin):
+    # 1001: 10 días trabajados y 5 con código 180; 2002: toda la quincena con código 180
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 10 + ["180"] * 5)], [2002, "2002", *(["180"] * 15)]], DIAS)
+    base_dia = 1750905 / 30
+    n = _nomina(admin, pid, "2002")
+    ss = n["seguridad_social_180"]
+    assert n["neto"] == 0 and n["devengado"] == 0 and n["salud"] == 0
+    assert ss["dias"] == 15 and ss["base"] == int(base_dia * 15 + 0.5) and ss["exonerado"] and ss["salud_empleador"] == 0
+    assert ss["salud_empleado"] == round(ss["base"] * 0.04) and ss["pension_empleador"] == round(ss["base"] * 0.12)
+    assert n["provision_ss_180"] == ss["total"] and any("código 180" in a for a in n["alertas"])
+    n1 = _nomina(admin, pid, "1001")
+    assert n1["seguridad_social_180"]["dias"] == 5 and n1["dias_salario"] == 10 and n1["neto"] > 0
+
+    # Auxilio variable (rodamiento intermunicipal): suma a los auxilios no prestacionales, sin descuento por TNL
+    r = admin.post(f"{API}/periodos/{pid}/novedades", json={"documento": "1001", "tipo": "auxilio_variable",
+                                                           "descripcion": "Rodamiento intermunicipal", "valor": 45000})
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["valor"] == 45000 and r.json()["data"]["deduccion"] is False
+    n2 = _nomina(admin, pid, "1001")
+    assert n2["auxilios_no_prestacionales"] == 45000 and n2["novedades_devengo"] == 0
+    assert n2["ibc"] == n1["ibc"] and n2["devengado"] == n1["devengado"] + 45000
+    assert any(x["descripcion"] == "Rodamiento intermunicipal" for x in n2["auxilios"])
+
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
+    filas = list(libro.worksheets[0].iter_rows(values_only=True))
+    fila = dict(zip(filas[0], next(f for f in filas if f[0] == "2002")))
+    assert fila["DIAS COD 180"] == 15 and fila["PROVISION SEG SOCIAL COD 180"] == ss["total"]
+
+
+def test_nomina_por_horas(admin):
+    turno = {"hora_inicio": "08:00", "hora_fin": "12:00", "horas_extras": 0, "remunerado": True, "incapacidad": False}
+    assert admin.post(f"{API}/turnos", json={**turno, "codigo": "H4", "nombre": "4 horas", "horas_ordinarias": 4}).status_code == 201
+    assert admin.post(f"{API}/turnos", json={**turno, "codigo": "H2", "nombre": "2 horas", "horas_ordinarias": 2}).status_code == 201
+
+    # Normal (no cambia nada) y dos por horas del mismo periodo
+    normal = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    n_normal_antes = _nomina(admin, normal, "1001")
+    r = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Puesto A", "tipo_nomina": "horas",
+                                            "descuenta_salud": True, "descuenta_pension": False})
+    assert r.status_code == 201 and r.json()["data"]["tipo_nomina"] == "horas" and not r.json()["data"]["descuenta_pension"]
+    a = r.json()["data"]["id"]
+    # 5005: 2 h el 3 y el 4 (y un descanso Z el 5) en el Puesto A; el 4 también 4 h en el Puesto B
+    _cargar(admin, a, xlsx([["documento", "NOVIEMBRE", 3, 4, 5], [5005, "5005", "H2", "H2", "Z"]]))
+    b = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Puesto B", "tipo_nomina": "horas"}).json()["data"]["id"]
+    _cargar(admin, b, xlsx([["documento", "NOVIEMBRE", 4], [5005, "5005", "H4"]]))
+
+    hora = 1750905 / 210
+    aux_dia = 249095 / 30
+    na = _nomina(admin, a, "5005")
+    assert na["por_horas"] and na["horas_pagadas"] == 4 and na["basico"] == int(4 * hora + 0.5)
+    assert na["dias_auxilio"] == 2 and na["auxilio"] == int(2 * aux_dia + 0.5)  # el Z no paga auxilio
+    assert na["pension"] == 0 and na["salud"] == int(na["basico"] * 0.04 + 0.5)
+    nb = _nomina(admin, b, "5005")
+    # El 4 ya tiene auxilio en el Puesto A (creado antes): en el B solo las horas
+    assert nb["horas_pagadas"] == 4 and nb["dias_auxilio"] == 0 and nb["auxilio"] == 0 and nb["dias_auxilio_otra_nomina"] == 1
+    assert any("«Puesto A»" in x and "auxilio de transporte" in x for x in nb["alertas"])
+    assert nb["salud"] > 0 and nb["pension"] > 0
+
+    # La nómina normal no cambió
+    assert _nomina(admin, normal, "1001") == n_normal_antes
+
+    # Cambiar a normal: se recalcula como nómina normal
+    r = admin.put(f"{API}/periodos/{a}/tipo", json={"tipo_nomina": "normal"})
+    assert r.status_code == 200 and r.json()["data"]["descuenta_pension"]
+    n = _nomina(admin, a, "5005")
+    assert not n["por_horas"] and n["dias_salario"] == 3 and n["pension"] > 0
+
+
+def test_varias_lineas_el_mismo_dia_solo_en_nomina_por_horas(admin):
+    turno = {"hora_inicio": "08:00", "hora_fin": "12:00", "horas_extras": 0, "remunerado": True, "incapacidad": False}
+    admin.post(f"{API}/turnos", json={**turno, "codigo": "H4", "nombre": "4 horas", "horas_ordinarias": 4})
+    excel = xlsx([["documento", "NOVIEMBRE", 3, 4], [5005, "5005", "H4", "H4"], [5005, "5005", "H4", ""], [6006, "6006", "A", "A"]])
+
+    horas = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Por horas", "tipo_nomina": "horas"}).json()["data"]["id"]
+    r = _cargar(admin, horas, excel)
+    assert r.status_code == 200, r.text
+    assert any("más de una línea" in a for a in r.json()["data"]["advertencias"])
+    n = _nomina(admin, horas, "5005")
+    assert n["horas_pagadas"] == 12 and n["dias_auxilio"] == 2  # 8 h el 3 (dos puestos) + 4 h el 4; auxilio una vez por día
+    dias = admin.get(f"{API}/periodos/{horas}/empleados/{_resultado_id(admin, horas, '5005')}").json()["data"]["dias"]
+    assert [d["codigo"] for d in dias] == ["H4+H4", "H4"]
+
+    # En la nómina normal la segunda línea se omite como siempre
+    normal = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Normal"}).json()["data"]["id"]
+    r = _cargar(admin, normal, excel)
+    assert any("solo se permiten en la nómina por horas" in a for a in r.json()["data"]["advertencias"])
+    assert _nomina(admin, normal, "5005")["dias_salario"] == 2
+
+
+def _resultado_id(cliente, pid, doc):
+    from tests.test_liquidador import _resultados
+
+    return _resultados(cliente, pid)[doc]["empleado_id"]
+
+
+def test_pensionado_no_descuenta_pension(en_empresa, admin):
+    from app.apps.liquidador.models import LiqEmpleado
+
+    normal = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    horas = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Por horas", "tipo_nomina": "horas",
+                                                "descuenta_salud": True, "descuenta_pension": True}).json()["data"]["id"]
+    _cargar(admin, horas, xlsx([["documento", "NOVIEMBRE", 3], [1001, "1001", "A"]]))
+    assert _nomina(admin, normal, "1001")["pension"] > 0 and _nomina(admin, horas, "1001")["pension"] > 0
+
+    s = en_empresa("sera")
+    s.query(LiqEmpleado).filter(LiqEmpleado.documento == "1001").update({"pensionado": True})
+    s.commit()
+    for pid in (normal, horas):
+        admin.post(f"{API}/periodos/{pid}/recalcular")
+        n = _nomina(admin, pid, "1001")
+        assert n["pensionado"] and n["pension"] == 0 and n["pension_pct"] == 0 and n["salud"] > 0
+
+
+def test_auxilio_intermunicipal(admin):
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 13 + ["AUS"] * 2)]], DIAS)
+    n0 = _nomina(admin, pid, "1001")
+    r = admin.post(f"{API}/periodos/{pid}/novedades", json={"documento": "1001", "tipo": "auxilio_intermunicipal",
+                                                           "descripcion": "Auxilio intermunicipal", "valor": 60000})
+    assert r.status_code == 201, r.text
+    n = _nomina(admin, pid, "1001")
+    # No prestacional y completo aunque tenga ausencias: no cambia la base de salud y pensión
+    assert n["auxilios_no_prestacionales"] == 60000 and n["ibc"] == n0["ibc"] and n["devengado"] == n0["devengado"] + 60000
+    assert any("intermunicipal" in x["calculo"] for x in n["auxilios"])
+    assert admin.get(f"{API}/periodos/{pid}/novedades").json()["data"][0]["valor"] == 60000
+
+
+def test_importar_cuotas_desde_la_lista_de_la_entidad(admin):
+    pid = _periodo_con(admin, 2026, 11, 2, [[1001, "1001", *(["A"] * 15)], [2002, "2002", *(["A"] * 15)]], list(range(16, 31)))
+    mutual = xlsx([[None] * 8 + [36800], ["No.", None, "TIPO", "IDENTIFICACION", "NOMBRES Y APELLIDOS", "F. NAC", "TEL", "CIUDAD", "VALOR A PAGAR"],
+                   [1, 1, "Titular", 1001, "UNO PRUEBA", None, None, "CALI", 15900], [2, 2, "Titular", 2002, "DOS PRUEBA", None, None, "CALI", 15900],
+                   [3, 3, "Titular", 9999, "NO ESTA", None, None, "CALI", 5000]])
+    datos = {"descripcion": "Cuota mutual", "columna_valor": "I", "quincena": "segunda", "desde": "2026-11-01"}
+    r = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(mutual, "mutual.xlsx"), data=datos)
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert (d["creadas"], d["personas"]) == (2, 3) and any("no está en la base" in h["detalle"] for h in d["hallazgos"])
+    admin.post(f"{API}/periodos/{pid}/recalcular")
+    n = _nomina(admin, pid, "1001")
+    assert n["cuotas"] == 15900 and n["descuentos"][0]["descripcion"] == "Cuota mutual"
+    # Valores como texto («20900.00») y filas de total al final; solo en la 2.ª quincena
+    recordar = xlsx([["Fecha", "Empresa"], [], ["Identificacion", "Afiliado", "Inicio", "Plan", "GBF", "Adicional", "Desc", "Valor Total"],
+                     [1001, "UNO PRUEBA", None, "PLAN", "20900.00", 0, None, "20900.00"], [None] * 6 + ["Valor total", "20900.00"]])
+    r = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(recordar, "recordar.xlsx"),
+                   data={**datos, "descripcion": "Cuota recordar", "columna_valor": "H"})
+    assert r.json()["data"]["creadas"] == 1 and r.json()["data"]["total"] == 20900
+    q1 = _periodo_con(admin, 2026, 12, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    assert _nomina(admin, q1, "1001")["cuotas"] == 0  # solo 2.ª quincena
+    # La siguiente lista ya no trae a 2002: se le desactiva la cuota
+    mutual2 = xlsx([["IDENTIFICACION", "NOMBRE", "", "", "", "", "", "", "VALOR"], [1001, "UNO PRUEBA", None, None, None, None, None, None, 16500]])
+    d = admin.post(f"{API}/descuentos/importar-cuotas", files=archivo(mutual2, "mutual.xlsx"), data=datos).json()["data"]
+    assert (d["actualizadas"], d["desactivadas"]) == (1, 1)
+
+
+def test_recalcular_todas_las_nominas_del_periodo(admin):
+    a = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 15)]], DIAS)
+    b = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Cliente 2"}).json()["data"]["id"]
+    _cargar(admin, b, xlsx([["documento", "NOVIEMBRE", 1, 2], [2002, "2002", "A", "A"]]))
+    admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1, "nombre": "Sin excel"})
+    admin.post(f"{API}/periodos/{b}/cerrar")
+    admin.post(f"{API}/descuentos", json={"documento": "1001", "tipo": "cuota", "descripcion": "Mutual", "valor_mensual": 30000,
+                                          "desde": "2026-11-01", "quincena": "primera"})
+    assert _nomina(admin, a, "1001")["cuotas"] == 0
+    r = admin.post(f"{API}/nominas-del-periodo/recalcular", json={"anio": 2026, "mes": 11, "quincena": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"] == {"recalculadas": ["General"], "cerradas": ["Cliente 2"], "sin_excel": ["Sin excel"]}
+    assert _nomina(admin, a, "1001")["cuotas"] == 30000
+    assert admin.post(f"{API}/nominas-del-periodo/recalcular", json={"anio": 2030, "mes": 1, "quincena": 1}).status_code == 404
+
+
+def test_licencias_remuneradas(admin):
+    # 2 días de licencia de luto (LL) y 1 de licencia no remunerada (LNR)
+    pid = _periodo_con(admin, 2026, 11, 1, [[1001, "1001", *(["A"] * 12 + ["LL", "LL", "LNR"])]], DIAS)
+    n = _nomina(admin, pid, "1001")
+    dia = 1750905 / 30
+    assert n["licencias"] == [{"codigo": "LL", "nombre": "licencia de luto", "dias": 2, "valor": int(2 * dia + 0.5)}]
+    assert n["licencias_valor"] == int(2 * dia + 0.5) and n["dias_salario"] == 12 and n["dias_sin_pago"] == 1
+    assert n["dias_auxilio"] == 12  # la licencia no paga auxilio de transporte
+    assert n["ibc"] == n["basico"] + sum(n["valores"].values()) + n["licencias_valor"]
+    libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
+    filas = list(libro.worksheets[0].iter_rows(values_only=True))
+    assert dict(zip(filas[0], filas[1]))["LICENCIAS REMUNERADAS"] == n["licencias_valor"]

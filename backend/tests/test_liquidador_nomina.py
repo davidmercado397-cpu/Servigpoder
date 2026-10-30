@@ -49,9 +49,10 @@ def test_nomina_de_una_quincena(admin):
     assert n["ibc"] == 1010940 and n["salud"] == 40438 and n["pension"] == 40438
     assert n["neto"] == 1135488 - 80876 == 1054612
 
-    # 3003: LR (otro proceso) y AUS no se pagan; V×5 como vacaciones; L sí; INC al 100 %; el auxilio solo por los 4 días A
+    # 3003: AUS no se paga; LR (licencia remunerada) se paga como licencia; V×5 como vacaciones; L sí; INC al 100 %; el auxilio solo por los 4 días A
     n = _nomina(admin, pid, "3003")
-    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 2 and n["dias_auxilio"] == 4
+    assert n["dias_salario"] == 5 and n["dias_incapacidad"] == 2 and n["dias_sin_pago"] == 1 and n["dias_auxilio"] == 4
+    assert [(x["codigo"], x["dias"]) for x in n["licencias"]] == [("LR", 1)]
     assert n["vacaciones"]["dias_habiles"] == 4 and n["vacaciones"]["dias_no_habiles"] == 1 and n["vacaciones_valor"] == 291818
     assert n["basico"] == 291818 and n["incapacidad"] == 116727 and n["auxilio"] == 33213
     assert (n["incapacidad_empresa"], n["incapacidad_eps"]) == (2, 0)
@@ -221,6 +222,30 @@ def test_auxilios_no_prestacionales_y_quincena(admin):
     assert "AUXILIOS NO PRESTACIONALES" in enc
 
 
+def test_tope_40_por_ciento_sobre_el_mes(admin):
+    filas = [[1001, "1001", *(["A"] * 15)], [3003, "3003", *(["A"] * 15)]]
+    p1 = _periodo_con(admin, 2026, 12, 1, filas, list(range(1, 16)))
+    # 1001: auxilio de 1.000.000 solo en la 2.ª quincena; 3003: bonificación de 2.000.000 (la mitad en cada quincena)
+    for doc, desc, valor, q in (("1001", "Cumplimiento", 1000000, "segunda"), ("3003", "Bonificación", 2000000, "ambas")):
+        r = admin.post(f"{API}/auxilios", json={"documento": doc, "descripcion": desc, "valor_mensual": valor, "desde": "2026-12-01", "quincena": q})
+        assert r.status_code == 201, r.text
+    admin.post(f"{API}/periodos/{p1}/recalcular")
+    a1, b1 = _nomina(admin, p1, "1001"), _nomina(admin, p1, "3003")
+    assert a1["exceso_no_salarial"] == 0
+    assert b1["exceso_no_salarial"] == round(1000000 - 0.4 * (b1["salarial"] + 1000000)) > 0
+
+    filas = [[1001, "1001", *(["A"] * 16)], [3003, "3003", *(["A"] * 16)]]
+    p2 = _periodo_con(admin, 2026, 12, 2, filas, list(range(16, 32)))
+    a2, b2 = _nomina(admin, p2, "1001"), _nomina(admin, p2, "3003")
+    # Sola, la 2.ª quincena de 1001 pasaría del 40 %; con la 1.ª, el mes no pasa: la base es solo lo salarial
+    assert a2["no_salarial"] == 1000000 and 1000000 > 0.4 * (a2["salarial"] + 1000000)
+    assert a2["exceso_no_salarial"] == 0 and a2["ibc"] == a2["salarial"] and any("sobre el mes" in x for x in a2["alertas"])
+    # 3003: el exceso del mes menos el que ya entró en la base de la 1.ª quincena
+    sal_mes = b1["salarial"] + b2["salarial"]
+    exceso_mes = round(2000000 - 0.4 * (sal_mes + 2000000))
+    assert b2["exceso_no_salarial"] == exceso_mes - b1["exceso_no_salarial"] and b2["ibc"] == b2["salarial"] + b2["exceso_no_salarial"]
+
+
 def test_vacaciones_habiles_promedio_y_saldo(admin):
     # Septiembre Q1 previa: 3003 hace 3 turnos N → recargo nocturno que alimenta el promedio sugerido (medio mes)
     p1 = _periodo_con(admin, 2026, 9, 1, [["3003", "3003", *(["N"] * 3)]], [1, 2, 3])
@@ -238,7 +263,7 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert not v["promedio_manual"] and v["saldo"] is None and v["base"] == 1750905 + sugerido
     assert v["valor_habiles"] == round(4 * (1750905 + sugerido) / 30) and n["ibc"] >= v["valor"]
     # El auxilio se descuenta por todo el tiempo no laborado: 5 vacaciones, 2 incapacidad, 1 LR y 1 AUS → 150.000 − 9 × 10.000
-    assert n["auxilios"][0]["valor"] == 60000 and n["dias_sin_pago"] == 2 and n["dias_tnl"] == 9
+    assert n["auxilios"][0]["valor"] == 60000 and n["dias_sin_pago"] == 1 and n["dias_tnl"] == 9
     assert "1 de ausencia, 2 de incapacidad, 5 de vacaciones, 1 de otras novedades" in n["auxilios"][0]["calculo"]
 
     # Lunes a viernes, ingreso 1-jun-2026 (5 días causados al 30-sep) → 3 hábiles y 2 no hábiles, sin alerta
@@ -268,6 +293,29 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert emp["dias_habiles"] == [0, 1, 2, 3, 4] and emp["vacaciones_liquidador"] == 3 and emp["saldo_vacaciones"]["previos"] == 4
     libro = load_workbook(BytesIO(admin.get(f"{API}/periodos/{pid}/nomina").content))
     assert libro["Vacaciones"].max_row == 2
+
+
+def test_tope_40_sin_primera_quincena_usa_el_salario_de_la_ficha(admin):
+    filas = [[1001, "1001", *(["A"] * 16)]]
+    p2 = _periodo_con(admin, 2026, 12, 2, filas, list(range(16, 32)))
+    r = admin.post(f"{API}/auxilios", json={"documento": "1001", "descripcion": "Cumplimiento", "valor_mensual": 1000000,
+                                            "desde": "2026-12-01", "quincena": "segunda"})
+    assert r.status_code == 201, r.text
+    admin.post(f"{API}/periodos/{p2}/recalcular")
+    n = _nomina(admin, p2, "1001")
+    # Sola pasaría del 40 %; con la 1.ª supuesta (15 días del mínimo = 875.453) el mes no pasa
+    assert 1000000 > 0.4 * (n["salarial"] + 1000000) and n["exceso_no_salarial"] == 0 and n["ibc"] == n["salarial"]
+    assert n["primera_supuesta"] == {"dias": 15, "salarial": 875453, "no_salarial": 0, "exceso": 0}
+    assert any("1.ª quincena no está en el sistema" in x for x in n["alertas"])
+
+
+def test_el_31_se_paga_en_vacaciones(admin):
+    # Diciembre 2026 Q2: 1001 trabaja del 16 al 27 y sale a vacaciones del lunes 28 al jueves 31
+    pid = _periodo_con(admin, 2026, 12, 2, [[1001, "1001", *(["A"] * 12 + ["V"] * 4)]], list(range(16, 32)))
+    n = _nomina(admin, pid, "1001")
+    v = n["vacaciones"]
+    assert (v["dias_habiles"], v["dias_no_habiles"]) == (4, 0) and v["valor_habiles"] == round(4 * 1750905 / 30)
+    assert n["dias_salario"] == 12  # lo trabajado sigue en base 30
 
 
 def test_varias_nominas_en_un_periodo(admin):

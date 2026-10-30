@@ -66,6 +66,8 @@ class Resumen:
     fechas: int = 0
     advertencias: list[str] = field(default_factory=list)
     detalle: list[FilaResumen] = field(default_factory=list)
+    # Nómina por horas: turnos de otras líneas de la misma persona el mismo día (se suman sus horas)
+    adicionales: dict[tuple[str, date], list] = field(default_factory=dict)
 
 
 def _normalizar(valor: object) -> str:
@@ -165,7 +167,10 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
     turnos = por_codigo(db)
     res = Resumen(fechas=len(columnas_fecha))
     leidas: list[FilaLeida] = []
-    vistos: set[tuple[str, date]] = set()
+    vistos: dict[tuple[str, date], object] = {}  # (documento, fecha) → turno de la primera línea
+    # En la nómina por horas una persona puede tener varias líneas el mismo día (varios puestos): se suman las horas
+    por_horas = getattr(periodo, "tipo_nomina", "normal") == "horas"
+    con_horas = lambda t: (t.horas_ordinarias or 0) + (t.horas_extras or 0) > 0  # noqa: E731
     for num, fila in enumerate(filas[1:], start=2):
         if not fila or fila[0] is None or str(fila[0]).strip() == "":
             continue
@@ -193,23 +198,43 @@ def leer(db: Session, periodo, contenido: bytes, con_arl: bool = False) -> tuple
                 res.advertencias.append(f"Fila {num}, {fecha.isoformat()}: el turno '{codigo}' no existe — se omitió")
                 continue
             if (documento, fecha) in vistos:
-                res.advertencias.append(f"Fila {num}, {fecha.isoformat()}: el documento {documento} ya tiene turno ese día — se omitió")
+                if por_horas and con_horas(turno) and con_horas(vistos[(documento, fecha)]):
+                    res.adicionales.setdefault((documento, fecha), []).append(turno)
+                    por_turno[codigo] = por_turno.get(codigo, 0) + 1
+                    continue
+                motivo = (" (en la nómina por horas solo se suman turnos con horas)" if por_horas else
+                          " (dos líneas el mismo día solo se permiten en la nómina por horas)")
+                res.advertencias.append(f"Fila {num}, {fecha.isoformat()}: el documento {documento} ya tiene turno ese día — se omitió{motivo}")
                 continue
-            vistos.add((documento, fecha))
+            vistos[(documento, fecha)] = turno
             leida.dias.append((fecha, turno))
             res.dias += 1
             por_turno[codigo] = por_turno.get(codigo, 0) + 1
         res.detalle.append(FilaResumen(documento, nombre, sum(por_turno.values()),
                                        ", ".join(f"{c}×{n}" for c, n in sorted(por_turno.items())) or "—"))
 
+    res.empleados = len({f.documento for f in leidas})  # quien tiene varias líneas (nómina por horas) cuenta una vez
+    if res.adicionales:
+        res.advertencias.append(f"Nómina por horas: {len(res.adicionales)} día(s) de personas con más de una línea (varios puestos); "
+                                f"se suman las horas de cada línea y el auxilio de transporte va una vez por día")
     if res.dias == 0:
         raise ErrorImportacion("No se importó ningún día de trabajo. Verifica que las celdas de cada día contengan un "
                                "código de turno válido (D, N, Z, L, AUS, INC…).")
     return leidas, res
 
 
+def mismo_nombre(a: str, b: str) -> bool:
+    """Dos nombres de la misma persona aunque cambie el orden o falte un apellido: comparten al menos dos palabras
+    (o todas, si alguno tiene una sola)."""
+    from app.apps.liquidador.services.personal import _norm
+
+    pa, pb = set(_norm(a).split()), set(_norm(b).split())
+    return len(pa & pb) >= min(2, len(pa), len(pb))
+
+
 def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
-    """Reemplaza los días de la nómina; crea o actualiza los empleados del archivo."""
+    """Reemplaza los días de la nómina y crea a quien no exista. A los empleados que ya existen no les cambia nada (nombre,
+    cargo…): la ficha manda. Si el nombre del Excel no coincide con el de la ficha, lo advierte (cédula mal digitada)."""
     leidas, res = leer(db, periodo, contenido)
     from app.apps.liquidador.services.personal import Indice
 
@@ -221,13 +246,14 @@ def importar(db: Session, periodo: LiqPeriodo, contenido: bytes) -> Resumen:
             emp = LiqEmpleado(documento=f.documento, nombre=f.nombre, cargo=f.cargo)
             db.add(emp)
             empleados[f.documento] = emp
-        elif emp.tipo_personal is None:  # quien viene de la base de personal conserva su nombre y cargo
-            emp.nombre = f.nombre
-            if f.con_cargo:
-                emp.cargo = f.cargo
+        elif f.nombre != f.documento and not f.nombre.isdigit() and not mismo_nombre(f.nombre, emp.nombre):
+            res.advertencias.append(f"Fila {f.num}: la cédula {f.documento} es de {emp.nombre} en la ficha, pero el Excel dice "
+                                    f"«{f.nombre}». Se cargó a {emp.nombre}; si la cédula está mal digitada, corríjala y vuelva a cargar")
         db.flush()
         for fecha, turno in f.dias:
-            db.add(LiqDia(periodo_id=periodo.id, empleado_id=emp.id, fecha=fecha, turno_id=turno.id, codigo=turno.codigo))
+            extra = res.adicionales.get((f.documento, fecha), [])
+            db.add(LiqDia(periodo_id=periodo.id, empleado_id=emp.id, fecha=fecha, turno_id=turno.id, turnos_extra=[t.id for t in extra],
+                          codigo="+".join([turno.codigo, *(t.codigo for t in extra)])[:40]))
     db.flush()
     return res
 

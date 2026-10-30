@@ -5,6 +5,8 @@ export type Periodo = {
   id: number; anio: number; mes: number; quincena: number; tipo: string; etiqueta: string; desde: string; hasta: string;
   /** Nombre de la nómina dentro del periodo (Cliente 1, Administrativa…); las anteriores quedaron como «General» */
   nombre: string;
+  /** Nómina por horas: se pagan las horas trabajadas y el auxilio por día trabajado; descuenta salud y/o pensión según se marque */
+  tipo_nomina?: "normal" | "horas"; descuenta_salud?: boolean; descuenta_pension?: boolean;
   estado: "borrador" | "calculada" | "cerrada"; archivo: string | null; advertencias: string[];
   cargado_en: string | null; calculado_en: string | null; cerrado_en: string | null; creado_en: string | null; empleados: number;
   /** Umbral semanal de horas: se marca al liquidar y vale para cada carga o recálculo del periodo */
@@ -38,11 +40,25 @@ export type Nomina = {
   recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
   descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; cuotas?: number; deducciones: number; neto: number; tarifas: string[];
   /** Auxilios no prestacionales: no son base de salud y pensión salvo lo que pase del 40 % (exceso_no_salarial) */
-  auxilios?: { id: number; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
+  auxilios?: { id: number | string; descripcion: string; valor: number; calculo: string }[]; auxilios_no_prestacionales?: number;
   dias_ausencia?: number; dias_tnl?: number; exceso_no_salarial?: number; alertas?: string[];
   vacaciones?: VacacionesNomina | null; vacaciones_valor?: number;
   /** Novedades manuales de esta nómina (mayor/menor valor pagado, horas pendientes…) */
   novedades?: NovedadAplicada[]; novedades_devengo?: number; novedades_deduccion?: number;
+  /** Días con código 180 (incapacidad de más de 180 días): no se pagan; SERA provisiona la seguridad social */
+  seguridad_social_180?: SeguridadSocial180 | null; provision_ss_180?: number;
+  /** Nómina por horas */
+  /** Licencias remuneradas (códigos marcados «Remunerado» en Turnos): salario ÷ 30 por día */
+  licencias?: { codigo: string; nombre: string; dias: number; valor: number }[]; licencias_valor?: number; dias_licencia?: number;
+  /** Marcado como pensionado en la ficha: no descuenta pensión */
+  pensionado?: boolean;
+  por_horas?: boolean; horas_pagadas?: number; dias_trabajados?: number; dias_auxilio_otra_nomina?: number;
+};
+
+export type SeguridadSocial180 = {
+  dias: number; dias_base: number; base: number; exonerado: boolean; salud_empleado: number; pension_empleado: number;
+  salud_empleador: number; pension_empleador: number; total: number;
+  porcentajes: { salud_empleado: number; pension_empleado: number; salud_empleador: number; pension_empleador: number };
 };
 
 export type NovedadAplicada = {
@@ -58,6 +74,8 @@ export type Novedad = {
 };
 
 export const TIPOS_NOVEDAD: [string, string, string][] = [
+  ["auxilio_intermunicipal", "Auxilio intermunicipal", "Rodamiento por transporte intermunicipal: no prestacional, se paga solo en esta nómina y no hace base de salud y pensión"],
+  ["auxilio_variable", "Auxilio no prestacional variable", "Otro auxilio no prestacional que se paga solo en esta nómina; no hace base de salud y pensión"],
   ["mayor_valor", "Mayor valor pagado", "Se descuenta: se pagó de más en una nómina anterior"],
   ["menor_valor", "Menor valor pagado", "Se paga: se pagó de menos en una nómina anterior (hace base de salud y pensión)"],
   ["horas_extras", "Horas extras pendientes", "Horas por concepto valoradas con la tarifa de la fecha en que se causaron"],
@@ -83,7 +101,7 @@ export type VacacionPeriodo = VacacionesNomina & { empleado_id: number; document
 
 export const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas" | "novedades_devengo" | "novedades_deduccion" | "deducciones" | "neto", number>;
+export type TotalesNomina = Record<"basico" | "incapacidad" | "recargos" | "extras" | "auxilio" | "devengado" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas" | "novedades_devengo" | "novedades_deduccion" | "deducciones" | "neto" | "provision_ss_180", number>;
 
 export type Tarifa = {
   id: number; vigente_desde: string; smlmv: number; auxilio_transporte: number; horas_mes: number; salud_pct: number; pension_pct: number;
@@ -212,11 +230,11 @@ export const RECARGOS = ["ordinary_night", "holiday_day_surcharge", "holiday_nig
 
 /** Pagado por mes: suma de las nóminas cerradas del mes */
 export const CAMPOS_PAGADO: [string, string][] = [
-  ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["recargos", "Recargos"],
+  ["basico", "Sueldo básico"], ["incapacidad", "Incapacidad"], ["vacaciones_valor", "Vacaciones"], ["licencias_valor", "Licencias remuneradas"], ["recargos", "Recargos"],
   ["extras", "Horas extras"], ["auxilios_no_prestacionales", "Auxilios no prestacionales"], ["auxilio", "Auxilio de transporte"],
   ["novedades_devengo", "Novedades (devengo)"], ["devengado", "Total devengado"], ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"],
   ["cuotas", "Cuotas"], ["novedades_deduccion", "Novedades (deducción)"],
-  ["deducciones", "Total deducciones"], ["neto", "Neto pagado"],
+  ["deducciones", "Total deducciones"], ["neto", "Neto pagado"], ["provision_ss_180", "Provisión seg. social (cód. 180)"],
 ];
 
 export type NominaDelMes = {

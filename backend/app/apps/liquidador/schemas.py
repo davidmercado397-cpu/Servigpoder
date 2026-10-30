@@ -92,6 +92,9 @@ class PeriodoIn(BaseModel):
     mes: int = Field(ge=1, le=12)
     quincena: int = Field(ge=0, le=2, description="1: días 1-15 · 2: del 16 al fin de mes · 0: mensual (mes completo)")
     nombre: str = Field("General", min_length=1, max_length=80)  # nómina dentro del periodo: Cliente 1, Administrativa…
+    tipo_nomina: str = Field("normal", pattern="^(normal|horas)$")
+    descuenta_salud: bool = True  # solo cuenta en la nómina por horas
+    descuenta_pension: bool = True
 
     @field_validator("nombre")
     @classmethod
@@ -135,6 +138,15 @@ class PeriodoOut(Orm):
     umbral_activo: bool = False
     umbral_horas: float = 42
     umbral_horas_novedad: float = 7
+    tipo_nomina: str = "normal"
+    descuenta_salud: bool = True
+    descuenta_pension: bool = True
+
+
+class TipoNominaIn(BaseModel):
+    tipo_nomina: str = Field(pattern="^(normal|horas)$")
+    descuenta_salud: bool = True
+    descuenta_pension: bool = True
 
 
 class UmbralIn(BaseModel):

@@ -36,6 +36,8 @@ export type DescuentoAplicado = { id: number; tipo: TipoDescuento; descripcion: 
 export type Nomina = {
   salario: number; salario_minimo: boolean; valor_dia: number; valor_hora: number; horas_mes: number;
   dias_salario: number; dias_incapacidad: number; incapacidad_empresa: number; incapacidad_eps: number; dias_auxilio: number; dias_sin_pago: number;
+  /** Incapacidad: días 1 y 2 al 100 %; del 3.º en adelante al 66,66 % sin bajar del mínimo diario */
+  incapacidad_valor_empresa?: number; incapacidad_valor_eps?: number; incapacidad_minimo?: number; incapacidad_previa?: number;
   basico: number; incapacidad: number; auxilio: number; horas: Record<string, number>; valores: Record<string, number>;
   recargos: number; extras: number; devengado: number; ibc: number; salud: number; salud_pct: number; pension: number; pension_pct: number;
   descuentos: DescuentoAplicado[]; prestamos: number; embargos: number; cuotas?: number; deducciones: number; neto: number; tarifas: string[];

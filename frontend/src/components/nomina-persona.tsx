@@ -34,7 +34,14 @@ export function NominaPersona({ n, titulo = "Nómina del periodo" }: { n: Nomina
             {n.por_horas
               ? fila("Sueldo (por horas)", `${horas(n.horas_pagadas ?? 0)} h trabajadas × ${pesos(n.valor_hora)} en ${n.dias_trabajados ?? 0} día(s)`, n.basico)
               : fila("Sueldo básico", `${n.dias_salario} días (trabajados, descansos y libres)`, n.basico)}
-            {n.dias_incapacidad > 0 && fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)}
+            {n.dias_incapacidad > 0 && (n.incapacidad_valor_eps === undefined
+              ? fila("Incapacidad (100 %)", `${n.dias_incapacidad} días · ${n.incapacidad_empresa} empresa, ${n.incapacidad_eps} EPS`, n.incapacidad)
+              : <>
+                {n.incapacidad_empresa > 0 && fila("Incapacidad días 1 y 2 (100 %)", `${n.incapacidad_empresa} día(s) a cargo de la empresa`, n.incapacidad_valor_empresa ?? 0)}
+                {n.incapacidad_eps > 0 && fila("Incapacidad desde el 3.er día (66,66 %)",
+                  `${n.incapacidad_eps} día(s) EPS${n.incapacidad_minimo ? ` · ${n.incapacidad_minimo} al salario mínimo diario (el 66,66 % no alcanza el mínimo)` : ""}${n.incapacidad_previa ? ` · viene de ${n.incapacidad_previa} día(s) de la nómina anterior` : ""}`,
+                  n.incapacidad_valor_eps)}
+              </>)}
             {n.vacaciones && (
               <>
                 {fila("Vacaciones días hábiles", `${n.vacaciones.dias_habiles} días × ${pesos(n.vacaciones.valor_dia)} (hábiles: ${n.vacaciones.dias_habiles_empleado})`, n.vacaciones.valor_habiles)}

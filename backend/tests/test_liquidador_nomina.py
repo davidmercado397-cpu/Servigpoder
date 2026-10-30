@@ -70,7 +70,23 @@ def test_incapacidad_larga_y_base_30(admin):
     a, b = _nomina(admin, pid, "1"), _nomina(admin, pid, "2")
     assert a["dias_salario"] == 30 and a["basico"] == 1750905 and a["auxilio"] == 249095
     assert b["dias_incapacidad"] == 5 and (b["incapacidad_empresa"], b["incapacidad_eps"]) == (2, 3)
-    assert b["incapacidad"] == round(5 * 1750905 / 30) and b["dias_salario"] == 25  # el 31 no suma
+    # Con el mínimo, el 66,66 % del 3.er día en adelante sube al salario mínimo diario: los 5 días quedan al 100 %
+    assert b["incapacidad"] == round(5 * 1750905 / 30) and b["dias_salario"] == 25 and b["incapacidad_minimo"] == 3  # el 31 no suma
+
+
+def test_incapacidad_66_por_ciento_desde_el_tercer_dia(admin):
+    # Diciembre 2026: 3003 gana 3.000.000; INC del 14 al 17 (la 1.ª quincena tiene el 14 y el 15)
+    p1 = _periodo_con(admin, 2026, 12, 1, [[3003, "3003", *(["A"] * 13 + ["INC"] * 2)]], list(range(1, 16)))
+    eid = _resultados(admin, p1)["3003"]["empleado_id"]
+    assert admin.put(f"{API}/empleados/{eid}/salario", json={"salario": 3000000}).status_code == 200
+    admin.post(f"{API}/periodos/{p1}/recalcular")
+    a = _nomina(admin, p1, "3003")
+    assert (a["incapacidad_empresa"], a["incapacidad_eps"], a["incapacidad"]) == (2, 0, 200000)  # 2 días al 100 %
+    # En la 2.ª quincena el 16 y el 17 son el 3.º y 4.º día: al 66,66 % (66.660 por día, más que el mínimo diario)
+    p2 = _periodo_con(admin, 2026, 12, 2, [[3003, "3003", *(["INC"] * 2 + ["A"] * 14)]], list(range(16, 32)))
+    b = _nomina(admin, p2, "3003")
+    assert (b["incapacidad_empresa"], b["incapacidad_eps"], b["incapacidad_minimo"]) == (0, 2, 0)
+    assert b["incapacidad"] == b["incapacidad_valor_eps"] == 133320 and b["incapacidad_previa"] == 2
     # Febrero 2027 mensual: trabajar hasta el 28 completa los 30 días
     pid = _periodo_con(admin, 2027, 2, 0, [[1, "1", *(["A"] * 28)]], list(range(1, 29)))
     assert _nomina(admin, pid, "1")["dias_salario"] == 30 and _nomina(admin, pid, "1")["basico"] == 1750905

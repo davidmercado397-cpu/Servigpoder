@@ -56,6 +56,8 @@ PAGAN_AUXILIO = ("trabajado", "descanso_pago")
 INCAPACIDAD = "incapacidad"
 AUSENCIA = "ausencia"
 DIAS_EMPRESA_INCAPACIDAD = 2
+# Del 3.er día de incapacidad en adelante se paga el 66,66 %, sin bajar del salario mínimo diario
+PCT_INCAPACIDAD_EPS = Decimal("0.6666")
 
 # Conceptos que se pagan aparte del salario (las horas ordinarias diurnas ya están en el salario)
 CONCEPTOS_PAGO: tuple[str, ...] = tuple(c.value for c in HourConcept if c != HourConcept.ORDINARY_DAY)
@@ -173,6 +175,9 @@ class Acumulado:
     incapacidad_empresa: int = 0
     incapacidad_eps: int = 0
     incapacidad: Decimal = Decimal("0")
+    incapacidad_valor_empresa: Decimal = Decimal("0")
+    incapacidad_valor_eps: Decimal = Decimal("0")
+    incapacidad_minimo: int = 0  # días del 66,66 % que suben al salario mínimo diario
     dias_auxilio: int = 0
     auxilio: Decimal = Decimal("0")
     dias_sin_pago: int = 0
@@ -257,10 +262,12 @@ def provision_codigo_180(empleado: LiqEmpleado, dias: list[LiqDia], tarifas: Tar
 def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPeriodo, tarifas: Tarifas,
                       descuentos: list[LiqDescuento], ya_descontado: dict[int, Decimal], auxilios: list | None = None,
                       vacaciones: dict | None = None, novedades: list[LiqNovedad] | None = None,
-                      aux_en_otra: dict[date, str] | None = None, mes_previo: dict | None = None) -> dict:
+                      aux_en_otra: dict[date, str] | None = None, mes_previo: dict | None = None,
+                      incapacidad_previa: int = 0) -> dict:
     """`vacaciones` (solo si tiene días de vacaciones): festivos, promedio sugerido y meses, promedio manual y
     días hábiles ya disfrutados antes del periodo. `mes_previo`: lo salarial, lo no salarial y el exceso de las nóminas
-    del mismo mes liquidadas antes (el tope del 40 % es sobre el mes)."""
+    del mismo mes liquidadas antes (el tope del 40 % es sobre el mes). `incapacidad_previa`: días seguidos de incapacidad
+    justo antes del periodo (la incapacidad que viene de la quincena anterior sigue contando desde ahí)."""
     a = Acumulado()
     por_horas = getattr(periodo, "tipo_nomina", "normal") == "horas"
     aux_en_otra = aux_en_otra or {}
@@ -268,7 +275,7 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
     ctx = vacaciones or {}
     fest = ctx.get("festivos", set())
     promedio = ctx.get("manual") if ctx.get("manual") is not None else ctx.get("sugerido", Decimal("0"))
-    racha_inc, anterior_inc = 0, None
+    racha_inc, anterior_inc = (incapacidad_previa, periodo.desde - timedelta(days=1)) if incapacidad_previa else (0, None)
     for d in sorted(dias, key=lambda x: x.fecha):
         t = tarifas.en(d.fecha)
         a.tarifas.add(t.vigente_desde)
@@ -296,11 +303,16 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             racha_inc = racha_inc + 1 if anterior_inc == d.fecha - timedelta(days=1) else 1
             anterior_inc = d.fecha
             a.dias_incapacidad += base
-            a.incapacidad += valor_dia * base
-            if racha_inc <= DIAS_EMPRESA_INCAPACIDAD:
+            if racha_inc <= DIAS_EMPRESA_INCAPACIDAD:  # los 2 primeros días: 100 %
                 a.incapacidad_empresa += base
+                a.incapacidad_valor_empresa += valor_dia * base
             else:
                 a.incapacidad_eps += base
+                dia_eps = valor_dia * PCT_INCAPACIDAD_EPS
+                if dia_eps < t.smlmv / 30:
+                    dia_eps = t.smlmv / 30
+                    a.incapacidad_minimo += base
+                a.incapacidad_valor_eps += dia_eps * base
         elif vac.es_vacaciones(d):
             base = base or 1  # el 31 sí se paga en vacaciones
             valor_vac = (salario + promedio) / 30 * base
@@ -330,7 +342,8 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
             a.valores[concepto] += horas * valor_hora * Decimal(str(t.porcentajes.get(concepto, 0))) / 100
 
     valores = {c: _pesos(v) for c, v in a.valores.items() if _pesos(v)}
-    basico, incapacidad, auxilio = _pesos(a.basico), _pesos(a.incapacidad), _pesos(a.auxilio)
+    inc_empresa, inc_eps = _pesos(a.incapacidad_valor_empresa), _pesos(a.incapacidad_valor_eps)
+    basico, incapacidad, auxilio = _pesos(a.basico), inc_empresa + inc_eps, _pesos(a.auxilio)
     recargos = sum((v for c, v in valores.items() if c in RECARGOS), Decimal("0"))
     extras = sum((v for c, v in valores.items() if c not in RECARGOS), Decimal("0"))
 
@@ -500,6 +513,8 @@ def liquidar_empleado(empleado: LiqEmpleado, dias: list[LiqDia], periodo: LiqPer
         "horas_mes": t_cierre.horas_mes,
         "dias_salario": a.dias_salario, "dias_incapacidad": a.dias_incapacidad,
         "incapacidad_empresa": a.incapacidad_empresa, "incapacidad_eps": a.incapacidad_eps,
+        "incapacidad_valor_empresa": float(inc_empresa), "incapacidad_valor_eps": float(inc_eps),
+        "incapacidad_minimo": a.incapacidad_minimo, "incapacidad_previa": incapacidad_previa,
         "dias_auxilio": a.dias_auxilio, "dias_sin_pago": a.dias_sin_pago,
         "basico": float(basico), "incapacidad": float(incapacidad), "auxilio": float(auxilio),
         "auxilios": aux_aplicados, "auxilios_no_prestacionales": float(no_prestacional), "dias_ausencia": dias_ausencia, "dias_tnl": dias_descuento,
@@ -549,6 +564,7 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
     otras = _otras_nominas(db, periodo, por_empleado)
     aux_otra = _auxilio_en_otras(db, periodo, por_empleado) if getattr(periodo, "tipo_nomina", "normal") == "horas" else {}
     mes_previo = _mes_previo(db, periodo, list(resultados))
+    inc_previa = _incapacidad_previa(db, periodo, por_empleado)
     if periodo.quincena == 2:  # sin la 1.ª quincena en el sistema, se supone con el salario de la ficha
         for empleado_id in resultados:
             previo = mes_previo.get(empleado_id)
@@ -569,13 +585,35 @@ def liquidar(db: Session, periodo: LiqPeriodo, dias: list[LiqDia], resultados: d
         n = liquidar_empleado(empleados[empleado_id], por_empleado[empleado_id], periodo, tarifas,
                               descuentos[empleado_id] if aplica else [], ya, auxilios[empleado_id] if aplica else [],
                               contexto_vac.get(empleado_id), novedades[empleado_id], aux_otra.get(empleado_id),
-                              mes_previo.get(empleado_id))
+                              mes_previo.get(empleado_id), inc_previa.get(empleado_id, 0))
         e = empleados[empleado_id]
         if e.estado == "retirado" and e.fecha_retiro and any(d.fecha > e.fecha_retiro for d in por_empleado[empleado_id]):
             avisos = [f"Está retirado desde el {e.fecha_retiro:%d/%m/%Y} y tiene turnos después de esa fecha", *avisos]
         n["alertas"] = avisos + n["alertas"]
         n["otras_nominas"] = any("nómina «" in a for a in avisos)
         r.nomina, r.devengado, r.neto = n, Decimal(str(n["devengado"])), Decimal(str(n["neto"]))
+
+
+def _incapacidad_previa(db: Session, periodo: LiqPeriodo, por_empleado: dict[int, list[LiqDia]]) -> dict[int, int]:
+    """{empleado: días seguidos de incapacidad justo antes del periodo} (de las nóminas anteriores en el sistema), para quien
+    empieza el periodo incapacitado: así el 3.er día se cuenta desde el inicio real de la incapacidad."""
+    inicio = periodo.desde
+    ids = [eid for eid, dias in por_empleado.items() if any(d.fecha == inicio and d.clase == INCAPACIDAD for d in dias)]
+    if not ids:
+        return {}
+    fechas: dict[int, set[date]] = defaultdict(set)
+    for eid, fecha in db.execute(select(LiqDia.empleado_id, LiqDia.fecha).where(
+            LiqDia.empleado_id.in_(ids), LiqDia.periodo_id != periodo.id, LiqDia.clase == INCAPACIDAD,
+            LiqDia.fecha < inicio, LiqDia.fecha >= inicio - timedelta(days=DIAS_EMPRESA_INCAPACIDAD + 1))):
+        fechas[eid].add(fecha)
+    salida = {}
+    for eid, fs in fechas.items():
+        n, dia = 0, inicio - timedelta(days=1)
+        while dia in fs:
+            n, dia = n + 1, dia - timedelta(days=1)
+        if n:
+            salida[eid] = n
+    return salida
 
 
 def _orden_en_mes(p: LiqPeriodo) -> tuple[int, int]:

@@ -295,6 +295,29 @@ def test_vacaciones_habiles_promedio_y_saldo(admin):
     assert libro["Vacaciones"].max_row == 2
 
 
+def test_tope_40_sin_primera_quincena_usa_el_salario_de_la_ficha(admin):
+    filas = [[1001, "1001", *(["A"] * 16)]]
+    p2 = _periodo_con(admin, 2026, 12, 2, filas, list(range(16, 32)))
+    r = admin.post(f"{API}/auxilios", json={"documento": "1001", "descripcion": "Cumplimiento", "valor_mensual": 1000000,
+                                            "desde": "2026-12-01", "quincena": "segunda"})
+    assert r.status_code == 201, r.text
+    admin.post(f"{API}/periodos/{p2}/recalcular")
+    n = _nomina(admin, p2, "1001")
+    # Sola pasaría del 40 %; con la 1.ª supuesta (15 días del mínimo = 875.453) el mes no pasa
+    assert 1000000 > 0.4 * (n["salarial"] + 1000000) and n["exceso_no_salarial"] == 0 and n["ibc"] == n["salarial"]
+    assert n["primera_supuesta"] == {"dias": 15, "salarial": 875453, "no_salarial": 0, "exceso": 0}
+    assert any("1.ª quincena no está en el sistema" in x for x in n["alertas"])
+
+
+def test_el_31_se_paga_en_vacaciones(admin):
+    # Diciembre 2026 Q2: 1001 trabaja del 16 al 27 y sale a vacaciones del lunes 28 al jueves 31
+    pid = _periodo_con(admin, 2026, 12, 2, [[1001, "1001", *(["A"] * 12 + ["V"] * 4)]], list(range(16, 32)))
+    n = _nomina(admin, pid, "1001")
+    v = n["vacaciones"]
+    assert (v["dias_habiles"], v["dias_no_habiles"]) == (4, 0) and v["valor_habiles"] == round(4 * 1750905 / 30)
+    assert n["dias_salario"] == 12  # lo trabajado sigue en base 30
+
+
 def test_varias_nominas_en_un_periodo(admin):
     pid = _quincena(admin)  # nómina «General» de sep-2026 Q2
     _cargar(admin, pid)

@@ -45,6 +45,8 @@ class UsuarioOut(BaseModel):
     roles: list[RolResumen]
     mfa_activo: bool = False
     debe_cambiar_password: bool = False
+    # Bloqueado por intentos fallidos: minutos que le faltan (solo en la administración de usuarios)
+    bloqueado_minutos: int | None = None
     # Desarrollos marcados en cada empresa: {"sera": ["liquidador"], …}
     accesos: dict[str, list[str]] = {}
 

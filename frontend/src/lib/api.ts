@@ -80,6 +80,8 @@ export type RolResumen = { id: number; nombre: string };
 export type Usuario = {
   id: number; username: string; nombre: string; email: string | null; activo: boolean; roles: RolResumen[];
   mfa_activo: boolean; debe_cambiar_password: boolean;
+  /** Bloqueado por intentos fallidos: minutos que le faltan (solo en el listado de usuarios) */
+  bloqueado_minutos?: number | null;
   /** Desarrollos marcados en cada empresa: { sera: ["liquidador"], … } */
   accesos: Record<string, string[]>;
 };

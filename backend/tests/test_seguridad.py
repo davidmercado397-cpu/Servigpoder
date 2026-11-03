@@ -169,3 +169,21 @@ def test_permisos_de_app_con_prefijo():
     import pytest
     with pytest.raises(ValueError):
         App(codigo="x", nombre="X", descripcion="", icono="", color="", permisos={"otro.ver": ("M", "D")})
+
+
+def test_administrador_desbloquea_usuario(admin):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from tests.conftest import CSRF
+
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "bloq", "nombre": "Bloqueado", "password": "clave-segura-1"})
+    with TestClient(app, headers=CSRF) as otro:
+        for _ in range(5):
+            assert otro.post("/api/auth/login", json={"username": "bloq", "password": "mala"}).status_code == 401
+        assert otro.post("/api/auth/login", json={"username": "bloq", "password": "clave-segura-1"}).status_code == 423
+        u = next(x for x in admin.get("/api/usuarios?q=bloq").json()["data"] if x["username"] == "bloq")
+        assert 14 <= u["bloqueado_minutos"] <= 15
+        assert admin.post(f"/api/usuarios/{u['id']}/desbloquear").status_code == 200
+        assert next(x for x in admin.get("/api/usuarios?q=bloq").json()["data"] if x["username"] == "bloq")["bloqueado_minutos"] is None
+        assert otro.post("/api/auth/login", json={"username": "bloq", "password": "clave-segura-1"}).status_code == 200

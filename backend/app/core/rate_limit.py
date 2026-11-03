@@ -40,6 +40,19 @@ class LimitadorVentana:
                 eventos.popleft()
             return len(eventos)
 
+    def restante(self, clave: str, limite: int, ventana: int) -> int | None:
+        """Segundos que faltan para que la clave baje de `limite` eventos en la ventana (None si no lo alcanza)."""
+        ahora = time.monotonic()
+        with self._lock:
+            eventos = self._eventos.get(clave)
+            if not eventos:
+                return None
+            while eventos and eventos[0] <= ahora - ventana:
+                eventos.popleft()
+            if len(eventos) < limite:
+                return None
+            return int(eventos[len(eventos) - limite] + ventana - ahora) + 1
+
     def limpiar(self, clave: str) -> None:
         with self._lock:
             self._eventos.pop(clave, None)

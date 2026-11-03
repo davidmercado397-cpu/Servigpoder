@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 
 from app.api.deps import DbSession, require
+from app.api.routes.auth import bloqueo_minutos, desbloquear
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
 from app.core.paginacion import Paginacion, paginar_consulta, paginar_lista
@@ -51,6 +52,8 @@ def listar(db: DbSession, p: Paginacion, q: str = Query("", max_length=100), _=D
         patron = f"%{q.strip()}%"
         consulta = consulta.where(Usuario.username.ilike(patron) | Usuario.nombre.ilike(patron))
     usuarios, meta = paginar_consulta(db, consulta, p)
+    for u in usuarios:
+        u.bloqueado_minutos = bloqueo_minutos(u)
     return ok(usuarios, **meta)
 
 
@@ -93,6 +96,7 @@ def editar(usuario_id: int, data: UsuarioEditar, request: Request, db: DbSession
         user.email = data.email
         cambios.append("email")
     if data.password:
+        desbloquear(user)  # con la contraseña restablecida puede entrar ya
         user.password_hash = hash_password(data.password)
         user.debe_cambiar_password = user.id != actual.id  # restablecida por un administrador: es temporal
         cambios.append("password")
@@ -116,6 +120,18 @@ def editar(usuario_id: int, data: UsuarioEditar, request: Request, db: DbSession
     if {"password", "activo", "roles"} & set(cambios) and user.id != actual.id:
         user.sesion_version += 1
     auditar(db, request, "usuario_editado", actual.id, usuario=user.username, campos=cambios, **detalle)
+    db.commit()
+    return ok(user)
+
+
+@router.post("/{usuario_id}/desbloquear", response_model=ApiResponse[UsuarioOut], dependencies=gestionar)
+def desbloquear_usuario(usuario_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require("usuarios.gestionar"))):
+    """Quita el bloqueo por intentos fallidos (contraseña o códigos) sin esperar los minutos."""
+    user = db.get(Usuario, usuario_id)
+    if user is None:
+        raise ApiError(404, "Usuario no encontrado")
+    desbloquear(user)
+    auditar(db, request, "usuario_desbloqueado", actual.id, usuario=user.username)
     db.commit()
     return ok(user)
 

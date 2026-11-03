@@ -72,6 +72,15 @@ export default function UsuariosPage() {
     }
   }
 
+  async function desbloquear(u: Usuario) {
+    try {
+      await api(`/usuarios/${u.id}/desbloquear`, { method: "POST" });
+      cargar();
+    } catch (err) {
+      alert(mensajeError(err));
+    }
+  }
+
   async function restablecerMfa(u: Usuario) {
     if (!confirm(`¿Restablecer la verificación en dos pasos de ${u.nombre}? Deberá configurarla de nuevo en su próximo ingreso y se cerrarán sus sesiones abiertas.`)) return;
     try {
@@ -215,12 +224,20 @@ export default function UsuariosPage() {
                     {u.activo ? "Activo" : "Inactivo"}
                   </span>
                   {u.debe_cambiar_password && <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">Contraseña temporal</span>}
+                  {!!u.bloqueado_minutos && (
+                    <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800" title="Por intentos fallidos de ingreso">
+                      Bloqueado ({u.bloqueado_minutos} min)
+                    </span>
+                  )}
                 </td>
                 <td className="text-sm">
                   {u.mfa_activo ? <span className="text-[#086b08]">✓ Configurada</span> : <span className="text-slate-500">Pendiente (al primer ingreso)</span>}
                 </td>
                 {puedeGestionar && (
                   <td className="whitespace-nowrap text-right">
+                    {!!u.bloqueado_minutos && (
+                      <button className="mr-3 text-sm font-medium text-red-700 hover:underline" onClick={() => desbloquear(u)}>Desbloquear</button>
+                    )}
                     <button className="text-sm text-marca-600 hover:underline" onClick={() => editar(u)}>Editar</button>
                     {u.mfa_activo && (
                       <button className="ml-3 text-sm text-[#9a3f1a] hover:underline" onClick={() => restablecerMfa(u)}>Restablecer MFA</button>

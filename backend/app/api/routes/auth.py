@@ -64,6 +64,20 @@ def _bloqueado(clave: str) -> bool:
     return limitador.contar(clave, s.login_bloqueo_minutos * 60) >= s.login_max_intentos
 
 
+def bloqueo_minutos(user: Usuario) -> int | None:
+    """Minutos que le faltan al usuario para poder volver a intentar (por contraseña o por códigos), o None."""
+    s = get_settings()
+    segundos = [x for x in (limitador.restante(c, s.login_max_intentos, s.login_bloqueo_minutos * 60)
+                            for c in (f"login-fallido:{user.username.strip().lower()}", f"mfa-fallido:{user.id}")) if x]
+    return -(-max(segundos) // 60) if segundos else None
+
+
+def desbloquear(user: Usuario) -> None:
+    """Borra los intentos fallidos del usuario: puede volver a ingresar de inmediato."""
+    limitador.limpiar(f"login-fallido:{user.username.strip().lower()}")
+    limitador.limpiar(f"mfa-fallido:{user.id}")
+
+
 def _fallo(clave: str) -> None:
     limitador.registrar(clave, 10_000, get_settings().login_bloqueo_minutos * 60)
 

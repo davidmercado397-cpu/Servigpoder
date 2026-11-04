@@ -12,7 +12,8 @@ y se compara con lo pagado. Las diferencias se vuelven alertas. Funciones puras:
 
 Día 31 (meses de 31 días, en la 2.ª quincena y en la mensual): el salario va en base 30 y no lo incluye, pero si
 ese día es pagable (turno, Z, L, IND…) se le pagan las extras y recargos (130), la Ley 2101 (132) de la modalidad del
-puesto de ese día y el auxilio de transporte de ese día.
+puesto de ese día y el auxilio de transporte de ese día. Un descanso (Z, L) el 31 justo después de una novedad el 30
+(incapacidad, ausencia…) no cuenta. Si el 31 es novedad, SIESA lo descuenta de la base: un día menos de salario.
 
 Vacaciones: los días trabajados ANTES del primer día de vacaciones del periodo se pagan en la liquidación de
 vacaciones (no se esperan en la nómina); los de después del regreso, en la nómina normal. Toda persona con
@@ -303,10 +304,14 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
                 esperado[c] += v["valor"] * faltan_mes_corto
 
     # Día 31: fuera de la base 30 del salario, pero si es pagable lleva las extras, la Ley 2101 y el auxilio de ese día
-    trabajo_31 = False
+    trabajo_31 = novedad_31 = False
     pagan_31 = [c for c in dia_31_cand if not c[3].descuenta]
-    if dia_31 and pagan_31:
-        f, crudo, cod, _ = next((c for c in pagan_31 if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan_31[0])
+    elegido_31 = next((c for c in pagan_31 if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan_31[0]) if pagan_31 else None
+    # Descanso el 31 después de una novedad el 30 (sigue incapacitado, ausente…): no se paga
+    descanso_tras_novedad = (elegido_31 is not None and not _HORARIO.match(elegido_31[1]) and elegido_31[2] in {"Z", "L"}
+                             and fechas and dias[fechas[-1].isoformat()]["clase"] in ("novedad", "vacaciones"))
+    if dia_31 and elegido_31 and not descanso_tras_novedad:
+        f, crudo, cod, _ = elegido_31
         trabajo_31 = True
         info_puesto = puestos.get((f["ubicacion"], f["puesto"]))
         modalidad = info_puesto["modalidad"] if info_puesto else None
@@ -316,7 +321,10 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
                     esperado[c] += v["valor"]
         dias[dia_31.isoformat()] = {"codigo": crudo, "clase": "dia_31", "puesto": f["puesto"], "ubicacion": f["ubicacion"],
                                     "modalidad": modalidad}
+    elif dia_31 and descanso_tras_novedad:
+        dias[dia_31.isoformat()] = {"codigo": elegido_31[1], "clase": "dia_31_sin_pago", "puesto": elegido_31[0]["puesto"]}
     elif dia_31 and dia_31_cand:
+        novedad_31 = True
         dias[dia_31.isoformat()] = {"codigo": dia_31_cand[0][1], "clase": "novedad", "puesto": dia_31_cand[0][0]["puesto"]}
     dias_aux = pagables + trabajo_31
 
@@ -355,7 +363,8 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "tiene_programacion": any(d["clase"] != "vacio" for d in dias.values()),
         "dias": dias,
         "conteo": {"pagables": pagables, "novedad": novedad, "vacaciones": vacaciones, "vacios": vacios,
-                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones, "dia_31": int(trabajo_31)},
+                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones, "dia_31": int(trabajo_31),
+                   "novedad_31": int(novedad_31)},
         "vacaciones": {"desde": dias_vac[0].isoformat(), "hasta": dias_vac[-1].isoformat(), "dias": len(dias_vac),
                        "antes": antes_vacaciones} if dias_vac else None,
         "modalidades": dict(por_modalidad),
@@ -402,7 +411,14 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
         alerta("VACACIONES_VERIFICAR", f"Vacaciones del {vac['desde'][8:]} al {vac['hasta'][8:]} ({vac['dias']} días); {antes}; {despues}. "
                                        f"En esta nómina se le pagan {sal:g} días de salario.", esperado=pagables, pagado=sal)
     en_vac = " (tiene vacaciones en el periodo: lo trabajado antes va en la liquidación de vacaciones)" if vac else ""
-    if pagables == 0:
+    # Novedad el 31: SIESA la descuenta de la base de 30, un día menos de salario
+    dias_sal = max(pagables - c.get("novedad_31", 0), 0)
+    nota_31 = " (el 31 fue novedad: un día menos de la base)" if c.get("novedad_31") and pagables else ""
+    if pagables == 0 and c.get("dia_31"):
+        if sal > 1.5:  # solo trabajó el 31 (ingreso o regreso ese día): a lo sumo ese día
+            alerta("VACACIONES_CON_PAGO" if vac else "SALARIO_MAYOR_DIAS",
+                   f"Se le pagan {sal:g} días de salario y solo trabajó el 31{en_vac}.", referencia=CONCEPTO_SALARIO, esperado=1, pagado=sal)
+    elif pagables == 0:
         if sal > 0:
             alerta("VACACIONES_CON_PAGO" if vac else "PAGO_SIN_DIAS",
                    f"Se le pagan {sal:g} días de salario y no le corresponde ningún día en esta nómina{en_vac}.",
@@ -411,13 +427,13 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
             alerta("VACACIONES_CON_PAGO" if vac else "EXTRAS_SIN_DIAS",
                    f"Recibe {pesos(extras)} en extras/modalidad sin días a pagar en esta nómina{en_vac}.", referencia="130", esperado=0, pagado=extras)
     else:
-        if sal > pagables + 0.5:
+        if sal > dias_sal + 0.5:
             alerta("VACACIONES_CON_PAGO" if vac else "SALARIO_MAYOR_DIAS",
-                   f"Se le pagan {sal:g} días de salario pero en esta nómina le corresponden {pagables}{en_vac}.",
-                   referencia=CONCEPTO_SALARIO, esperado=pagables, pagado=sal)
-        elif sal < pagables - 0.5:
-            alerta("DIAS_SIN_PAGAR", f"Tiene {pagables} días trabajados y solo se le pagan {sal:g} días de salario.",
-                   referencia=CONCEPTO_SALARIO, esperado=pagables, pagado=sal)
+                   f"Se le pagan {sal:g} días de salario pero en esta nómina le corresponden {dias_sal}{nota_31}{en_vac}.",
+                   referencia=CONCEPTO_SALARIO, esperado=dias_sal, pagado=sal)
+        elif sal < dias_sal - 0.5:
+            alerta("DIAS_SIN_PAGAR", f"Tiene {dias_sal} días de salario a pagar{nota_31} y solo se le pagan {sal:g}.",
+                   referencia=CONCEPTO_SALARIO, esperado=dias_sal, pagado=sal)
 
     # Auxilio de transporte: días laborados + descansos (sin novedades), si gana hasta 2 SMLMV
     aux = per["auxilio"]

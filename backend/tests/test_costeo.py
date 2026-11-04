@@ -84,6 +84,11 @@ def test_parametros_cambian_el_resultado():
     assert otra_comision["comision"]["vendedor_total"] > base["comision"]["vendedor_total"]
     horas = calculo.calcular({**PALMASECA, "horas_bolsa_anual": 60}, P, RANGOS)
     assert horas["costos"]["horas_adicionales"] == pytest.approx(horas["costo_por_hombre"] / 30 / 12 * 60 / 12)
+    # ICA del costeo (municipio): reemplaza el parámetro general; vacío = el general
+    ica = calculo.calcular({**PALMASECA, "ica_por_mil": 4.5}, P, RANGOS)
+    assert ica["costos"]["ica"] < base["costos"]["ica"] and ica["facturacion"]["ica_por_mil"] == 4.5
+    assert ica["facturacion"]["ica_por_mil_parametro"] == P["ica_por_mil"]
+    assert calculo.calcular({**PALMASECA, "ica_por_mil": ""}, P, RANGOS)["costos"]["ica"] == base["costos"]["ica"]
 
 
 def test_comision_escogida_medios_hombres_y_rentabilidad():

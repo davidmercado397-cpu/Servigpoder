@@ -15,7 +15,7 @@ type Personal = { nombre: string; hombres: number; salario?: number | null; hora
 type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string };
 type Datos = {
   duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual: number; donaciones: number;
-  pct_comision_vendedor?: number | null; pct_comision_director?: number | null;
+  pct_comision_vendedor?: number | null; pct_comision_director?: number | null; ica_por_mil?: number | null;
   servicios: Servicio[]; personal: Personal[]; otros: Elemento[]; dotacion_tarifa: Elemento[]; dotacion_puesto: Elemento[];
 };
 type Resultado = {
@@ -24,7 +24,7 @@ type Resultado = {
   bolsas: { publicidad: number; representacion: number; horas_anuales: number; valor_hora: number };
   comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean;
     pct_director?: number; carga_director?: number; director_elegida?: boolean };
-  facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number };
+  facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number; ica_por_mil?: number; ica_por_mil_parametro?: number };
   personal: { nombre: string; hombres: number; costo_hombre: number; costo_total: number; neto_hombre: number }[];
   costos: Record<string, number>; total_costos: number; antes_renta: number; margen_mensual: number; margen_por_hombre: number; margen_total: number;
   pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: { mensual: number }[]; dotacion_puesto: { mensual: number }[];
@@ -151,6 +151,13 @@ export default function EditorCosteo() {
                 on={(v) => cambiar({ pct_comision_vendedor: v })} nota={notaComision(r.comision.vendedor_total, r.meses)} />
               <Comision etiqueta="Comisión del director (%)" v={d.pct_comision_director} automatica={r.comision.pct} off={!editable}
                 on={(v) => cambiar({ pct_comision_director: v })} nota={notaComision(r.comision.director_total, r.meses)} />
+              <div><label className="label">ICA (por mil)</label>
+                <input className="input" type="number" min={0} step="any" disabled={!editable}
+                  placeholder={`General ${(r.facturacion.ica_por_mil_parametro ?? 0).toLocaleString("es-CO")}`}
+                  value={d.ica_por_mil ?? ""} onChange={(e) => cambiar({ ica_por_mil: e.target.value === "" ? null : Number(e.target.value) })} />
+                <p className="mt-1 text-xs text-slate-500">
+                  {`${d.ica_por_mil == null ? "Vacío = el general · " : ""}${pesos(r.costos.ica ?? 0)} al mes`}
+                </p></div>
             </div>
           </Seccion>
 

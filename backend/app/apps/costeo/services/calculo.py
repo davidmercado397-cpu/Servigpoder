@@ -40,7 +40,7 @@ PARAMETROS: dict[str, tuple[float, str, str, str]] = {
     "pct_representacion": (1, "Reserva de gastos de representación (%)", "Gastos",
                            "Mensual sobre la tarifa mensual; la bolsa del contrato es ese valor por los meses"),
     "pct_renta": (35, "Impuesto de renta (%)", "Impuestos", "Sobre el margen antes de impuestos (nunca negativo)"),
-    "ica_por_mil": (6.6, "ICA (por mil)", "Impuestos", "Sobre el AIU"),
+    "ica_por_mil": (6.6, "ICA (por mil)", "Impuestos", "Sobre el AIU; cada costeo puede tener el suyo (según el municipio)"),
     "pct_aiu": (10, "AIU (%)", "Impuestos", "Base del IVA y del ICA"),
     "pct_iva": (19, "IVA (%)", "Impuestos", "Sobre el AIU"),
     "comision_factor_base": (0.9, "Comisión: factor sobre la tarifa", "Comisiones", "Constante de la fórmula de comisión"),
@@ -188,9 +188,10 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     # Facturación con impuestos (informativa) e ICA
     aiu = tarifa * p["pct_aiu"] / 100
     iva = aiu * p["pct_iva"] / 100
-    reteica = aiu * p["ica_por_mil"] / 1000
+    ica = _n(datos.get("ica_por_mil"), p["ica_por_mil"])  # el del costeo (municipio) o el parámetro general
+    reteica = aiu * ica / 1000
     total_a_pagar = tarifa + iva - reteica - descuento
-    ica_m = total_a_pagar * p["pct_aiu"] / 100 * p["ica_por_mil"] / 1000
+    ica_m = total_a_pagar * p["pct_aiu"] / 100 * ica / 1000
 
     costos = {
         "laboral": laboral, "dotacion_tarifa": dot_tarifa_m, "dotacion_puesto": dot_puesto_m, "horas_adicionales": horas_m,
@@ -223,7 +224,8 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
         "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director,
                      "pct_vendedor": rv.pct, "carga_vendedor": rv.carga, "vendedor_elegida": rv is not r,
                      "pct_director": rd.pct, "carga_director": rd.carga, "director_elegida": rd is not r},
-        "facturacion": {"aiu": aiu, "iva": iva, "reteica": reteica, "total_a_pagar": total_a_pagar},
+        "facturacion": {"aiu": aiu, "iva": iva, "reteica": reteica, "total_a_pagar": total_a_pagar, "ica_por_mil": ica,
+                        "ica_por_mil_parametro": p["ica_por_mil"]},
         "personal": personal, "dotacion_tarifa": dot_tarifa, "dotacion_puesto": dot_puesto, "otros": otros,
         # La dotación (de la tarifa y del puesto) es gasto operativo: no suma en el % de MFP ni pasa a la MFP
         "costos": costos, "gasto_operativo": dot_tarifa_m + dot_puesto_m, "total_costos": total_costos, "antes_renta": antes_renta,

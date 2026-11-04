@@ -141,14 +141,16 @@ export default function EditorCosteo() {
           <Seccion titulo="Condiciones">
             <div className="grid gap-3 sm:grid-cols-3">
               <Num etiqueta="Duración (meses)" v={d.duracion_meses} on={(v) => cambiar({ duracion_meses: v })} off={!editable} />
-              <Num etiqueta="Nota crédito (%)" v={+(d.pct_nota_credito * 100).toFixed(4)} on={(v) => cambiar({ pct_nota_credito: v / 100 })} off={!editable} />
-              <Num etiqueta="Cupo de inversión (%)" v={+(d.pct_cupo_inversion * 100).toFixed(4)} on={(v) => cambiar({ pct_cupo_inversion: v / 100 })} off={!editable} />
+              <Num etiqueta="Nota crédito (%)" v={+(d.pct_nota_credito * 100).toFixed(4)} on={(v) => cambiar({ pct_nota_credito: v / 100 })} off={!editable}
+                nota={r.descuento_nota_credito ? `${pesos(r.descuento_nota_credito)} al mes · ${pesos(r.descuento_nota_credito * r.meses)} en ${r.meses} meses` : undefined} />
+              <Num etiqueta="Cupo de inversión (%)" v={+(d.pct_cupo_inversion * 100).toFixed(4)} on={(v) => cambiar({ pct_cupo_inversion: v / 100 })} off={!editable}
+                nota={r.mfp.cupo_inversion_vp ? `${pesos(r.mfp.cupo_inversion_vp)} hoy (valor presente) · ${pesos(r.costos.cupo_inversion ?? 0)} al mes` : undefined} />
               <Num etiqueta="Horas de obsequio por año" v={d.horas_bolsa_anual} on={(v) => cambiar({ horas_bolsa_anual: v })} off={!editable} />
               <Num etiqueta="Donaciones (total)" v={d.donaciones} on={(v) => cambiar({ donaciones: v })} off={!editable} />
               <Comision etiqueta="Comisión del vendedor (%)" v={d.pct_comision_vendedor} automatica={r.comision.pct} off={!editable}
-                on={(v) => cambiar({ pct_comision_vendedor: v })} />
+                on={(v) => cambiar({ pct_comision_vendedor: v })} nota={notaComision(r.comision.vendedor_total, r.meses)} />
               <Comision etiqueta="Comisión del director (%)" v={d.pct_comision_director} automatica={r.comision.pct} off={!editable}
-                on={(v) => cambiar({ pct_comision_director: v })} />
+                on={(v) => cambiar({ pct_comision_director: v })} nota={notaComision(r.comision.director_total, r.meses)} />
             </div>
           </Seccion>
 
@@ -350,16 +352,23 @@ function Tabla({ columnas, children }: { columnas: string[]; children: React.Rea
   );
 }
 
-function Num({ etiqueta, v, on, off }: { etiqueta: string; v: number; on: (v: number) => void; off?: boolean }) {
-  return <div><label className="label">{etiqueta}</label><input className="input" type="number" disabled={off} value={v} onChange={(e) => on(n(e.target.value))} /></div>;
+// `nota`: lo que representa el valor en pesos, debajo del recuadro
+function Num({ etiqueta, v, on, off, nota }: { etiqueta: string; v: number; on: (v: number) => void; off?: boolean; nota?: string }) {
+  return (
+    <div><label className="label">{etiqueta}</label><input className="input" type="number" disabled={off} value={v} onChange={(e) => on(n(e.target.value))} />
+      {nota && <p className="mt-1 text-xs text-slate-500">{nota}</p>}</div>
+  );
 }
 
+const notaComision = (total: number, meses: number) => total ? `${pesos(total)} en el contrato · ${pesos(total / meses)} al mes (con carga prestacional)` : undefined;
+
 // % digitado como fracción (0,2 % → 0.002); vacío = automática según el rango del % de MFP
-function Comision({ etiqueta, v, automatica, on, off }: { etiqueta: string; v?: number | null; automatica: number; on: (v: number | null) => void; off?: boolean }) {
+function Comision({ etiqueta, v, automatica, on, off, nota }: { etiqueta: string; v?: number | null; automatica: number; on: (v: number | null) => void; off?: boolean; nota?: string }) {
   return (
     <div><label className="label">{etiqueta}</label>
       <input className="input" type="number" min={0} step="any" disabled={off} placeholder={`Automática ${pct(automatica, 2)}`}
-        value={v == null ? "" : +(v * 100).toFixed(4)} onChange={(e) => on(e.target.value === "" ? null : Number(e.target.value) / 100)} /></div>
+        value={v == null ? "" : +(v * 100).toFixed(4)} onChange={(e) => on(e.target.value === "" ? null : Number(e.target.value) / 100)} />
+      {nota && <p className="mt-1 text-xs text-slate-500">{nota}</p>}</div>
   );
 }
 

@@ -4,16 +4,18 @@ Para cada persona de cada nómina cargada (quincenal: 1.ª quincena del 1 al 15 
 días 1 al 30; el día 31 no suma al salario) se calcula, con la programación del mes:
 
 - días pagables: días con turno, Z, L, IND… (todo código sin el check "Descuenta"); también son los días
-  que llevan auxilio de transporte;
+  que llevan auxilio de transporte, salvo la inducción (IND), que paga el salario pero no auxilio, extras (130)
+  ni Ley 2101 (132);
 - la modalidad de cada día según el puesto donde trabajó (prioridad: modalidad del puesto > de la ubicación);
 - el valor esperado de cada concepto de la modalidad (días × valor por día) y de cada cuota;
 
 y se compara con lo pagado. Las diferencias se vuelven alertas. Funciones puras: no tocan la base.
 
 Día 31 (meses de 31 días, en la 2.ª quincena y en la mensual): el salario va en base 30 y no lo incluye, pero si
-ese día es pagable (turno, Z, L, IND…) se le pagan las extras y recargos (130), la Ley 2101 (132) de la modalidad del
-puesto de ese día y el auxilio de transporte de ese día. Un descanso (Z, L) el 31 justo después de una novedad el 30
-(incapacidad, ausencia…) no cuenta. Si el 31 es novedad, SIESA lo descuenta de la base: un día menos de salario.
+ese día es pagable (turno, Z, L) se le pagan las extras y recargos (130) y la Ley 2101 (132) de la modalidad del
+puesto de ese día; nada más (ni auxilio de transporte). Un descanso (Z, L) el 31 justo después de una novedad el 30
+(incapacidad, ausencia…) y la inducción (IND) no cuentan. Si el 31 es novedad, SIESA lo descuenta de la base: un día
+menos de salario.
 
 Vacaciones: los días trabajados ANTES del primer día de vacaciones del periodo se pagan en la liquidación de
 vacaciones (no se esperan en la nómina); los de después del regreso, en la nómina normal. Toda persona con
@@ -62,8 +64,20 @@ INFORMATIVAS = {"VACACIONES_VERIFICAR"}
 CUOTA_ACTIVA = {"EN PROCESO", "PENDIENTE"}
 CONCEPTO_SALARIO = "100"
 CONCEPTO_AUXILIO = "103"
-# Conceptos de la modalidad que se pagan también el día 31 (el salario no)
+# Conceptos de la modalidad que se pagan también el día 31 (el salario y el auxilio no)
 CONCEPTOS_DIA_31 = ("130", "132")
+# Inducción: paga el salario, pero no auxilio de transporte, extras (130) ni Ley 2101 (132)
+CODIGOS_INDUCCION = {"IND", "IND NOCHE"}
+CONCEPTOS_SIN_INDUCCION = ("130", "132")
+
+
+def es_induccion(cod: str) -> bool:
+    return cod in CODIGOS_INDUCCION or cod.split(" ")[0] == "IND"
+
+
+def _elegir(pagan: list) -> tuple:
+    """El código que manda en un día con varios: un horario o turno, luego la inducción y por último Z o L."""
+    return min(pagan, key=lambda c: 0 if _HORARIO.match(c[1]) else 2 if c[2] in {"Z", "L"} else 1 if es_induccion(c[2]) else 0)
 # Devengos que son horas extras o recargos por hora (además de los de la modalidad)
 CONCEPTOS_EXTRAS = {"104", "105", "106", "107", "108", "109", "111", "115", "116", "142", "143"}
 
@@ -240,7 +254,7 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas, codigos, puestos, puestos_aprobados,
              mods, conceptos_modalidad, desc_concepto, p, sin_modalidad, dia_31: date | None = None) -> dict:
     dias: dict[str, dict] = {}
-    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = 0
+    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = induccion = 0
     por_modalidad: dict[str, int] = defaultdict(int)
     esperado: dict[str, float] = defaultdict(float)
     ultimo_dia_modalidad: str | None = None
@@ -273,20 +287,25 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             ultimo_dia_modalidad = None
             continue
         # El día se paga una vez, con la modalidad del puesto donde trabajó (si tiene turno, ese manda)
-        f, crudo, cod, _ = next((c for c in pagan if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan[0])
+        f, crudo, cod, _ = _elegir(pagan)
         if primer_vac and d < primer_vac:
             antes_vacaciones += 1
             dias[iso] = {"codigo": crudo, "clase": "antes_vacaciones", "puesto": f["puesto"], "ubicacion": f["ubicacion"]}
             continue
         pagables += 1
+        es_ind = es_induccion(cod)
+        induccion += es_ind
         clave = (f["ubicacion"], f["puesto"])
         info_puesto = puestos.get(clave)
         modalidad = info_puesto["modalidad"] if info_puesto else None
         dia = {"codigo": crudo, "clase": "pagable", "puesto": f["puesto"], "ubicacion": f["ubicacion"], "modalidad": modalidad}
+        if es_ind:
+            dia["induccion"] = True
         if modalidad:
             por_modalidad[modalidad] += 1
             for c, v in mods[modalidad]["conceptos"].items():
-                esperado[c] += v["valor"]
+                if not (es_ind and c in CONCEPTOS_SIN_INDUCCION):
+                    esperado[c] += v["valor"]
         elif clave not in puestos_aprobados:
             dias_sin_modalidad += 1
             s = sin_modalidad.setdefault(clave, {"personas": set(), "dias": 0, "ubicacion_nombre": f["ubicacion_nombre"],
@@ -303,14 +322,15 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             for c, v in mods[ultimo_dia_modalidad]["conceptos"].items():
                 esperado[c] += v["valor"] * faltan_mes_corto
 
-    # Día 31: fuera de la base 30 del salario, pero si es pagable lleva las extras, la Ley 2101 y el auxilio de ese día
+    # Día 31: fuera de la base 30 del salario, pero si es pagable lleva las extras (130) y la Ley 2101 (132) de ese día
     trabajo_31 = novedad_31 = False
     pagan_31 = [c for c in dia_31_cand if not c[3].descuenta]
-    elegido_31 = next((c for c in pagan_31 if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan_31[0]) if pagan_31 else None
-    # Descanso el 31 después de una novedad el 30 (sigue incapacitado, ausente…): no se paga
+    elegido_31 = _elegir(pagan_31) if pagan_31 else None
+    # Descanso el 31 después de una novedad el 30 (sigue incapacitado, ausente…) o inducción: no se paga nada
     descanso_tras_novedad = (elegido_31 is not None and not _HORARIO.match(elegido_31[1]) and elegido_31[2] in {"Z", "L"}
                              and fechas and dias[fechas[-1].isoformat()]["clase"] in ("novedad", "vacaciones"))
-    if dia_31 and elegido_31 and not descanso_tras_novedad:
+    induccion_31 = elegido_31 is not None and not _HORARIO.match(elegido_31[1]) and es_induccion(elegido_31[2])
+    if dia_31 and elegido_31 and not descanso_tras_novedad and not induccion_31:
         f, crudo, cod, _ = elegido_31
         trabajo_31 = True
         info_puesto = puestos.get((f["ubicacion"], f["puesto"]))
@@ -321,12 +341,13 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
                     esperado[c] += v["valor"]
         dias[dia_31.isoformat()] = {"codigo": crudo, "clase": "dia_31", "puesto": f["puesto"], "ubicacion": f["ubicacion"],
                                     "modalidad": modalidad}
-    elif dia_31 and descanso_tras_novedad:
-        dias[dia_31.isoformat()] = {"codigo": elegido_31[1], "clase": "dia_31_sin_pago", "puesto": elegido_31[0]["puesto"]}
+    elif dia_31 and (descanso_tras_novedad or induccion_31):
+        dias[dia_31.isoformat()] = {"codigo": elegido_31[1], "clase": "dia_31_sin_pago", "puesto": elegido_31[0]["puesto"],
+                                    "motivo": "inducción" if induccion_31 else "descanso después de una novedad"}
     elif dia_31 and dia_31_cand:
         novedad_31 = True
         dias[dia_31.isoformat()] = {"codigo": dia_31_cand[0][1], "clase": "novedad", "puesto": dia_31_cand[0][0]["puesto"]}
-    dias_aux = pagables + trabajo_31
+    dias_aux = pagables - induccion  # el 31 no lleva auxilio; la inducción tampoco
 
     # Puestos donde está programada: modalidad que aplica, su origen y días en cada uno
     en_periodo = [d.isoformat() for d in fechas]
@@ -364,7 +385,7 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "dias": dias,
         "conteo": {"pagables": pagables, "novedad": novedad, "vacaciones": vacaciones, "vacios": vacios,
                    "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones, "dia_31": int(trabajo_31),
-                   "novedad_31": int(novedad_31)},
+                   "novedad_31": int(novedad_31), "induccion": induccion},
         "vacaciones": {"desde": dias_vac[0].isoformat(), "hasta": dias_vac[-1].isoformat(), "dias": len(dias_vac),
                        "antes": antes_vacaciones} if dias_vac else None,
         "modalidades": dict(por_modalidad),
@@ -438,7 +459,7 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
     # Auxilio de transporte: días laborados + descansos (sin novedades), si gana hasta 2 SMLMV
     aux = per["auxilio"]
     dias_aux = aux["dias_esperados"]
-    con_31 = " (incluye el día 31)" if c.get("dia_31") else ""
+    con_31 = f" ({c['induccion']} de inducción no llevan auxilio)" if c.get("induccion") else ""
     if dias_aux > 0 and (per["salario"] or 0) <= 2 * p.smlmv:
         if aux["pagado"] <= 0:
             alerta("AUX_CERO", f"Tiene {dias_aux} días con derecho a auxilio de transporte{con_31} y se le pagan 0 días.",

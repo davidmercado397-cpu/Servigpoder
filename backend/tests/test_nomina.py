@@ -198,7 +198,7 @@ def test_escenario_completo(admin):
 def test_detalle_de_persona_y_dias(admin):
     pid = _cargar_todo(admin)
     d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1002").json()["data"]
-    assert d["conteo"] == {"pagables": 0, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0, "antes_vacaciones": 10, "dia_31": 0, "novedad_31": 0}
+    assert d["conteo"] == {"pagables": 0, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0, "antes_vacaciones": 10, "dia_31": 0, "novedad_31": 0, "induccion": 0}
     assert d["vacaciones"] == {"desde": "2026-09-26", "hasta": "2026-09-30", "dias": 5, "antes": 10}
     assert d["dias_salario"] == 15 and d["auxilio"]["dias_esperados"] == 0
     c130 = next(x for x in d["conceptos"] if x["concepto"] == "130")
@@ -375,24 +375,27 @@ def test_primera_quincena(admin):
     assert admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal", "quincena": 3}).status_code == 422
 
 
-def test_dia_31_paga_extras_ley_2101_y_auxilio(admin):
-    # Octubre (31 días): Ana trabaja del 16 al 31 → salario de 15 días (base 30), pero 130, 132 y auxilio de 16 días
+def test_dia_31_paga_extras_y_ley_2101(admin):
+    # Octubre (31 días): Ana trabaja del 16 al 31 → salario y auxilio de 15 días (base 30), pero 130 y 132 de 16 días
     trabajo = ["06:00 - 18:00", "06:00 - 18:00", "18:00 - 06:00", "18:00 - 06:00", "Z", "L"] * 3
     dias = {"1001": {16 + i: trabajo[i] for i in range(16)}, "1003": {16 + i: trabajo[i] for i in range(16)},
             "1005": {**{16 + i: trabajo[i] for i in range(15)}, 31: "[AUS]"},
             "1010": {**{d: "[IEG]" for d in range(16, 31)}, 31: "L"},  # incapacitada hasta el 30: el L del 31 no se paga
-            "1012": {31: "06:00 - 18:00"}}  # ingresa el 31
+            "1012": {31: "06:00 - 18:00"},  # ingresa el 31
+            # Inducción el 20 y el 31: paga el salario, pero no auxilio, extras ni Ley 2101
+            "1009": {**{16 + i: trabajo[i] for i in range(15)}, 20: "IND", 31: "IND"}}
     filas: list[list[object]] = [["Compañia", "EMPRESA"], ["Desde", "2026-10-01"], ["Hasta", "2026-10-31"], [],
                                  ["C.C. Empleado", "NOMBRE EMPLEADO", "UBICACION", "DESCRIPCION UBICACION", "PUESTO", "DESCRIPCION PUESTO",
                                   *[str(d) for d in range(1, 32)]]]
     for ced, d in dias.items():
         filas.append([ced, next(c[1] for c in CONTRATOS if c[0] == ced), "10", "UBI 10", "10", "PUESTO 10", *[d.get(i) for i in range(1, 32)]])
-    nomina = {"1001": {**_completo(15), "DEVENGO_130": 16 * 20000, "DEVENGO_132": 16 * 3000, "DEVENGO_103": round(DIA_AUX * 16)},
+    nomina = {"1001": {**_completo(15), "DEVENGO_130": 16 * 20000, "DEVENGO_132": 16 * 3000},
+              "1009": {**_completo(15), "DEVENGO_130": 14 * 20000, "DEVENGO_132": 14 * 3000, "DEVENGO_103": round(DIA_AUX * 14)},
               "1003": _completo(15),  # no se le pagó el 31
               # El 31 fue ausencia: SIESA lo descuenta de la base (14 días de salario); extras y auxilio de los 15 trabajados
               "1005": {**_completo(15), "HORAS_100": 14 * 7, "DEVENGO_100": round(1750905 / 30 * 14)},
               "1010": {},
-              "1012": {**_completo(1)}}
+              "1012": _completo(1, aux=False)}
     pid = admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 10, "nomina": "quincenal"}).json()["data"]["id"]
     for tipo, contenido in [("modalidades", _modalidades()), ("ubicaciones", _ubicaciones()), ("contratos", _contratos()),
                             ("cuotas", _cuotas()), ("programacion", xlsx(filas)), ("quincenal", _nomina(nomina))]:
@@ -401,12 +404,13 @@ def test_dia_31_paga_extras_ley_2101_y_auxilio(admin):
     alertas = _alertas(admin, pid)
     de_dias = {"100", "103", "130", "132"}
     assert not {x for x in alertas.get("1001", set()) if x[1] in de_dias}
-    assert {x for x in alertas.get("1003", set()) if x[1] in de_dias} == {("MODALIDAD_MENOR", "130"), ("MODALIDAD_MENOR", "132"),
-                                                                       ("AUX_DIFERENTE", "103")}
-    for ced in ("1005", "1010", "1012"):
+    assert {x for x in alertas.get("1003", set()) if x[1] in de_dias} == {("MODALIDAD_MENOR", "130"), ("MODALIDAD_MENOR", "132")}
+    for ced in ("1005", "1009", "1010", "1012"):
         assert not {x for x in alertas.get(ced, set()) if x[1] in de_dias}, ced
     assert admin.get(f"{API}/periodos/{pid}/personas/quincenal/1010").json()["data"]["dias"]["2026-10-31"]["clase"] == "dia_31_sin_pago"
     d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1001").json()["data"]
     assert d["conteo"]["pagables"] == 15 and d["conteo"]["dia_31"] == 1 and d["dias"]["2026-10-31"]["clase"] == "dia_31"
     assert {x["concepto"]: x["esperado"] for x in d["conceptos"]} == {"130": 320000, "132": 48000}
-    assert d["auxilio"]["dias_esperados"] == 16
+    assert d["auxilio"]["dias_esperados"] == 15
+    ind = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1009").json()["data"]
+    assert ind["conteo"]["induccion"] == 1 and ind["dias"]["2026-10-31"]["clase"] == "dia_31_sin_pago"

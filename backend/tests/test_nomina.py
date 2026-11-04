@@ -404,6 +404,8 @@ def test_dia_31_paga_extras_y_ley_2101(admin):
     alertas = _alertas(admin, pid)
     de_dias = {"100", "103", "130", "132"}
     assert not {x for x in alertas.get("1001", set()) if x[1] in de_dias}
+    msj = [a["mensaje"] for a in admin.get(f"{API}/periodos/{pid}/alertas?tamano=150").json()["data"] if a["cedula"] == "1003"]
+    assert all("15 días + el 31" in m and "Le falta el pago del día 31" in m for m in msj if m.startswith("13"))
     assert {x for x in alertas.get("1003", set()) if x[1] in de_dias} == {("MODALIDAD_MENOR", "130"), ("MODALIDAD_MENOR", "132")}
     for ced in ("1005", "1009", "1010", "1012"):
         assert not {x for x in alertas.get(ced, set()) if x[1] in de_dias}, ced

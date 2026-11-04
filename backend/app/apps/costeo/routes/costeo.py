@@ -12,7 +12,7 @@ from app.apps.costeo.models import (
     APROBADO, BORRADOR, ENVIADO, RECHAZADO, CstCatalogoCosto, CstCliente, CstComisionRango, CstCosteo, CstMfp, CstMfpItem,
     CstParametro, CstServicio, CstTipoItem,
 )
-from app.apps.costeo.services import calculo, configuracion
+from app.apps.costeo.services import calculo, configuracion, puestos
 from app.apps.costeo.services.calculo import Rango
 from app.core.auditoria import auditar
 from app.core.respuestas import ApiError, ApiResponse, ok
@@ -20,6 +20,7 @@ from app.models import Usuario
 
 router = APIRouter()
 VER, COSTEAR, CONFIGURAR, GESTIONAR, PRECIOS = "costeo.ver", "costeo.costear", "costeo.configurar", "costeo.mfp", "costeo.precios"
+CONTABLE = "costeo.contable"
 
 
 def require_alguno(*permisos: str):
@@ -103,7 +104,7 @@ def servicios(db: DbSession, _=Depends(require(VER))):
 
 
 @router.put("/servicios", response_model=ApiResponse[dict])
-def guardar_servicio(data: ServicioIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+def guardar_servicio(data: ServicioIn, request: Request, db: DbSession, actual: Usuario = Depends(require_alguno(CONFIGURAR, CONTABLE))):
     s = db.get(CstServicio, data.id) if data.id else CstServicio()
     if s is None:
         raise ApiError(404, "Servicio no encontrado")
@@ -123,6 +124,8 @@ class CatalogoIn(BaseModel):
     vida_util_meses: int | None = Field(default=None, ge=1, le=600)
     entregas_anio: float | None = Field(default=None, ge=0, le=365)
     por_hombre: bool = False
+    aplica: str = Field(default="", pattern=r"^(|todos|gala|overol|arma|fuego|fogeo|traumatica)$")
+    cantidad: float = Field(default=1, ge=0, le=1000)
     activo: bool = True
     fuente: str = Field(default="", max_length=120)
 
@@ -130,7 +133,8 @@ class CatalogoIn(BaseModel):
 def _cat_out(c: CstCatalogoCosto) -> dict:
     return {"id": c.id, "grupo": c.grupo, "nombre": c.nombre, "valor_unitario": float(c.valor_unitario),
             "vida_util_meses": c.vida_util_meses, "entregas_anio": float(c.entregas_anio) if c.entregas_anio is not None else None,
-            "por_hombre": c.por_hombre, "activo": c.activo, "fuente": c.fuente,
+            "por_hombre": c.por_hombre, "aplica": c.aplica or "", "cantidad": float(c.cantidad if c.cantidad is not None else 1),
+            "activo": c.activo, "fuente": c.fuente,
             "actualizado_en": c.actualizado_en.isoformat() if c.actualizado_en else ""}
 
 
@@ -167,13 +171,38 @@ class CosteoIn(BaseModel):
     datos: dict = Field(default_factory=dict)
 
 
+def _catalogo(db: DbSession) -> list[dict]:
+    return [_cat_out(c) for c in db.scalars(select(CstCatalogoCosto).where(CstCatalogoCosto.activo.is_(True)).order_by(CstCatalogoCosto.id))]
+
+
+def _servicios_cat(db: DbSession) -> list[dict]:
+    return [{"id": s.id, "descripcion": s.descripcion, "tarifa": float(s.tarifa), "hombres": float(s.hombres)}
+            for s in db.scalars(select(CstServicio).where(CstServicio.activo.is_(True)))]
+
+
+def _preparar(db: DbSession, datos: dict) -> dict:
+    """Costeo automático: hombres del personal y dotación de la tarifa con las tablas de compras vigentes."""
+    return puestos.preparar(datos, [x for x in _catalogo(db) if x["grupo"] == "dotacion_tarifa"])
+
+
+def _proteger(db: DbSession, actual: Usuario, nuevo: dict, previo: dict | None) -> dict:
+    """Lo que el comercial no cambia queda como estaba o como viene del catálogo (contable y compras sí lo cambian)."""
+    admin = CONFIGURAR in actual.permisos
+    try:
+        return puestos.proteger(nuevo, previo, _servicios_cat(db), _catalogo(db), contable=admin or CONTABLE in actual.permisos,
+                                precios=admin or PRECIOS in actual.permisos or CONTABLE in actual.permisos)
+    except puestos.CosteoInvalido as e:
+        raise ApiError(422, str(e)) from e
+
+
 def _calcular(db: DbSession, c: CstCosteo | None, datos: dict) -> dict:
     if c is not None and c.estado == APROBADO and c.parametros_aprobados:
+        # Aprobado: se calcula con lo guardado (dotación incluida) y los parámetros con que se aprobó
         p = c.parametros_aprobados["parametros"]
         rangos = [Rango(**r) for r in c.parametros_aprobados["rangos"]]
-    else:
-        p, rangos = configuracion.parametros(db), configuracion.rangos(db)
-    return calculo.calcular(datos, p, rangos)
+        return calculo.calcular(datos, p, rangos)
+    p, rangos = configuracion.parametros(db), configuracion.rangos(db)
+    return calculo.calcular(_preparar(db, datos), p, rangos)
 
 
 def _costeo_out(c: CstCosteo, completo: bool = False) -> dict:
@@ -221,8 +250,12 @@ def previsualizar(datos: dict, db: DbSession, _=Depends(require(VER))):
 def crear_costeo(data: CosteoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(COSTEAR))):
     if db.get(CstCliente, data.cliente_id) is None:
         raise ApiError(422, "Cliente no encontrado")
-    datos = data.datos or {"duracion_meses": 12, "pct_nota_credito": 0, "pct_cupo_inversion": 0, "servicios": [], "personal": [],
-                           "otros": [], "dotacion_tarifa": [], "dotacion_puesto": [], "horas_bolsa_anual": 0, "donaciones": 0}
+    datos = data.datos or {"duracion_meses": 12, "pct_nota_credito": 0, "pct_cupo_inversion": 0, "servicios": [],
+                           "personal": [{"nombre": "Guarda", "hombres": 0, "horas_extras": 0, "auxilio_transporte": True,
+                                         "auxilios_no_salariales": 0, "rodamiento": 0}],
+                           "otros": [], "dotacion_tarifa": [], "dotacion_puesto": [], "horas_bolsa_anual": 0, "donaciones": 0,
+                           "automatico": True}
+    datos = _preparar(db, _proteger(db, actual, datos, {"automatico": True}))
     c = CstCosteo(cliente_id=data.cliente_id, nombre=data.nombre.strip(), datos=datos, creado_por=actual.id)
     c.resultado = _calcular(db, None, datos)
     db.add(c)
@@ -241,12 +274,14 @@ def ver_costeo(costeo_id: int, db: DbSession, _=Depends(require(VER))):
 
 
 @router.put("/costeos/{costeo_id}", response_model=ApiResponse[dict])
-def guardar_costeo(costeo_id: int, data: CosteoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(COSTEAR))):
+def guardar_costeo(costeo_id: int, data: CosteoIn, request: Request, db: DbSession,
+                   actual: Usuario = Depends(require_alguno(COSTEAR, CONTABLE))):
     c = _costeo(db, costeo_id)
     if c.estado == APROBADO:
         raise ApiError(409, "El costeo está aprobado: cree una nueva versión para modificarlo")
-    c.cliente_id, c.nombre, c.datos = data.cliente_id, data.nombre.strip(), data.datos
-    c.resultado = _calcular(db, c, data.datos)
+    datos = _preparar(db, _proteger(db, actual, data.datos, c.datos))
+    c.cliente_id, c.nombre, c.datos = data.cliente_id, data.nombre.strip(), datos
+    c.resultado = _calcular(db, c, datos)
     auditar(db, request, "cst_costeo_guardado", actual.id, costeo=c.nombre, version=c.version,
             margen=round(c.resultado.get("margen_mensual", 0)))
     db.commit()

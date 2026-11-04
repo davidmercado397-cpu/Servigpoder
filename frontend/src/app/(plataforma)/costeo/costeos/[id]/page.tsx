@@ -10,12 +10,16 @@ import { api, mensajeError } from "@/lib/api";
 import { ESTADO_COSTEO, hoyISO, pct, pesos, type Cliente } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
-type Servicio = { descripcion: string; puesto: string; cantidad: number; tarifa: number; hombres: number };
+type Servicio = { servicio_id?: number; descripcion: string; puesto: string; cantidad: number; tarifa: number; hombres: number;
+  dotacion?: string; arma?: string; personal?: string };
 type Personal = { nombre: string; hombres: number; salario?: number | null; horas_extras: number; auxilio_transporte: boolean; auxilios_no_salariales: number; rodamiento: number };
-type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string };
+type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string;
+  aplica?: string; por_hombre?: boolean };
 type Datos = {
   duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual: number; donaciones: number;
   pct_comision_vendedor?: number | null; pct_comision_director?: number | null; ica_por_mil?: number | null;
+  /** Costeo por puestos: hombres del personal y dotación de la tarifa automáticos */
+  automatico?: boolean;
   servicios: Servicio[]; personal: Personal[]; otros: Elemento[]; dotacion_tarifa: Elemento[]; dotacion_puesto: Elemento[];
 };
 type Resultado = {
@@ -27,7 +31,7 @@ type Resultado = {
   facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number; ica_por_mil?: number; ica_por_mil_parametro?: number };
   personal: { nombre: string; hombres: number; costo_hombre: number; costo_total: number; neto_hombre: number }[];
   costos: Record<string, number>; total_costos: number; antes_renta: number; margen_mensual: number; margen_por_hombre: number; margen_total: number;
-  pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: { mensual: number }[]; dotacion_puesto: { mensual: number }[];
+  pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: (Elemento & { mensual: number })[]; dotacion_puesto: { mensual: number }[];
 };
 type Costeo = { id: number; cliente: Cliente; nombre: string; version: number; estado: string; datos: Datos; resultado: Resultado; mfp_id: number | null; parametros_aprobados: boolean };
 type CatServicio = { id: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
@@ -44,6 +48,11 @@ const GRUPOS_COSTO: { titulo: string; costos: [string, string][] }[] = [
 ];
 const TIPOS_MFP: [string, string][] = [["OTROS", "Otros"], ["ACCES_TOO", "Acces Too"], ["EQUIPOS", "Equipos"], ["NOTA_CREDITO", "Nota crédito / bono tarifa"],
   ["CAPACITACION", "Capacitación"], ["REINVERSION", "Reinversión"]];
+const DOTACIONES: [string, string][] = [["gala", "Gala"], ["overol", "Overol"]];
+const ARMAS: [string, string][] = [["sin", "Sin arma"], ["fuego", "Fuego"], ["fogeo", "Fogeo"], ["traumatica", "Traumática"]];
+const APLICA: Record<string, string> = { todos: "Todos los puestos", gala: "Gala", overol: "Overol", arma: "Puestos con arma", fuego: "Arma de fuego",
+  fogeo: "Arma de fogeo", traumatica: "Arma traumática" };
+const PESTANAS: [string, string][] = [["condiciones", "Condiciones"], ["puestos", "Puestos y dotación"], ["personal", "Personal"], ["otros", "Otros costos (MFP)"]];
 const VACIO: Datos = { duracion_meses: 12, pct_nota_credito: 0, pct_cupo_inversion: 0, horas_bolsa_anual: 0, donaciones: 0, servicios: [], personal: [], otros: [], dotacion_tarifa: [], dotacion_puesto: [] };
 const n = (v: string) => (v === "" ? 0 : Number(v));
 
@@ -53,6 +62,10 @@ export default function EditorCosteo() {
   const costear = usePermiso("costeo.costear");
   const gestionar = usePermiso("costeo.mfp");
   const configurar = usePermiso("costeo.configurar");
+  // Lo que el comercial no cambia: tarifas, hombres, salario, auxilio de transporte e ICA (contable); precios de dotación (compras)
+  const contable = usePermiso("costeo.contable") || configurar;
+  const precios = usePermiso("costeo.precios") || contable;
+  const [pestana, setPestana] = useState("condiciones");
   const [c, setC] = useState<Costeo | null>(null);
   const [d, setD] = useState<Datos>(VACIO);
   const [nombre, setNombre] = useState("");
@@ -87,9 +100,11 @@ export default function EditorCosteo() {
   }, [d, c]);
 
   if (!c || !r) return msg ? <Alerta>{msg.texto}</Alerta> : <p className="text-sm text-slate-500">Cargando…</p>;
-  const editable = costear && c.estado !== "aprobado";
+  const editable = (costear || contable) && c.estado !== "aprobado";
+  const auto = !!d.automatico;
   const cambiar = (x: Partial<Datos>) => { setD({ ...d, ...x }); setCambios(true); };
-  const hombres = d.personal.reduce((s, p) => s + Number(p.hombres || 0), 0) || r.hombres_servicios;
+  const hombres = r.hombres_servicios || d.personal.reduce((s, p) => s + Number(p.hombres || 0), 0);
+  const porPuestos = () => cambiar({ automatico: true, servicios: d.servicios.map((s) => ({ dotacion: "gala", arma: "sin", ...s })) });
 
   async function guardar() {
     try {
@@ -138,7 +153,19 @@ export default function EditorCosteo() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="space-y-5">
-          <Seccion titulo="Condiciones">
+          <div className="flex flex-wrap gap-1 border-b border-slate-200">
+            {PESTANAS.map(([k, t], i) => (
+              <button key={k} onClick={() => setPestana(k)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm ${pestana === k ? "border-marca-600 font-semibold text-marca-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+                {i + 1}. {t}
+              </button>
+            ))}
+          </div>
+          {!auto && editable && (
+            <Alerta tipo="info">Este costeo tiene los hombres y la dotación digitados a mano.{" "}
+              <button className="font-medium underline" onClick={porPuestos}>Pasar a costeo por puestos</button>: los hombres salen del servicio y la dotación de las tablas de compras.</Alerta>
+          )}
+          {pestana === "condiciones" && <Seccion titulo="Condiciones">
             <div className="grid gap-3 sm:grid-cols-3">
               <Num etiqueta="Duración (meses)" v={d.duracion_meses} on={(v) => cambiar({ duracion_meses: v })} off={!editable} />
               <Num etiqueta="Nota crédito (%)" v={+(d.pct_nota_credito * 100).toFixed(4)} on={(v) => cambiar({ pct_nota_credito: v / 100 })} off={!editable}
@@ -152,50 +179,93 @@ export default function EditorCosteo() {
               <Comision etiqueta="Comisión del director (%)" v={d.pct_comision_director} automatica={r.comision.pct} off={!editable}
                 on={(v) => cambiar({ pct_comision_director: v })} nota={notaComision(r.comision.director_total, r.meses)} />
               <div><label className="label">ICA (por mil)</label>
-                <input className="input" type="number" min={0} step="any" disabled={!editable}
+                <input className="input" type="number" min={0} step="any" disabled={!editable || !contable} title={contable ? undefined : "Lo cambia el área contable"}
                   placeholder={`General ${(r.facturacion.ica_por_mil_parametro ?? 0).toLocaleString("es-CO")}`}
                   value={d.ica_por_mil ?? ""} onChange={(e) => cambiar({ ica_por_mil: e.target.value === "" ? null : Number(e.target.value) })} />
                 <p className="mt-1 text-xs text-slate-500">
                   {`${d.ica_por_mil == null ? "Vacío = el general · " : ""}${pesos(r.costos.ica ?? 0)} al mes`}
                 </p></div>
             </div>
-          </Seccion>
+          </Seccion>}
 
-          <Seccion titulo="Servicios" accion={editable && (
+          {pestana === "puestos" && <>
+          <Seccion titulo="Puestos" accion={editable && (
             <select className="input w-72" value="" onChange={(e) => {
               const s = servicios.find((x) => String(x.id) === e.target.value);
-              if (s) cambiar({ servicios: [...d.servicios, { descripcion: s.descripcion, puesto: "", cantidad: 1, tarifa: s.tarifa, hombres: s.hombres }] });
+              if (s) cambiar({ servicios: [...d.servicios, { servicio_id: s.id, descripcion: s.descripcion, puesto: "", cantidad: 1, tarifa: s.tarifa, hombres: s.hombres,
+                ...(auto ? { dotacion: "gala", arma: "sin", personal: d.personal[0]?.nombre } : {}) }] });
             }}><option value="">+ Agregar servicio…</option>{servicios.map((s) => <option key={s.id} value={s.id}>{s.descripcion.slice(0, 80)}</option>)}</select>
           )}>
-            <Tabla columnas={["Servicio", "Puesto", "Cant.", "Tarifa", "Hombres", ""]}>
+            <p className="mb-2 text-xs text-slate-500">Los hombres los fija el servicio (24 h de lunes a domingo = 3, 12 h de lunes a domingo = 1,5, 12 h de lunes a viernes = 1)
+              {contable ? "; el área contable puede ajustarlos." : " y la tarifa es la del decreto: los ajusta el área contable."} Total: {r.hombres_servicios.toLocaleString("es-CO")} hombres.</p>
+            <Tabla columnas={["Servicio", "Puesto", "Cant.", ...(auto ? ["Dotación", "Arma", ...(d.personal.length > 1 ? ["Personal"] : [])] : []), "Tarifa", "Hombres", ""]}>
               {d.servicios.map((s, i) => {
                 const set = (x: Partial<Servicio>) => cambiar({ servicios: d.servicios.map((y, j) => (j === i ? { ...y, ...x } : y)) });
                 return (
                   <tr key={i}>
                     <td className="max-w-xs text-xs">{s.descripcion}</td>
                     <td><input className="input w-28" disabled={!editable} value={s.puesto} onChange={(e) => set({ puesto: e.target.value })} /></td>
-                    <td><input className="input w-16" type="number" disabled={!editable} value={s.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
-                    <td><input className="input w-32" type="number" disabled={!editable} value={s.tarifa} onChange={(e) => set({ tarifa: n(e.target.value) })} /></td>
-                    <td><input className="input w-20" type="number" min={0} step="0.5" disabled={!editable} value={s.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
+                    <td><input className="input w-16" type="number" min={1} disabled={!editable} value={s.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
+                    {auto && <>
+                      <td><select className="input w-24" disabled={!editable} value={s.dotacion ?? "gala"} onChange={(e) => set({ dotacion: e.target.value })}>
+                        {DOTACIONES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></td>
+                      <td><select className="input w-28" disabled={!editable} value={s.arma ?? "sin"} onChange={(e) => set({ arma: e.target.value })}>
+                        {ARMAS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></td>
+                      {d.personal.length > 1 && <td><select className="input w-28" disabled={!editable} value={s.personal ?? d.personal[0].nombre} onChange={(e) => set({ personal: e.target.value })}>
+                        {d.personal.map((p, j) => <option key={j} value={p.nombre}>{p.nombre}</option>)}</select></td>}
+                    </>}
+                    <td><input className="input w-32" type="number" disabled={!editable || !contable} value={s.tarifa} onChange={(e) => set({ tarifa: n(e.target.value) })} /></td>
+                    <td><input className="input w-20" type="number" min={0} step="any" disabled={!editable || !contable} value={s.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
                     <td>{editable && <Quitar on={() => cambiar({ servicios: d.servicios.filter((_, j) => j !== i) })} />}</td>
                   </tr>
                 );
               })}
             </Tabla>
           </Seccion>
+          {auto ? (
+            <Seccion titulo="Dotación de la tarifa (automática)">
+              <p className="mb-2 text-xs text-slate-500">Sale de las tablas de compras según la dotación y el arma de cada puesto (gasto operativo: no suma en el % de MFP).
+                Para cambiar un precio o qué lleva cada puesto: Configuración → Dotación de la tarifa.</p>
+              <Tabla columnas={["Elemento", "Aplica a", "Cantidad", "Valor unitario", "Vida útil / entregas", "Mensual"]}>
+                {(r.dotacion_tarifa ?? []).map((x, i) => (
+                  <tr key={i}>
+                    <td>{x.nombre}</td><td className="text-xs text-slate-500">{APLICA[x.aplica ?? ""] ?? ""}{x.por_hombre ? " · por hombre" : " · por puesto"}</td>
+                    <td className="tabular-nums">{Number(x.cantidad).toLocaleString("es-CO")}</td><td className="tabular-nums">{pesos(x.valor_unitario)}</td>
+                    <td className="text-xs">{x.entregas_anio != null ? `${x.entregas_anio} al año` : x.vida_util_meses ? `${x.vida_util_meses} meses` : "contrato"}</td>
+                    <td className="text-right tabular-nums">{pesos(x.mensual)}</td>
+                  </tr>
+                ))}
+              </Tabla>
+            </Seccion>
+          ) : (
+            <Elementos titulo="Dotación de la tarifa" ayuda="Gasto operativo: no suma en el % de MFP. Con entregas al año: valor × cantidad × entregas ÷ 12. Con vida útil: valor × cantidad ÷ vida útil."
+              filas={d.dotacion_tarifa} catalogo={catalogo.filter((x) => x.grupo === "dotacion_tarifa")} hombres={hombres} editable={editable} precios={precios}
+              on={(f) => cambiar({ dotacion_tarifa: f })} mensuales={r.dotacion_tarifa?.map((x) => x.mensual) ?? []} />
+          )}
+          <Elementos titulo="Dotación adicional del puesto" ayuda="Gasto operativo: no suma en el % de MFP. Lo que pide el cliente aparte de la tarifa, con el precio y la vida útil de compras."
+            filas={d.dotacion_puesto} catalogo={catalogo.filter((x) => x.grupo === "dotacion_puesto")} hombres={hombres} editable={editable} precios={precios}
+            on={(f) => cambiar({ dotacion_puesto: f })} mensuales={r.dotacion_puesto?.map((x) => x.mensual) ?? []} />
+          </>}
 
-          <Seccion titulo="Personal" accion={editable && <button className="btn-secundario" onClick={() => cambiar({ personal: [...d.personal, { nombre: "Guarda", hombres: 0, horas_extras: 0, auxilio_transporte: true, auxilios_no_salariales: 0, rodamiento: 0 }] })}><Plus className="h-4 w-4" /> Tipo de personal</button>}>
-            <p className="mb-2 text-xs text-slate-500">Las horas extras son el valor negociado con el cliente por hombre al mes. Salario vacío = salario mínimo.</p>
-            <Tabla columnas={["Tipo", "Hombres", "Salario", "Horas extras", "Aux. transporte", "Aux. no salariales", "Rodamiento", "Costo por hombre", ""]}>
+          {pestana === "personal" && <Seccion titulo="Personal" accion={editable && <button className="btn-secundario" onClick={() => cambiar({ personal: [...d.personal, { nombre: `Guarda ${d.personal.length + 1}`, hombres: 0, horas_extras: 0, auxilio_transporte: true, auxilios_no_salariales: 0, rodamiento: 0 }] })}><Plus className="h-4 w-4" /> Tipo de personal</button>}>
+            <p className="mb-2 text-xs text-slate-500">Las horas extras y recargos son el valor negociado por hombre al mes.
+              {auto ? " Los hombres salen de los puestos (con varios tipos, cada puesto escoge el suyo en Puestos y dotación)." : ""}
+              {contable ? " Salario vacío = salario mínimo." : " El salario y el auxilio de transporte los ajusta el área contable."}</p>
+            <Tabla columnas={["Tipo", "Hombres", "Salario", "Horas extras y recargos", "Aux. transporte", "Aux. no salariales", "Rodamiento", "Costo por hombre", ""]}>
               {d.personal.map((p, i) => {
                 const set = (x: Partial<Personal>) => cambiar({ personal: d.personal.map((y, j) => (j === i ? { ...y, ...x } : y)) });
                 return (
                   <tr key={i}>
-                    <td><input className="input w-28" disabled={!editable} value={p.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
-                    <td><input className="input w-20" type="number" min={0} step="0.5" disabled={!editable} value={p.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
-                    <td><input className="input w-28" type="number" disabled={!editable} placeholder="Mínimo" value={p.salario ?? ""} onChange={(e) => set({ salario: e.target.value === "" ? null : n(e.target.value) })} /></td>
+                    <td><input className="input w-28" disabled={!editable} value={p.nombre} onChange={(e) => {
+                      const v = e.target.value;
+                      cambiar({ personal: d.personal.map((y, j) => (j === i ? { ...y, nombre: v } : y)),
+                        servicios: d.servicios.map((s) => (s.personal === p.nombre ? { ...s, personal: v } : s)) });
+                    }} /></td>
+                    <td>{auto ? <span className="tabular-nums">{(r.personal[i]?.hombres ?? 0).toLocaleString("es-CO")}</span>
+                      : <input className="input w-20" type="number" min={0} step="0.5" disabled={!editable || !contable} value={p.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} />}</td>
+                    <td><input className="input w-28" type="number" disabled={!editable || !contable} placeholder="Mínimo" value={p.salario ?? ""} onChange={(e) => set({ salario: e.target.value === "" ? null : n(e.target.value) })} /></td>
                     <td><input className="input w-28" type="number" disabled={!editable} value={p.horas_extras} onChange={(e) => set({ horas_extras: n(e.target.value) })} /></td>
-                    <td className="text-center"><input type="checkbox" disabled={!editable} checked={p.auxilio_transporte} onChange={(e) => set({ auxilio_transporte: e.target.checked })} /></td>
+                    <td className="text-center"><input type="checkbox" disabled={!editable || !contable} checked={p.auxilio_transporte} onChange={(e) => set({ auxilio_transporte: e.target.checked })} /></td>
                     <td><input className="input w-24" type="number" disabled={!editable} value={p.auxilios_no_salariales} onChange={(e) => set({ auxilios_no_salariales: n(e.target.value) })} /></td>
                     <td><input className="input w-24" type="number" disabled={!editable} value={p.rodamiento} onChange={(e) => set({ rodamiento: n(e.target.value) })} /></td>
                     <td className="text-right tabular-nums">{pesos(r.personal[i]?.costo_hombre)}</td>
@@ -204,17 +274,11 @@ export default function EditorCosteo() {
                 );
               })}
             </Tabla>
-          </Seccion>
+          </Seccion>}
 
-          <Elementos titulo="Otros costos directos (MFP)" ayuda="Se reparten en la vida útil indicada (vacía = los meses del contrato). Al crear la MFP, cada uno queda como un ítem del tipo elegido."
-            filas={d.otros} catalogo={catalogo.filter((x) => x.grupo === "otros")} hombres={hombres} editable={editable} conTipo
-            on={(f) => cambiar({ otros: f })} mensuales={r.otros?.map((x) => x.mensual) ?? []} />
-          <Elementos titulo="Dotación de la tarifa" ayuda="Gasto operativo: no suma en el % de MFP. Con entregas al año: valor × cantidad × entregas ÷ 12. Con vida útil: valor × cantidad ÷ vida útil."
-            filas={d.dotacion_tarifa} catalogo={catalogo.filter((x) => x.grupo === "dotacion_tarifa")} hombres={hombres} editable={editable}
-            on={(f) => cambiar({ dotacion_tarifa: f })} mensuales={r.dotacion_tarifa?.map((x) => x.mensual) ?? []} />
-          <Elementos titulo="Dotación adicional del puesto" ayuda="Gasto operativo: no suma en el % de MFP. Elementos que no hacen parte de la tarifa mínima, repartidos en su vida útil."
-            filas={d.dotacion_puesto} catalogo={catalogo.filter((x) => x.grupo === "dotacion_puesto")} hombres={hombres} editable={editable}
-            on={(f) => cambiar({ dotacion_puesto: f })} mensuales={r.dotacion_puesto?.map((x) => x.mensual) ?? []} />
+          {pestana === "otros" && <Elementos titulo="Otros costos directos (MFP)" ayuda="Se reparten en la vida útil indicada (vacía = los meses del contrato). Al crear la MFP, cada uno queda como un ítem del tipo elegido."
+            filas={d.otros} catalogo={catalogo.filter((x) => x.grupo === "otros")} hombres={hombres} editable={editable} precios conTipo
+            on={(f) => cambiar({ otros: f })} mensuales={r.otros?.map((x) => x.mensual) ?? []} />}
         </div>
 
         <PanelResultado r={r} />
@@ -277,10 +341,12 @@ function PanelResultado({ r }: { r: Resultado }) {
   );
 }
 
-function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, on, mensuales, conTipo }: {
-  titulo: string; ayuda: string; filas: Elemento[]; catalogo: CatElemento[]; hombres: number; editable: boolean; on: (f: Elemento[]) => void;
+function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, precios, on, mensuales, conTipo }: {
+  titulo: string; ayuda: string; filas: Elemento[]; catalogo: CatElemento[]; hombres: number; editable: boolean; precios?: boolean; on: (f: Elemento[]) => void;
   mensuales: number[]; conTipo?: boolean;
 }) {
+  // Sin permiso de precios: el elemento, su valor y su vida útil son los del catálogo de compras; solo se cambia la cantidad
+  const libre = editable && !!precios;
   return (
     <Seccion titulo={titulo} accion={editable && (
       <div className="flex gap-2">
@@ -289,7 +355,7 @@ function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, on, mens
           if (x) on([...filas, { nombre: x.nombre, valor_unitario: x.valor_unitario, cantidad: x.por_hombre ? hombres : 1, vida_util_meses: x.vida_util_meses, entregas_anio: x.entregas_anio,
             ...(conTipo ? { tipo_item: x.nombre.includes("ACCES") ? "ACCES_TOO" : x.nombre.includes("BONO TARIFA") ? "NOTA_CREDITO" : "OTROS" } : {}) }]);
         }}><option value="">+ Del catálogo…</option>{catalogo.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
-        <button className="btn-secundario" onClick={() => on([...filas, { nombre: "", valor_unitario: 0, cantidad: 1, ...(conTipo ? { tipo_item: "OTROS" } : {}) }])}><Plus className="h-4 w-4" /></button>
+        {libre && <button className="btn-secundario" title="Elemento que no está en el catálogo" onClick={() => on([...filas, { nombre: "", valor_unitario: 0, cantidad: 1, ...(conTipo ? { tipo_item: "OTROS" } : {}) }])}><Plus className="h-4 w-4" /></button>}
       </div>
     )}>
       <p className="mb-2 text-xs text-slate-500">{ayuda}</p>
@@ -298,11 +364,11 @@ function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, on, mens
           const set = (y: Partial<Elemento>) => on(filas.map((z, j) => (j === i ? { ...z, ...y } : z)));
           return (
             <tr key={i}>
-              <td><input className="input w-48" disabled={!editable} value={x.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
-              <td><input className="input w-28" type="number" disabled={!editable} value={x.valor_unitario} onChange={(e) => set({ valor_unitario: n(e.target.value) })} /></td>
+              <td><input className="input w-48" disabled={!libre} value={x.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
+              <td><input className="input w-28" type="number" disabled={!libre} value={x.valor_unitario} onChange={(e) => set({ valor_unitario: n(e.target.value) })} /></td>
               <td><input className="input w-16" type="number" step="any" disabled={!editable} value={x.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
-              <td><input className="input w-20" type="number" disabled={!editable} placeholder="Contrato" value={x.vida_util_meses ?? ""} onChange={(e) => set({ vida_util_meses: e.target.value === "" ? null : n(e.target.value) })} /></td>
-              <td><input className="input w-20" type="number" disabled={!editable} value={x.entregas_anio ?? ""} onChange={(e) => set({ entregas_anio: e.target.value === "" ? null : n(e.target.value) })} /></td>
+              <td><input className="input w-20" type="number" disabled={!libre} placeholder="Contrato" value={x.vida_util_meses ?? ""} onChange={(e) => set({ vida_util_meses: e.target.value === "" ? null : n(e.target.value) })} /></td>
+              <td><input className="input w-20" type="number" disabled={!libre} value={x.entregas_anio ?? ""} onChange={(e) => set({ entregas_anio: e.target.value === "" ? null : n(e.target.value) })} /></td>
               {conTipo && (
                 <td><select className="input w-36" disabled={!editable} value={x.tipo_item ?? "OTROS"} onChange={(e) => set({ tipo_item: e.target.value })}>
                   {TIPOS_MFP.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></td>

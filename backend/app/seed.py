@@ -16,10 +16,12 @@ from app.models import Empresa, EmpresaApp, Permiso, Rol, Usuario, UsuarioEmpres
 
 def seed(db: Session) -> None:
     existentes = {p.codigo: p for p in db.scalars(select(Permiso))}
+    nuevos = set()
     for codigo, (modulo, descripcion) in todos_los_permisos().items():
         p = existentes.get(codigo)
         if p is None:
             db.add(Permiso(codigo=codigo, modulo=modulo, descripcion=descripcion))
+            nuevos.add(codigo)
         else:
             p.modulo, p.descripcion = modulo, descripcion
     db.flush()
@@ -32,6 +34,9 @@ def seed(db: Session) -> None:
         elif nombre == "Administrador":
             # El administrador siempre conserva todos los permisos, incluidos los nuevos.
             rol.permisos = list(permisos.values())
+        else:
+            # Un permiso que se crea ahora llega también a los roles base que ya existían y lo traen en su lista
+            rol.permisos = rol.permisos + [permisos[c] for c in codigos if c in nuevos and permisos[c] not in rol.permisos]
     db.flush()
 
     # Empresas iniciales (en una base existente las crea la migración 0014 con sus datos)

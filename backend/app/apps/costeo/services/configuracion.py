@@ -33,6 +33,8 @@ SERVICIOS = [
     ("Servicio de vigilancia 8 horas DIURNO de lunes a domingo todo el mes, dotado con medio de comunicación", 3904692, 1.1),
     ("Servicio de vigilancia 8 horas NOCTURNO de lunes a domingo todo el mes, dotado con medio de comunicación", 5118536, 1.1),
     ("Servicio de vigilancia y seguridad privada 12 horas de lunes a sábado, apoyo en porterías (sin arma)", 6556331, 1.5),
+    # Tarifa por definir (la pone el área contable en Configuración)
+    ("Servicio de vigilancia 12 horas de lunes a viernes", 0, 1),
 ]
 
 # (nombre, valor, vida útil en meses, entregas al año, por hombre); vida útil vacía = los meses del contrato
@@ -41,7 +43,7 @@ DOTACION_TARIFA = [
     ("OVEROL", 73780, None, 1, True), ("GOLEANA", 21301, None, 1, True), ("CORBATA", 14042, None, 1, True),
     ("CORREA", 15470, None, 1, True), ("APELLIDOS (PAR)", 5950, None, 2, True), ("BOTAS PUNTERA", 73780, None, 1, True),
     ("CALZADO HOMBRE", 49861, None, 2, True), ("CALZADO MUJER", 46410, None, 2, True), ("CAPA IMPERMEABLE", 48385, 12, None, False),
-    ("ARMA DE FUEGO", 0, 60, None, False), ("ARMA TRAUMÁTICA", 1666666, 60, None, False), ("ARMA NO LETAL", 700000, 60, None, False),
+    ("ARMA DE FUEGO", 0, 60, None, False), ("ARMA DE FOGEO", 0, 60, None, False), ("ARMA TRAUMÁTICA", 1666666, 60, None, False), ("ARMA NO LETAL", 700000, 60, None, False),
     ("CHAPUZA EXTERNA", 25595, 24, None, False), ("RADIO KENWOOD", 987700, 36, None, False), ("PORTA RADIOS", 33915, 24, None, False),
     ("CARGADOR DE RADIO", 131264, 24, None, False), ("TONFA CON PORTA TONFA", 31535, 24, None, False),
     ("MINUTAS", 13866, None, 3, True), ("EXÁMENES MÉDICOS (OSTEOMUSCULAR, AUDIOMETRÍA Y VISIOMETRÍA)", 68000, None, 1, True),
@@ -69,6 +71,16 @@ OTROS = [
 TIPOS_DOCUMENTO = [("PEL", "Pago electrónico"), ("FV", "Factura de venta"), ("FC", "Factura de compra / proveedor"),
                    ("NC", "Nota crédito"), ("ND", "Nota débito"), ("RC", "Recibo de caja"), ("NCT", "Nota de contabilidad / cruce"),
                    ("OC", "Orden de compra")]
+# A qué puestos aplica cada elemento de la dotación de la tarifa en el costeo automático (lo ajusta compras);
+# los que no están aquí no entran solos (se agregan a mano)
+APLICA_INICIAL = {
+    "PANTALÓN": "gala", "CAMISA": "gala", "CORBATA": "gala", "GOLEANA": "gala", "CORREA": "gala", "APELLIDOS (PAR)": "gala",
+    "CALZADO HOMBRE": "gala", "OVEROL": "overol", "BOTAS PUNTERA": "overol",
+    "CAPA IMPERMEABLE": "todos", "RADIO KENWOOD": "todos", "PORTA RADIOS": "todos", "CARGADOR DE RADIO": "todos",
+    "TONFA CON PORTA TONFA": "todos", "MINUTAS": "todos", "EXÁMENES MÉDICOS (OSTEOMUSCULAR, AUDIOMETRÍA Y VISIOMETRÍA)": "todos",
+    "PRUEBAS DE SPA": "todos", "CHAPUZA EXTERNA": "arma", "ARMA DE FUEGO": "fuego", "ARMA DE FOGEO": "fogeo",
+    "ARMA TRAUMÁTICA": "traumatica",
+}
 POR_HOMBRE_PUESTO = {"CHAQUETAS", "PITOS", "BOTAS PANTANERAS"}
 
 
@@ -91,7 +103,8 @@ def sembrar(db: Session) -> None:
         fuente_c, fuente_d = "Compras (16/03/2026)", "Fabian Sabogal (01/03/2026)"
         for nombre, valor, vida, entregas, por_hombre in DOTACION_TARIFA:
             db.add(CstCatalogoCosto(grupo="dotacion_tarifa", nombre=nombre, valor_unitario=valor, vida_util_meses=vida,
-                                    entregas_anio=entregas, por_hombre=por_hombre, fuente=fuente_c))
+                                    entregas_anio=entregas, por_hombre=por_hombre, fuente=fuente_c,
+                                    aplica=APLICA_INICIAL.get(nombre, ""), cantidad=1))
         for nombre, valor, vida in DOTACION_PUESTO:
             db.add(CstCatalogoCosto(grupo="dotacion_puesto", nombre=nombre, valor_unitario=valor, vida_util_meses=vida,
                                     por_hombre=nombre in POR_HOMBRE_PUESTO, fuente=fuente_d))

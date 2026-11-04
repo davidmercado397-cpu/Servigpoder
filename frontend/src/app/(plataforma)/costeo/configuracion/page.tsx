@@ -11,7 +11,11 @@ type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "
 type Parametro = { clave: string; valor: number; nombre: string; grupo: string; ayuda: string };
 type RangoC = { hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type Servicio = { id?: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
-type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean; activo: boolean; fuente: string; actualizado_en?: string };
+type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: number; vida_util_meses: number | null; entregas_anio: number | null; por_hombre: boolean;
+  aplica?: string; cantidad?: number; activo: boolean; fuente: string; actualizado_en?: string };
+// Dotación de la tarifa en el costeo por puestos: a qué puestos aplica cada elemento
+const APLICA: [string, string][] = [["", "Solo a mano"], ["todos", "Todos los puestos"], ["gala", "Dotación de gala"], ["overol", "Dotación de overol"],
+  ["arma", "Puestos con arma (cualquiera)"], ["fuego", "Arma de fuego"], ["fogeo", "Arma de fogeo"], ["traumatica", "Arma traumática"]];
 
 const PESTANAS: [Pestana, string][] = [
   ["parametros", "Parámetros"], ["comisiones", "Comisiones"], ["servicios", "Servicios y tarifas"], ["dotacion_tarifa", "Dotación de la tarifa"],
@@ -21,6 +25,7 @@ const PESTANAS: [Pestana, string][] = [
 export default function Configuracion() {
   const puede = usePermiso("costeo.configurar");
   const precios = usePermiso("costeo.precios");
+  const contable = usePermiso("costeo.contable");
   const [p, setP] = useState<Pestana>("parametros");
   return (
     <>
@@ -32,7 +37,7 @@ export default function Configuracion() {
       <Pestanas opciones={PESTANAS} valor={p} onChange={setP} />
       {p === "parametros" && <Parametros puede={puede} />}
       {p === "comisiones" && <Comisiones puede={puede} />}
-      {p === "servicios" && <Servicios puede={puede} />}
+      {p === "servicios" && <Servicios puede={puede || contable} />}
       {(p === "dotacion_tarifa" || p === "dotacion_puesto" || p === "otros") && <Catalogo key={p} grupo={p} puede={puede || precios} />}
       {p === "tipos" && <Tipos puede={puede} />}
       {p === "documentos" && <Documentos puede={puede} />}
@@ -184,7 +189,9 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
           const viejos = lista.filter((x) => x.activo && x.actualizado_en && Date.now() - new Date(x.actualizado_en).getTime() > 183 * 864e5).length;
           return viejos > 0 ? <div className="mb-3"><Alerta tipo="info">{viejos} precios llevan más de 6 meses sin actualizar.</Alerta></div> : null;
         })()}
-        {puede && !edicion && <button className="btn-primario" onClick={() => setEdicion({ grupo, nombre: "", valor_unitario: 0, vida_util_meses: null, entregas_anio: null, por_hombre: false, activo: true, fuente: "" })}><Plus className="h-4 w-4" /> Elemento</button>}
+        {grupo === "dotacion_tarifa" && <p className="mb-3 text-sm text-slate-500">En el costeo por puestos, cada elemento entra solo en los puestos a los que aplica
+          (según la dotación y el arma que escoge el comercial), con su cantidad por hombre o por puesto.</p>}
+        {puede && !edicion && <button className="btn-primario" onClick={() => setEdicion({ grupo, nombre: "", valor_unitario: 0, vida_util_meses: null, entregas_anio: null, por_hombre: false, aplica: "", cantidad: 1, activo: true, fuente: "" })}><Plus className="h-4 w-4" /> Elemento</button>}
         {edicion && (
           <div className="grid gap-3 sm:grid-cols-4 sm:items-end">
             <div className="sm:col-span-2"><label className="label">Nombre</label><input className="input" value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} /></div>
@@ -192,7 +199,12 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
             <div><label className="label">Fuente</label><input className="input" value={edicion.fuente} onChange={(e) => setEdicion({ ...edicion, fuente: e.target.value })} /></div>
             <div><label className="label">Vida útil (meses)</label><input className="input" type="number" value={edicion.vida_util_meses ?? ""} onChange={(e) => setEdicion({ ...edicion, vida_util_meses: num(e.target.value) })} /></div>
             <div><label className="label">Entregas al año</label><input className="input" type="number" step="any" value={edicion.entregas_anio ?? ""} onChange={(e) => setEdicion({ ...edicion, entregas_anio: num(e.target.value) })} /></div>
-            <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={edicion.por_hombre} onChange={(e) => setEdicion({ ...edicion, por_hombre: e.target.checked })} /> Uno por hombre</label>
+            <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={edicion.por_hombre} onChange={(e) => setEdicion({ ...edicion, por_hombre: e.target.checked })} /> Por hombre (si no, por puesto)</label>
+            {grupo === "dotacion_tarifa" && <>
+              <div><label className="label">Aplica a</label><select className="input" value={edicion.aplica ?? ""} onChange={(e) => setEdicion({ ...edicion, aplica: e.target.value })}>
+                {APLICA.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
+              <div><label className="label">Cantidad {edicion.por_hombre ? "por hombre" : "por puesto"}</label><input className="input" type="number" step="any" min={0} value={edicion.cantidad ?? 1} onChange={(e) => setEdicion({ ...edicion, cantidad: Number(e.target.value) })} /></div>
+            </>}
             <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={edicion.activo} onChange={(e) => setEdicion({ ...edicion, activo: e.target.checked })} /> Activo</label>
             <div className="flex justify-end gap-2 sm:col-span-4"><button className="btn-secundario" onClick={() => setEdicion(null)}>Cancelar</button>
               <button className="btn-primario" onClick={async () => {
@@ -202,12 +214,15 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
         )}
       </div>
       <table className="tabla">
-        <thead><tr><th>Elemento</th><th className="text-right">Valor</th><th className="text-right">Vida útil</th><th className="text-right">Entregas/año</th><th>Por hombre</th><th>Fuente</th><th>Actualizado</th><th /></tr></thead>
+        <thead><tr><th>Elemento</th><th className="text-right">Valor</th><th className="text-right">Vida útil</th><th className="text-right">Entregas/año</th><th>Por hombre</th>
+          {grupo === "dotacion_tarifa" && <><th>Aplica a</th><th className="text-right">Cantidad</th></>}<th>Fuente</th><th>Actualizado</th><th /></tr></thead>
         <tbody>{lista.map((x) => (
           <tr key={x.id} className={x.activo ? "" : "opacity-50"}>
             <td>{x.nombre}</td><td className="text-right tabular-nums">{pesos(x.valor_unitario)}</td>
             <td className="text-right tabular-nums">{x.vida_util_meses ?? (x.entregas_anio === null ? "contrato" : "—")}</td>
-            <td className="text-right tabular-nums">{x.entregas_anio ?? "—"}</td><td>{x.por_hombre ? "Sí" : ""}</td><td className="text-xs text-slate-500">{x.fuente}</td>
+            <td className="text-right tabular-nums">{x.entregas_anio ?? "—"}</td><td>{x.por_hombre ? "Sí" : ""}</td>
+            {grupo === "dotacion_tarifa" && <><td className="text-xs">{APLICA.find(([v]) => v === (x.aplica ?? ""))?.[1]}</td><td className="text-right tabular-nums">{x.cantidad ?? 1}</td></>}
+            <td className="text-xs text-slate-500">{x.fuente}</td>
             <td className="whitespace-nowrap text-xs text-slate-500">{x.actualizado_en ? new Date(x.actualizado_en).toLocaleDateString("es-CO") : ""}</td>
             <td>{puede && <button onClick={() => setEdicion(x)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}</td>
           </tr>

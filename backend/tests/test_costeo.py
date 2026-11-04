@@ -360,3 +360,79 @@ def test_precios_y_horas_sin_documento(admin):
     assert admin.put(f"{API}/catalogo", json={**item, "valor_unitario": 99999}).json()["data"]["valor_unitario"] == 99999
     assert admin.put(f"{API}/parametros", json={"pct_renta": 30}).status_code == 403
     assert admin.put(f"{API}/servicios", json={"descripcion": "Nuevo servicio", "tarifa": 1, "hombres": 3}).status_code == 403
+
+
+# ---------------- Costeo por puestos: hombres y dotación automáticos; lo que solo cambia contable ----------------
+
+def test_dotacion_y_hombres_por_puesto():
+    from app.apps.costeo.services import puestos
+    catalogo = [
+        {"grupo": "dotacion_tarifa", "nombre": "CAMISA", "valor_unitario": 49385, "entregas_anio": 3, "por_hombre": True, "aplica": "gala", "cantidad": 1},
+        {"grupo": "dotacion_tarifa", "nombre": "OVEROL", "valor_unitario": 73780, "entregas_anio": 1, "por_hombre": True, "aplica": "overol", "cantidad": 1},
+        {"grupo": "dotacion_tarifa", "nombre": "RADIO", "valor_unitario": 987700, "vida_util_meses": 36, "por_hombre": False, "aplica": "todos", "cantidad": 1},
+        {"grupo": "dotacion_tarifa", "nombre": "CHAPUZA", "valor_unitario": 25595, "vida_util_meses": 24, "por_hombre": False, "aplica": "arma", "cantidad": 1},
+        {"grupo": "dotacion_tarifa", "nombre": "ARMA DE FOGEO", "valor_unitario": 500000, "vida_util_meses": 60, "por_hombre": False, "aplica": "fogeo", "cantidad": 1},
+        {"grupo": "dotacion_tarifa", "nombre": "JEAN", "valor_unitario": 103503, "entregas_anio": 3, "por_hombre": True, "aplica": "", "cantidad": 1},
+    ]
+    servicios = [
+        {"descripcion": "24 h", "cantidad": 2, "hombres": 3, "dotacion": "gala", "arma": "fogeo", "personal": "Guarda 4x2"},
+        {"descripcion": "12 h L-V", "cantidad": 1, "hombres": 1, "dotacion": "overol", "arma": "sin", "personal": "Guarda 5x2"},
+    ]
+    dot = {x["nombre"]: x["cantidad"] for x in puestos.dotacion_automatica(servicios, catalogo)}
+    assert dot == {"CAMISA": 6, "RADIO": 3, "CHAPUZA": 2, "ARMA DE FOGEO": 2, "OVEROL": 1}  # el jean no entra solo
+    personal = puestos.personal_automatico(servicios, [{"nombre": "Guarda 4x2"}, {"nombre": "Guarda 5x2"}])
+    assert [p["hombres"] for p in personal] == [6, 1]
+    # Un puesto sin tipo de personal va al primero; un costeo a mano no cambia
+    assert puestos.personal_automatico([{"cantidad": 1, "hombres": 1.5}], [{"nombre": "A"}, {"nombre": "B"}])[0]["hombres"] == 1.5
+    assert puestos.preparar({"servicios": servicios, "dotacion_tarifa": [{"nombre": "X"}]}, catalogo)["dotacion_tarifa"] == [{"nombre": "X"}]
+
+
+def test_comercial_no_cambia_lo_de_contable(admin):
+    roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
+    for usuario, rol in (("comercial", "Comercial costeo"), ("contable", "Contable costeo")):
+        admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": usuario, "nombre": usuario, "password": "clave-segura-1",
+                                          "roles": [roles[rol]]})
+    servicio = next(s for s in admin.get(f"{API}/servicios").json()["data"] if "lunes a viernes" in s["descripcion"])
+    assert servicio["hombres"] == 1
+    cid = admin.post(f"{API}/clientes", json={"nit": "77", "nombre": "Ventura"}).json()["data"]["id"]
+    admin.post("/api/auth/logout")
+
+    entrar(admin, "comercial", "clave-segura-1")
+    c = admin.post(f"{API}/costeos", json={"cliente_id": cid, "nombre": "Ventura"}).json()["data"]
+    assert c["datos"]["automatico"]
+    datos = {**c["datos"], "ica_por_mil": 1,
+             "servicios": [{"servicio_id": servicio["id"], "descripcion": servicio["descripcion"], "puesto": "Recepción", "cantidad": 2,
+                            "tarifa": 99, "hombres": 7, "dotacion": "gala", "arma": "traumatica"}],
+             "personal": [{"nombre": "Guarda", "hombres": 50, "salario": 5000000, "horas_extras": 800000, "auxilio_transporte": False,
+                           "auxilios_no_salariales": 100000, "rodamiento": 0, "ley_2101": 1}],
+             "dotacion_puesto": [{"nombre": "LINTERNAS", "valor_unitario": 1, "cantidad": 2, "vida_util_meses": 24}]}
+    g = admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Ventura", "datos": datos})
+    assert g.status_code == 200, g.text
+    d = g.json()["data"]["datos"]
+    s, p = d["servicios"][0], d["personal"][0]
+    assert (s["tarifa"], s["hombres"], d["ica_por_mil"]) == (servicio["tarifa"], 1, None)  # tarifa, hombres e ICA: los del catálogo
+    assert p["hombres"] == 2 and p["salario"] is None and p["auxilio_transporte"] and "ley_2101" not in p  # 2 puestos × 1 hombre
+    assert (p["horas_extras"], p["auxilios_no_salariales"]) == (800000, 100000)  # esto sí lo cambia el comercial
+    assert d["dotacion_puesto"][0]["valor_unitario"] == 57120  # el precio de compras
+    nombres = {x["nombre"] for x in d["dotacion_tarifa"]}
+    assert {"CAMISA", "PANTALÓN", "ARMA TRAUMÁTICA", "CHAPUZA EXTERNA", "RADIO KENWOOD"} <= nombres and "OVEROL" not in nombres
+    camisa = next(x for x in d["dotacion_tarifa"] if x["nombre"] == "CAMISA")
+    assert camisa["cantidad"] == 2 and camisa["valor_unitario"] == 49385
+    # Un elemento que no está en el catálogo de compras no lo agrega el comercial
+    malo = {**d, "dotacion_puesto": [{"nombre": "INVENTADO", "valor_unitario": 1, "cantidad": 1}]}
+    assert admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Ventura", "datos": malo}).status_code == 422
+    admin.post("/api/auth/logout")
+
+    # Contable sí ajusta tarifa, hombres, salario e ICA; el comercial, al guardar después, no los pisa
+    entrar(admin, "contable", "clave-segura-1")
+    d2 = {**d, "ica_por_mil": 4.5, "servicios": [{**s, "tarifa": 8000000, "hombres": 1.5}], "personal": [{**p, "salario": 2000000}]}
+    g = admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Ventura", "datos": d2}).json()["data"]
+    assert g["datos"]["ica_por_mil"] == 4.5 and g["datos"]["personal"][0]["hombres"] == 3 and g["resultado"]["tarifa_decreto"] == 16000000
+    assert admin.put(f"{API}/servicios", json={**servicio, "tarifa": 9000000}).status_code == 200  # y la tarifa del catálogo
+    admin.post("/api/auth/logout")
+    entrar(admin, "comercial", "clave-segura-1")
+    d3 = {**g["datos"], "ica_por_mil": None, "personal": [{**g["datos"]["personal"][0], "salario": None, "horas_extras": 900000}]}
+    g = admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Ventura", "datos": d3}).json()["data"]
+    assert g["datos"]["ica_por_mil"] == 4.5 and g["datos"]["personal"][0]["salario"] == 2000000
+    assert g["datos"]["personal"][0]["horas_extras"] == 900000 and g["datos"]["servicios"][0]["tarifa"] == 8000000
+    assert admin.put(f"{API}/servicios", json={**servicio, "tarifa": 1}).status_code == 403

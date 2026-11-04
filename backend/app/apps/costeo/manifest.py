@@ -11,11 +11,15 @@ PERMISOS: dict[str, tuple[str, str]] = {
     "costeo.costear": ("Costeo", "Crear, editar y versionar costeos"),
     "costeo.configurar": ("Configuración", "Editar parámetros, comisiones, servicios, catálogos de costos y tipos de ítem"),
     "costeo.precios": ("Configuración", "Actualizar los precios de dotación y otros costos directos (compras y contabilidad)"),
+    "costeo.contable": ("Costeo", "Área contable: en el costeo cambiar tarifas, hombres, salario, auxilio de transporte, Ley 2101 e ICA; "
+                                  "en la configuración, los hombres y tarifas de los servicios"),
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
     "Comercial costeo": ("Costeo y MFP's: hace costeos y registra la ejecución de las MFP", ["costeo.ver", "costeo.movimientos", "costeo.costear"]),
     "Programador MFP": ("Costeo y MFP's: consulta las MFP y registra las solicitudes de horas", ["costeo.ver", "costeo.movimientos"]),
+    "Contable costeo": ("Costeo y MFP's: el área contable ajusta tarifas, hombres, salarios e impuestos de los costeos",
+                        ["costeo.ver", "costeo.contable"]),
     "Precios costeo": ("Costeo y MFP's: compras y contabilidad actualizan los precios de dotación y otros costos", ["costeo.ver", "costeo.precios"]),
     "Administrador costeo": ("Costeo y MFP's: todo, incluida la autorización para superar topes", list(PERMISOS)),
 }

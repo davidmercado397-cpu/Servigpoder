@@ -1,7 +1,7 @@
 """Motor de validación de la nómina (modalidades FIJAS).
 
 Para cada persona de cada nómina cargada (quincenal: 1.ª quincena del 1 al 15 o 2.ª del 16 al 30; mensual:
-días 1 al 30; el día 31 no suma) se calcula, con la programación del mes:
+días 1 al 30; el día 31 no suma al salario) se calcula, con la programación del mes:
 
 - días pagables: días con turno, Z, L, IND… (todo código sin el check "Descuenta"); también son los días
   que llevan auxilio de transporte;
@@ -9,6 +9,10 @@ días 1 al 30; el día 31 no suma) se calcula, con la programación del mes:
 - el valor esperado de cada concepto de la modalidad (días × valor por día) y de cada cuota;
 
 y se compara con lo pagado. Las diferencias se vuelven alertas. Funciones puras: no tocan la base.
+
+Día 31 (meses de 31 días, en la 2.ª quincena y en la mensual): el salario va en base 30 y no lo incluye, pero si
+ese día es pagable (turno, Z, L, IND…) se le pagan las extras y recargos (130), la Ley 2101 (132) de la modalidad del
+puesto de ese día y el auxilio de transporte de ese día.
 
 Vacaciones: los días trabajados ANTES del primer día de vacaciones del periodo se pagan en la liquidación de
 vacaciones (no se esperan en la nómina); los de después del regreso, en la nómina normal. Toda persona con
@@ -57,6 +61,8 @@ INFORMATIVAS = {"VACACIONES_VERIFICAR"}
 CUOTA_ACTIVA = {"EN PROCESO", "PENDIENTE"}
 CONCEPTO_SALARIO = "100"
 CONCEPTO_AUXILIO = "103"
+# Conceptos de la modalidad que se pagan también el día 31 (el salario no)
+CONCEPTOS_DIA_31 = ("130", "132")
 # Devengos que son horas extras o recargos por hora (además de los de la modalidad)
 CONCEPTOS_EXTRAS = {"104", "105", "106", "107", "108", "109", "111", "115", "116", "142", "143"}
 
@@ -185,6 +191,10 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
         base_dias = 15 if nomina == QUINCENAL else 30
         fechas = [desde + timedelta(days=i) for i in range((hasta - desde).days + 1)]
         faltan_mes_corto = base_dias - len(fechas) if hasta.day == calendar.monthrange(anio, mes)[1] else 0
+        # El 31 (si el periodo llega a fin de mes y la programación lo trae): extras, Ley 2101 y auxilio de ese día
+        dia_31 = (hasta + timedelta(days=1)) if hasta.day == 30 and calendar.monthrange(anio, mes)[1] == 31 else None
+        if dia_31 and p_hasta < dia_31:
+            dia_31 = None
         en_nomina: set[str] = set(archivo["personas"])
 
         for ced, pago in archivo["personas"].items():
@@ -193,7 +203,8 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
                 continue
             contrato = contratos.get(ced)
             persona = _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas_por_persona.get(ced, []),
-                               codigos, puestos, puestos_aprobados, mods, conceptos_modalidad, desc_concepto, p, sin_modalidad)
+                               codigos, puestos, puestos_aprobados, mods, conceptos_modalidad, desc_concepto, p, sin_modalidad,
+                               dia_31)
             a = _alertas_persona(persona, pago, contrato, trat, nomina, base_dias, p)
             a += _alertas_cuotas(persona, pago, cuotas_por_persona.get(ced, []), conceptos_cuota, archivo["conceptos"], nomina, p,
                                  quincena)
@@ -226,14 +237,14 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 
 
 def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas, codigos, puestos, puestos_aprobados,
-             mods, conceptos_modalidad, desc_concepto, p, sin_modalidad) -> dict:
+             mods, conceptos_modalidad, desc_concepto, p, sin_modalidad, dia_31: date | None = None) -> dict:
     dias: dict[str, dict] = {}
     pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = 0
     por_modalidad: dict[str, int] = defaultdict(int)
     esperado: dict[str, float] = defaultdict(float)
     ultimo_dia_modalidad: str | None = None
     por_dia = []
-    for d in fechas:
+    for d in fechas + ([dia_31] if dia_31 else []):
         candidatos = []
         for f in filas:
             crudo = f["dias"].get(d.isoformat())
@@ -243,6 +254,7 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
                 candidatos.append((f, crudo, cod, info))
         por_dia.append((d, candidatos))
     # Primer día de vacaciones del periodo: lo trabajado antes se paga en la liquidación de vacaciones
+    dia_31_cand = por_dia.pop()[1] if dia_31 else []
     dias_vac = [d for d, cand in por_dia if cand and all(c[3].descuenta for c in cand) and any(c[3].vacaciones for c in cand)]
     primer_vac = dias_vac[0] if dias_vac else None
     for d, candidatos in por_dia:
@@ -290,6 +302,24 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             for c, v in mods[ultimo_dia_modalidad]["conceptos"].items():
                 esperado[c] += v["valor"] * faltan_mes_corto
 
+    # Día 31: fuera de la base 30 del salario, pero si es pagable lleva las extras, la Ley 2101 y el auxilio de ese día
+    trabajo_31 = False
+    pagan_31 = [c for c in dia_31_cand if not c[3].descuenta]
+    if dia_31 and pagan_31:
+        f, crudo, cod, _ = next((c for c in pagan_31 if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan_31[0])
+        trabajo_31 = True
+        info_puesto = puestos.get((f["ubicacion"], f["puesto"]))
+        modalidad = info_puesto["modalidad"] if info_puesto else None
+        if modalidad:
+            for c, v in mods[modalidad]["conceptos"].items():
+                if c in CONCEPTOS_DIA_31:
+                    esperado[c] += v["valor"]
+        dias[dia_31.isoformat()] = {"codigo": crudo, "clase": "dia_31", "puesto": f["puesto"], "ubicacion": f["ubicacion"],
+                                    "modalidad": modalidad}
+    elif dia_31 and dia_31_cand:
+        dias[dia_31.isoformat()] = {"codigo": dia_31_cand[0][1], "clase": "novedad", "puesto": dia_31_cand[0][0]["puesto"]}
+    dias_aux = pagables + trabajo_31
+
     # Puestos donde está programada: modalidad que aplica, su origen y días en cada uno
     en_periodo = [d.isoformat() for d in fechas]
     puestos_persona = []
@@ -325,13 +355,13 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "tiene_programacion": any(d["clase"] != "vacio" for d in dias.values()),
         "dias": dias,
         "conteo": {"pagables": pagables, "novedad": novedad, "vacaciones": vacaciones, "vacios": vacios,
-                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones},
+                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones, "dia_31": int(trabajo_31)},
         "vacaciones": {"desde": dias_vac[0].isoformat(), "hasta": dias_vac[-1].isoformat(), "dias": len(dias_vac),
                        "antes": antes_vacaciones} if dias_vac else None,
         "modalidades": dict(por_modalidad),
         "dias_salario": round(horas.get(CONCEPTO_SALARIO, 0) / p.horas_dia, 2) if p.horas_dia else 0,
         "auxilio": {"pagado": devengos.get(CONCEPTO_AUXILIO, 0), "dias_pagados": round(devengos.get(CONCEPTO_AUXILIO, 0) / (p.auxilio_transporte / 30), 2),
-                    "dias_esperados": pagables, "esperado": round(pagables * p.auxilio_transporte / 30)},
+                    "dias_esperados": dias_aux, "esperado": round(dias_aux * p.auxilio_transporte / 30)},
         "conceptos": [{"concepto": c, "descripcion": desc_concepto.get(c, ""), "esperado": round(esperado.get(c, 0)),
                        "pagado": round(devengos.get(c, 0))} for c in usados],
         "extras": {c: devengos[c] for c in CONCEPTOS_EXTRAS if devengos.get(c)},
@@ -391,22 +421,24 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
 
     # Auxilio de transporte: días laborados + descansos (sin novedades), si gana hasta 2 SMLMV
     aux = per["auxilio"]
-    if pagables > 0 and (per["salario"] or 0) <= 2 * p.smlmv:
+    dias_aux = aux["dias_esperados"]
+    con_31 = " (incluye el día 31)" if c.get("dia_31") else ""
+    if dias_aux > 0 and (per["salario"] or 0) <= 2 * p.smlmv:
         if aux["pagado"] <= 0:
-            alerta("AUX_CERO", f"Tiene {pagables} días con derecho a auxilio de transporte y se le pagan 0 días.",
+            alerta("AUX_CERO", f"Tiene {dias_aux} días con derecho a auxilio de transporte{con_31} y se le pagan 0 días.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=0)
         elif abs(aux["pagado"] - aux["esperado"]) > p.tolerancia:
             alerta("VACACIONES_CON_PAGO" if vac and aux["pagado"] > aux["esperado"] else "AUX_DIFERENTE",
                    f"Auxilio de transporte por {aux['dias_pagados']:g} días ({pesos(aux['pagado'])}); "
-                   f"le corresponden {pagables} días ({pesos(aux['esperado'])}){en_vac}.",
+                   f"le corresponden {dias_aux} días{con_31} ({pesos(aux['esperado'])}){en_vac}.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=aux["pagado"])
-    elif pagables == 0 and aux["pagado"] > p.tolerancia:
+    elif dias_aux == 0 and aux["pagado"] > p.tolerancia:
         alerta("VACACIONES_CON_PAGO" if vac else "AUX_DIFERENTE",
                f"Se le paga auxilio de transporte ({pesos(aux['pagado'])}) sin días a pagar en esta nómina{en_vac}.",
                referencia=CONCEPTO_AUXILIO, esperado=0, pagado=aux["pagado"])
 
     # Modalidad: concepto por concepto
-    if pagables > 0:
+    if pagables > 0 or c.get("dia_31"):
         for x in per["conceptos"]:
             dif = x["pagado"] - x["esperado"]
             if dif > p.tolerancia:

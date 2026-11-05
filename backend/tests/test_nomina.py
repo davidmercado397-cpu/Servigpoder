@@ -434,3 +434,19 @@ def test_dia_31_paga_los_conceptos_de_la_modalidad(admin):
     assert d["auxilio"]["dias_esperados"] == 15
     ind = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1009").json()["data"]
     assert ind["dias"]["2026-10-31"]["clase"] == "dia_31" and ind["auxilio"]["dias_esperados"] == 15
+
+
+def test_plano_de_ajustes_siesa(admin):
+    # Carla: 130 pagado 400.000 y esperado 300.000 → negativo; solo conceptos de la modalidad (nunca salario ni auxilio)
+    pid = _cargar_todo(admin)
+    r = admin.get(f"{API}/periodos/{pid}/plano-ajustes")
+    assert r.status_code == 200
+    libro = load_workbook(BytesIO(r.content))
+    assert libro.sheetnames == ["Positivos", "Negativos"]
+    filas = {h: [list(f) for f in libro[h].iter_rows(values_only=True)] for h in libro.sheetnames}
+    assert filas["Positivos"][0] == filas["Negativos"][0] == ["Cédula", "Concepto", "Valor"]
+    neg = {(c, k): v for c, k, v in filas["Negativos"][1:]}
+    assert neg[("1003", "130")] == -100000
+    todas = filas["Positivos"][1:] + filas["Negativos"][1:]
+    assert all(v > 0 for _, _, v in filas["Positivos"][1:]) and all(v < 0 for _, _, v in filas["Negativos"][1:])
+    assert not {k for _, k, _ in todas} & {"100", "103"}

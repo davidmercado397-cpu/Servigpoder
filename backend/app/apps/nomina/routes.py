@@ -400,6 +400,49 @@ def guardar_parametros(data: ParametrosIn, request: Request, db: DbSession, actu
 
 # --- Informe en Excel --------------------------------------------------------------------------------
 
+# Alertas de conceptos de la modalidad (130, 132, 128, 129…) que van al plano de ajustes de SIESA
+TIPOS_AJUSTE = ("MODALIDAD_MAYOR", "MODALIDAD_MENOR")
+
+
+def ajustes_modalidad(db: Session, periodo_id: int) -> dict[tuple[str, str], int]:
+    """(cédula, concepto) → valor a ajustar = esperado − pagado (positivo: se le debe pagar; negativo: descontar)."""
+    ajustes: dict[tuple[str, str], int] = {}
+    for a in db.scalars(select(NomAlerta).where(NomAlerta.periodo_id == periodo_id).order_by(NomAlerta.cedula, NomAlerta.referencia)):
+        if not ((a.datos or {}).get("ajuste") or a.tipo in TIPOS_AJUSTE) or a.esperado is None or a.pagado is None:
+            continue
+        clave = (a.cedula, a.referencia)
+        ajustes[clave] = ajustes.get(clave, 0) + round(float(a.esperado) - float(a.pagado))
+    return {k: v for k, v in ajustes.items() if v}
+
+
+@router.get("/periodos/{periodo_id}/plano-ajustes", dependencies=[Depends(limitar("exportar", 10, 60))])
+def plano_ajustes(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Excel para cargar a SIESA: cédula, concepto y valor a ajustar. Hoja "Positivos" (se le debe pagar) y hoja
+    "Negativos" (se pagó de más: valor con signo menos). Todas las diferencias de conceptos de la modalidad."""
+    p = _periodo(db, periodo_id)
+    ajustes = ajustes_modalidad(db, p.id)
+    buf = BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True})
+    for nombre, filas in (("Positivos", [(k, v) for k, v in ajustes.items() if v > 0]),
+                          ("Negativos", [(k, v) for k, v in ajustes.items() if v < 0])):
+        hoja = libro.add_worksheet(nombre)
+        hoja.write_row(0, 0, ["Cédula", "Concepto", "Valor"], negrita)
+        for i, ((cedula, concepto), valor) in enumerate(filas, start=1):
+            hoja.write_string(i, 0, cedula)
+            hoja.write_string(i, 1, concepto)
+            hoja.write_number(i, 2, valor)
+        hoja.set_column(0, 0, 14)
+        hoja.set_column(1, 2, 12)
+    libro.close()
+
+    auditar(db, request, "nom_plano_ajustes", actual.id, periodo=f"{p.mes:02d}/{p.anio}", filas=len(ajustes))
+    db.commit()
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="ajustes_siesa_{p.nomina}{p.quincena or ''}_{p.anio}-{p.mes:02d}.xlsx"'})
+
+
 @router.get("/periodos/{periodo_id}/informe", dependencies=[Depends(limitar("exportar", 10, 60))])
 def informe(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     p = _periodo(db, periodo_id)

@@ -469,13 +469,13 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
                 alerta("VACACIONES_CON_PAGO" if vac else "MODALIDAD_MAYOR",
                        f"{x['concepto']} {x['descripcion']}: pagado {pesos(x['pagado'])}, esperado {pesos(x['esperado'])} "
                        f"({pagables} días{mas_31(x['concepto'])}){en_vac}.",
-                       referencia=x["concepto"], esperado=x["esperado"], pagado=x["pagado"])
+                       referencia=x["concepto"], esperado=x["esperado"], pagado=x["pagado"], ajuste=True)
             elif dif < -p.tolerancia:
                 falta_31 = (" Le falta el pago del día 31." if mas_31(x["concepto"]) and abs(-dif - valor_31.get(x["concepto"], 0)) <= p.tolerancia
                             else "")
                 alerta("MODALIDAD_MENOR", f"{x['concepto']} {x['descripcion']}: pagado {pesos(x['pagado'])}, esperado {pesos(x['esperado'])} "
                                           f"({pagables} días{mas_31(x['concepto'])}).{falta_31}",
-                       referencia=x["concepto"], esperado=x["esperado"], pagado=x["pagado"])
+                       referencia=x["concepto"], esperado=x["esperado"], pagado=x["pagado"], ajuste=True)
     return a
 
 

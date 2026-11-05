@@ -47,7 +47,7 @@ export type PersonaDetalle = {
   cedula: string; nombre: string; nomina: string; grupo: string; tratamiento: string; cargo: string; salario: number;
   contrato: { activo: boolean; tipo_nomina: string; grupo: string; ingreso: string | null; cargo: string } | null;
   desde: string; hasta: string; dias: Record<string, Dia>;
-  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number; antes_vacaciones?: number; dia_31?: number; novedad_31?: number };
+  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number; antes_vacaciones?: number };
   vacaciones: { desde: string; hasta: string; dias: number; antes: number } | null;
   modalidades: Record<string, number>; dias_salario: number;
   auxilio: { pagado: number; dias_pagados: number; dias_esperados: number; esperado: number };
@@ -92,8 +92,6 @@ export const VACACIONES = "VACACIONES_VERIFICAR";
 export const CLASE_DIA: Record<string, [string, string]> = {
   pagable: ["Pagable", "bg-marca-50 text-marca-800"],
   antes_vacaciones: ["Trabajado antes de vacaciones (va en la liquidación)", "bg-sky-50 text-sky-800"],
-  dia_31: ["Día 31: conceptos de la modalidad (130, 132…); sin salario ni auxilio", "bg-amber-50 text-amber-800"],
-  dia_31_sin_pago: ["Día 31 sin pago (descanso después de una novedad)", "bg-slate-50 text-slate-500"],
   novedad: ["Novedad", "bg-violet-50 text-violet-700"],
   vacaciones: ["Vacaciones", "bg-violet-100 text-violet-800"],
   vacio: ["Sin programación", "bg-slate-50 text-slate-400"],

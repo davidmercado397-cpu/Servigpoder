@@ -562,9 +562,7 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
             )}
             <div className="grid gap-3 sm:grid-cols-4">
               {[
-                ["Días a pagar en esta nómina", d.conteo.pagables, [d.conteo.antes_vacaciones ? `${d.conteo.antes_vacaciones} antes de vacaciones van en la liquidación` : "turnos + descansos (Z, L, IND)",
-                  d.conteo.dia_31 ? "+ el 31: conceptos de la modalidad (sin salario ni auxilio)" : "",
-                  d.conteo.novedad_31 ? "el 31 fue novedad: un día menos de salario" : ""].filter(Boolean).join(" · ")],
+                ["Días a pagar en esta nómina", d.conteo.pagables, d.conteo.antes_vacaciones ? `${d.conteo.antes_vacaciones} antes de vacaciones van en la liquidación` : "turnos + descansos (Z, L, IND)"],
                 ["Días de salario pagados", d.dias_salario, "horas del concepto 100 ÷ 7"],
                 ["Días de novedad", d.conteo.novedad, d.conteo.vacaciones ? `${d.conteo.vacaciones} de vacaciones` : "descuentan"],
                 ["Neto", pesos(d.neto), `devengado ${pesos(d.devengado)}`],

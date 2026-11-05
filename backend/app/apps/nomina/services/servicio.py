@@ -23,7 +23,7 @@ LECTORES = {
 CODIGOS_BASE = {
     # código: (descripción, descuenta, vacaciones)
     "Z": ("Descanso", False, False), "L": ("Libre", False, False), "IND": ("Inducción", False, False),
-    "IND NOCHE": ("Inducción nocturna", False, False), "IND CORP": ("Inducción corporativa", False, False),
+    "IND NOCHE": ("Inducción nocturna", False, False), "IND CORP": ("Inducción corporativa", True, False),  # no paga nada
     "VAC": ("Vacaciones", True, True), "PRV": ("Programado a vacaciones", True, True),
     "LNR": ("Licencia no remunerada", True, False), "LRM": ("Licencia remunerada", True, False), "LIC": ("Licencia", True, False),
     "LUT": ("Licencia por luto", True, False), "IEG": ("Incapacidad por enfermedad general", True, False),

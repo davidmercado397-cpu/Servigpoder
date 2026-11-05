@@ -198,7 +198,7 @@ def test_escenario_completo(admin):
 def test_detalle_de_persona_y_dias(admin):
     pid = _cargar_todo(admin)
     d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1002").json()["data"]
-    assert d["conteo"] == {"pagables": 0, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0, "antes_vacaciones": 10, "induccion": 0}
+    assert d["conteo"] == {"pagables": 0, "novedad": 5, "vacaciones": 5, "vacios": 0, "sin_modalidad": 0, "antes_vacaciones": 10}
     assert d["vacaciones"] == {"desde": "2026-09-26", "hasta": "2026-09-30", "dias": 5, "antes": 10}
     assert d["dias_salario"] == 15 and d["auxilio"]["dias_esperados"] == 0
     c130 = next(x for x in d["conceptos"] if x["concepto"] == "130")
@@ -375,21 +375,19 @@ def test_primera_quincena(admin):
     assert admin.post(f"{API}/periodos", json={"anio": 2026, "mes": 9, "nomina": "quincenal", "quincena": 3}).status_code == 422
 
 
-def test_induccion_paga_salario_sin_auxilio_ni_128_130_132(admin):
-    # Ana con inducción el 16 y el 17 (IND e IND NOCHE): 15 días de salario; auxilio, 130 y 132 de 13 días
+def test_induccion_paga_completo_y_la_corporativa_no_paga(admin):
+    # Ana: IND el 16 e IND NOCHE el 17 se pagan como un turno; IND CORP el 18 descuenta (no paga nada)
     pid = _cargar_todo(admin)
     from tests.conftest import archivo as _archivo
+    corp = next(c for c in admin.get(f"{API}/codigos?q=IND").json()["data"] if c["codigo"] == "IND CORP")
+    assert corp["descuenta"]
     prog = load_workbook(BytesIO(_programacion()))
-    hoja = prog.active
-    for fila in hoja.iter_rows(min_row=6):
+    for fila in prog.active.iter_rows(min_row=6):
         if str(fila[0].value) == "1001":
-            fila[6 + 15].value, fila[6 + 16].value = "IND", "IND NOCHE"  # columnas de los días 16 y 17
+            fila[6 + 15].value, fila[6 + 16].value, fila[6 + 17].value = "IND", "IND NOCHE", "IND CORP"  # días 16, 17 y 18
     salida = BytesIO()
     prog.save(salida)
-    nomina = {**QUINCENAL, "1001": {**QUINCENAL["1001"], "DEVENGO_103": round(DIA_AUX * 13), "DEVENGO_130": 13 * 20000, "DEVENGO_132": 13 * 3000}}
-    for tipo, contenido in (("programacion", salida.getvalue()), ("quincenal", _nomina(nomina))):
-        assert admin.post(f"{API}/periodos/{pid}/archivos/{tipo}", files=_archivo(contenido, f"{tipo}.xlsx")).status_code == 200
+    assert admin.post(f"{API}/periodos/{pid}/archivos/programacion", files=_archivo(salida.getvalue(), "programacion.xlsx")).status_code == 200
     d = admin.get(f"{API}/periodos/{pid}/personas/quincenal/1001").json()["data"]
-    assert d["conteo"]["pagables"] == 15 and d["conteo"]["induccion"] == 2 and d["auxilio"]["dias_esperados"] == 13
-    assert {x["concepto"]: x["esperado"] for x in d["conceptos"]} == {"130": 260000, "132": 39000}
-    assert not {x for x in _alertas(admin, pid).get("1001", set()) if x[1] in {"100", "103", "130", "132"}}
+    assert d["conteo"]["pagables"] == 14 and d["conteo"]["novedad"] == 1 and d["auxilio"]["dias_esperados"] == 14
+    assert {x["concepto"]: x["esperado"] for x in d["conceptos"]} == {"130": 280000, "132": 42000}

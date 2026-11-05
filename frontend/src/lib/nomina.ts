@@ -47,7 +47,7 @@ export type PersonaDetalle = {
   cedula: string; nombre: string; nomina: string; grupo: string; tratamiento: string; cargo: string; salario: number;
   contrato: { activo: boolean; tipo_nomina: string; grupo: string; ingreso: string | null; cargo: string } | null;
   desde: string; hasta: string; dias: Record<string, Dia>;
-  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number; antes_vacaciones?: number; induccion?: number };
+  conteo: { pagables: number; novedad: number; vacaciones: number; vacios: number; sin_modalidad: number; antes_vacaciones?: number };
   vacaciones: { desde: string; hasta: string; dias: number; antes: number } | null;
   modalidades: Record<string, number>; dias_salario: number;
   auxilio: { pagado: number; dias_pagados: number; dias_esperados: number; esperado: number };

@@ -3,9 +3,9 @@
 Para cada persona de cada nómina cargada (quincenal: 1.ª quincena del 1 al 15 o 2.ª del 16 al 30; mensual:
 días 1 al 30; el día 31 no suma) se calcula, con la programación del mes:
 
-- días pagables: días con turno, Z, L, IND… (todo código sin el check "Descuenta"); también son los días
-  que llevan auxilio de transporte, salvo la inducción (IND): paga el salario, pero no auxilio de transporte,
-  extras (130), Ley 2101 (132) ni productividad (128);
+- días pagables: días con turno, Z, L, IND, IND NOCHE… (todo código sin el check "Descuenta"); también son los
+  días que llevan auxilio de transporte. La inducción (IND, IND NOCHE) se paga completa como un turno; la
+  inducción corporativa (IND CORP) lleva el check "Descuenta": no paga salario, auxilio ni conceptos;
 - la modalidad de cada día según el puesto donde trabajó (prioridad: modalidad del puesto > de la ubicación);
 - el valor esperado de cada concepto de la modalidad (días × valor por día) y de cada cuota;
 
@@ -58,13 +58,6 @@ INFORMATIVAS = {"VACACIONES_VERIFICAR"}
 CUOTA_ACTIVA = {"EN PROCESO", "PENDIENTE"}
 CONCEPTO_SALARIO = "100"
 CONCEPTO_AUXILIO = "103"
-# Inducción: paga el salario, pero no auxilio de transporte ni estos conceptos de la modalidad
-CODIGOS_INDUCCION = {"IND", "IND NOCHE"}
-CONCEPTOS_SIN_INDUCCION = ("128", "130", "132")
-
-
-def es_induccion(cod: str) -> bool:
-    return cod in CODIGOS_INDUCCION or cod.split(" ")[0] == "IND"
 # Devengos que son horas extras o recargos por hora (además de los de la modalidad)
 CONCEPTOS_EXTRAS = {"104", "105", "106", "107", "108", "109", "111", "115", "116", "142", "143"}
 
@@ -236,7 +229,7 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas, codigos, puestos, puestos_aprobados,
              mods, conceptos_modalidad, desc_concepto, p, sin_modalidad) -> dict:
     dias: dict[str, dict] = {}
-    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = induccion = 0
+    pagables = novedad = vacaciones = vacios = dias_sin_modalidad = antes_vacaciones = 0
     por_modalidad: dict[str, int] = defaultdict(int)
     esperado: dict[str, float] = defaultdict(float)
     ultimo_dia_modalidad: str | None = None
@@ -268,26 +261,20 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
             ultimo_dia_modalidad = None
             continue
         # El día se paga una vez, con la modalidad del puesto donde trabajó (si tiene turno, ese manda)
-        # Orden: horario o turno, luego la inducción y por último Z o L
-        f, crudo, cod, _ = min(pagan, key=lambda c: 0 if _HORARIO.match(c[1]) else 2 if c[2] in {"Z", "L"} else 1 if es_induccion(c[2]) else 0)
+        f, crudo, cod, _ = next((c for c in pagan if _HORARIO.match(c[1]) or c[2] not in {"Z", "L"}), pagan[0])
         if primer_vac and d < primer_vac:
             antes_vacaciones += 1
             dias[iso] = {"codigo": crudo, "clase": "antes_vacaciones", "puesto": f["puesto"], "ubicacion": f["ubicacion"]}
             continue
         pagables += 1
-        es_ind = not _HORARIO.match(crudo) and es_induccion(cod)
-        induccion += es_ind
         clave = (f["ubicacion"], f["puesto"])
         info_puesto = puestos.get(clave)
         modalidad = info_puesto["modalidad"] if info_puesto else None
         dia = {"codigo": crudo, "clase": "pagable", "puesto": f["puesto"], "ubicacion": f["ubicacion"], "modalidad": modalidad}
-        if es_ind:
-            dia["induccion"] = True
         if modalidad:
             por_modalidad[modalidad] += 1
             for c, v in mods[modalidad]["conceptos"].items():
-                if not (es_ind and c in CONCEPTOS_SIN_INDUCCION):
-                    esperado[c] += v["valor"]
+                esperado[c] += v["valor"]
         elif clave not in puestos_aprobados:
             dias_sin_modalidad += 1
             s = sin_modalidad.setdefault(clave, {"personas": set(), "dias": 0, "ubicacion_nombre": f["ubicacion_nombre"],
@@ -339,13 +326,13 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "tiene_programacion": any(d["clase"] != "vacio" for d in dias.values()),
         "dias": dias,
         "conteo": {"pagables": pagables, "novedad": novedad, "vacaciones": vacaciones, "vacios": vacios,
-                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones, "induccion": induccion},
+                   "sin_modalidad": dias_sin_modalidad, "antes_vacaciones": antes_vacaciones},
         "vacaciones": {"desde": dias_vac[0].isoformat(), "hasta": dias_vac[-1].isoformat(), "dias": len(dias_vac),
                        "antes": antes_vacaciones} if dias_vac else None,
         "modalidades": dict(por_modalidad),
         "dias_salario": round(horas.get(CONCEPTO_SALARIO, 0) / p.horas_dia, 2) if p.horas_dia else 0,
         "auxilio": {"pagado": devengos.get(CONCEPTO_AUXILIO, 0), "dias_pagados": round(devengos.get(CONCEPTO_AUXILIO, 0) / (p.auxilio_transporte / 30), 2),
-                    "dias_esperados": pagables - induccion, "esperado": round((pagables - induccion) * p.auxilio_transporte / 30)},
+                    "dias_esperados": pagables, "esperado": round(pagables * p.auxilio_transporte / 30)},
         "conceptos": [{"concepto": c, "descripcion": desc_concepto.get(c, ""), "esperado": round(esperado.get(c, 0)),
                        "pagado": round(devengos.get(c, 0))} for c in usados],
         "extras": {c: devengos[c] for c in CONCEPTOS_EXTRAS if devengos.get(c)},
@@ -403,22 +390,20 @@ def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, no
             alerta("DIAS_SIN_PAGAR", f"Tiene {pagables} días trabajados y solo se le pagan {sal:g} días de salario.",
                    referencia=CONCEPTO_SALARIO, esperado=pagables, pagado=sal)
 
-    # Auxilio de transporte: días laborados + descansos (sin novedades ni inducción), si gana hasta 2 SMLMV
+    # Auxilio de transporte: días laborados + descansos (sin novedades), si gana hasta 2 SMLMV
     aux = per["auxilio"]
-    dias_aux = aux["dias_esperados"]
-    sin_ind = f" ({c['induccion']} de inducción no llevan auxilio)" if c.get("induccion") else ""
-    if dias_aux > 0 and (per["salario"] or 0) <= 2 * p.smlmv:
+    if pagables > 0 and (per["salario"] or 0) <= 2 * p.smlmv:
         if aux["pagado"] <= 0:
-            alerta("AUX_CERO", f"Tiene {dias_aux} días con derecho a auxilio de transporte{sin_ind} y se le pagan 0 días.",
+            alerta("AUX_CERO", f"Tiene {pagables} días con derecho a auxilio de transporte y se le pagan 0 días.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=0)
         elif abs(aux["pagado"] - aux["esperado"]) > p.tolerancia:
             alerta("VACACIONES_CON_PAGO" if vac and aux["pagado"] > aux["esperado"] else "AUX_DIFERENTE",
                    f"Auxilio de transporte por {aux['dias_pagados']:g} días ({pesos(aux['pagado'])}); "
-                   f"le corresponden {dias_aux} días{sin_ind} ({pesos(aux['esperado'])}){en_vac}.",
+                   f"le corresponden {pagables} días ({pesos(aux['esperado'])}){en_vac}.",
                    referencia=CONCEPTO_AUXILIO, esperado=aux["esperado"], pagado=aux["pagado"])
-    elif dias_aux == 0 and aux["pagado"] > p.tolerancia:
+    elif pagables == 0 and aux["pagado"] > p.tolerancia:
         alerta("VACACIONES_CON_PAGO" if vac else "AUX_DIFERENTE",
-               f"Se le paga auxilio de transporte ({pesos(aux['pagado'])}) sin días con auxilio en esta nómina{sin_ind}{en_vac}.",
+               f"Se le paga auxilio de transporte ({pesos(aux['pagado'])}) sin días a pagar en esta nómina{en_vac}.",
                referencia=CONCEPTO_AUXILIO, esperado=0, pagado=aux["pagado"])
 
     # Modalidad: concepto por concepto

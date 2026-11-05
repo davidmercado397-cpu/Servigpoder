@@ -443,6 +443,71 @@ def plano_ajustes(periodo_id: int, request: Request, db: DbSession, actual: Usua
                              headers={"Content-Disposition": f'attachment; filename="ajustes_siesa_{p.nomina}{p.quincena or ''}_{p.anio}-{p.mes:02d}.xlsx"'})
 
 
+# Alertas de salario: esperado y pagado van en días, no en pesos
+ALERTAS_EN_DIAS = {"PAGO_SIN_DIAS", "SALARIO_MAYOR_DIAS", "DIAS_SIN_PAGAR"}
+
+
+@router.get("/periodos/{periodo_id}/justificaciones", dependencies=[Depends(limitar("exportar", 10, 60))])
+def informe_justificaciones(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Excel de las alertas justificadas: qué se justificó, con qué comentario, quién y cuándo, y el resumen por justificación."""
+    p = _periodo(db, periodo_id)
+    filas = db.execute(_consulta_alertas(p.id, "", "", JUSTIFICADA, "", "")).all()
+    usuarios = {u.id: u.nombre for u in db.scalars(select(Usuario).where(Usuario.id.in_({d.usuario_id for _, d in filas if d.usuario_id})))}
+    buf = BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True, "bg_color": "#D9EAFF", "text_wrap": True, "valign": "top"})
+    dinero = libro.add_format({"num_format": "#,##0"})
+    texto = libro.add_format({"text_wrap": True, "valign": "top"})
+
+    def unidad(a: NomAlerta) -> str:
+        return "días" if a.tipo in ALERTAS_EN_DIAS else "pesos"
+
+    def diferencia(a: NomAlerta) -> float | None:
+        return float(a.pagado) - float(a.esperado) if a.esperado is not None and a.pagado is not None else None
+
+    hoja = libro.add_worksheet("Resumen")
+    hoja.write_row(0, 0, ["Justificación", "Alertas", "Personas", "Pagado − esperado (pesos)", "Justificó"], negrita)
+    grupos: dict[str, list] = {}
+    for a, d in filas:
+        g = grupos.setdefault(d.comentario, [0, set(), 0.0, set()])
+        g[0] += 1
+        g[1].add(a.cedula)
+        if unidad(a) == "pesos" and diferencia(a) is not None:
+            g[2] += diferencia(a)
+        g[3].add(usuarios.get(d.usuario_id, ""))
+    for i, (comentario, (n, personas, dif, quienes)) in enumerate(sorted(grupos.items(), key=lambda kv: -kv[1][0]), start=1):
+        hoja.write(i, 0, comentario, texto)
+        hoja.write_row(i, 1, [n, len(personas)])
+        hoja.write_number(i, 3, round(dif), dinero)
+        hoja.write(i, 4, ", ".join(sorted(x for x in quienes if x)))
+    hoja.set_column(0, 0, 70)
+    hoja.set_column(1, 2, 10)
+    hoja.set_column(3, 4, 24)
+
+    hoja = libro.add_worksheet("Justificaciones")
+    enc = ["Nómina", "Cédula", "Nombre", "Grupo", "Alerta", "Concepto", "Detalle", "Esperado", "Pagado", "Pagado − esperado", "Unidad",
+           "Justificación", "Justificó", "Fecha"]
+    hoja.write_row(0, 0, enc, negrita)
+    for i, (a, d) in enumerate(filas, start=1):
+        hoja.write_row(i, 0, [a.nomina, a.cedula, a.nombre, motor.TIPOS[a.tipo][2], motor.TIPOS[a.tipo][0], a.referencia, a.mensaje])
+        for col, v in ((7, a.esperado), (8, a.pagado), (9, diferencia(a))):
+            if v is not None:
+                hoja.write_number(i, col, float(v), dinero)
+        hoja.write_row(i, 10, [unidad(a), d.comentario, usuarios.get(d.usuario_id, ""),
+                               d.decidido_en.strftime("%Y-%m-%d %H:%M") if d.decidido_en else ""])
+    hoja.autofilter(0, 0, max(len(filas), 1), len(enc) - 1)
+    hoja.freeze_panes(1, 3)
+    for col, ancho in enumerate([10, 13, 34, 16, 38, 9, 60, 12, 12, 14, 8, 50, 22, 16]):
+        hoja.set_column(col, col, ancho)
+    libro.close()
+
+    auditar(db, request, "nom_informe_justificaciones", actual.id, periodo=f"{p.mes:02d}/{p.anio}", filas=len(filas))
+    db.commit()
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="justificaciones_{p.nomina}{p.quincena or ''}_{p.anio}-{p.mes:02d}.xlsx"'})
+
+
 @router.get("/periodos/{periodo_id}/informe", dependencies=[Depends(limitar("exportar", 10, 60))])
 def informe(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
     p = _periodo(db, periodo_id)

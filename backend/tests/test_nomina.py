@@ -284,6 +284,20 @@ def test_informe_excel(admin):
     assert libro["Alertas"].max_row > 10
 
 
+def test_informe_de_justificaciones(admin):
+    pid = _cargar_todo(admin)
+    a = next(x for x in admin.get(f"{API}/periodos/{pid}/alertas?tamano=150").json()["data"] if x["esperado"] is not None)
+    item = {"nomina": a["nomina"], "cedula": a["cedula"], "tipo": a["tipo"], "referencia": a["referencia"]}
+    admin.put(f"{API}/periodos/{pid}/alertas/decision", json={"items": [item], "estado": "justificada", "comentario": "Pactado con el cliente"})
+    r = admin.get(f"{API}/periodos/{pid}/justificaciones")
+    assert r.status_code == 200 and r.headers["content-disposition"] == 'attachment; filename="justificaciones_quincenal2_2026-09.xlsx"'
+    libro = load_workbook(BytesIO(r.content))
+    assert libro.sheetnames == ["Resumen", "Justificaciones"]
+    fila = [c.value for c in libro["Justificaciones"][2]]
+    assert fila[1] == a["cedula"] and fila[11] == "Pactado con el cliente" and fila[12]  # quién lo justificó
+    assert libro["Justificaciones"].max_row == 2 and libro["Resumen"]["A2"].value == "Pactado con el cliente"
+
+
 def test_permisos(admin):
     admin.post("/api/roles", json={"nombre": "Solo ver nomina", "permisos": ["nomina.ver"]})
     rid = next(r["id"] for r in admin.get("/api/roles").json()["data"] if r["nombre"] == "Solo ver nomina")

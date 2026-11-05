@@ -91,6 +91,12 @@ export default function PeriodoNomina() {
         <div className="ml-auto flex flex-wrap gap-2">
           {calculado && <a className="btn-secundario inline-flex items-center gap-1.5" href={`/api/nomina/periodos/${id}/informe`}><Download className="h-4 w-4" /> Informe Excel</a>}
           {calculado && (
+            <a className="btn-secundario inline-flex items-center gap-1.5" href={`/api/nomina/periodos/${id}/justificaciones`}
+               title="Alertas justificadas: comentario, quién y cuándo, con un resumen por justificación">
+              <Download className="h-4 w-4" /> Justificaciones
+            </a>
+          )}
+          {calculado && (
             <a className="btn-secundario inline-flex items-center gap-1.5" href={`/api/nomina/periodos/${id}/plano-ajustes`}
                title="Cédula, concepto y valor a ajustar de los conceptos de la modalidad (positivos y negativos en hojas aparte)">
               <Download className="h-4 w-4" /> Plano de ajustes SIESA

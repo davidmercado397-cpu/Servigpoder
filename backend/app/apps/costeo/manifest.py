@@ -6,6 +6,7 @@ from app.core.plataforma import App
 PERMISOS: dict[str, tuple[str, str]] = {
     "costeo.ver": ("Consulta", "Ver MFP, bolsas, costeos y totales; descargar el Excel"),
     "costeo.movimientos": ("MFP", "Registrar pagos, aplicaciones y solicitudes de horas de las MFP (programación y comercial)"),
+    "costeo.mfp.crear": ("MFP", "Crear MFP nuevas y sus clientes (comercial); editarlas después requiere el permiso de gestionar MFP"),
     "costeo.mfp": ("MFP", "Crear y editar MFP y sus ítems, importar el Excel, terminar contratos, aprobar costeos y crear la MFP"),
     "costeo.autorizar": ("MFP", "Autorizar movimientos que superan lo pactado o la bolsa de horas"),
     "costeo.costear": ("Costeo", "Crear, editar y versionar costeos"),
@@ -16,7 +17,8 @@ PERMISOS: dict[str, tuple[str, str]] = {
 }
 
 ROLES_BASE: dict[str, tuple[str, list[str]]] = {
-    "Comercial costeo": ("Costeo y MFP's: hace costeos y registra la ejecución de las MFP", ["costeo.ver", "costeo.movimientos", "costeo.costear"]),
+    "Comercial costeo": ("Costeo y MFP's: hace costeos y registra la ejecución de las MFP", ["costeo.ver", "costeo.movimientos", "costeo.costear",
+                                                                                              "costeo.mfp.crear"]),
     "Programador MFP": ("Costeo y MFP's: consulta las MFP y registra las solicitudes de horas", ["costeo.ver", "costeo.movimientos"]),
     "Contable costeo": ("Costeo y MFP's: el área contable ajusta tarifas, hombres, salarios e impuestos de los costeos",
                         ["costeo.ver", "costeo.contable"]),

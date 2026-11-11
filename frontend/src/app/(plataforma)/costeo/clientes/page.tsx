@@ -13,6 +13,7 @@ type ClienteFila = { id: number; nit: string; nombre: string; activo: boolean; m
 
 export default function Clientes() {
   const gestionar = usePermiso("costeo.mfp");
+  const crear = usePermiso("costeo.mfp.crear");  // el comercial crea clientes para sus MFP
   const [lista, setLista] = useState<ClienteFila[] | null>(null);
   const [q, setQ] = useState("");
   const [edicion, setEdicion] = useState<{ id?: number; nit: string; nombre: string; activo: boolean } | null>(null);
@@ -43,7 +44,7 @@ export default function Clientes() {
 
   return (
     <>
-      <Titulo accion={gestionar && !edicion && <button className="btn-primario" onClick={() => setEdicion({ nit: "", nombre: "", activo: true })}><Plus className="h-4 w-4" /> Nuevo cliente</button>}>
+      <Titulo accion={(gestionar || crear) && !edicion && <button className="btn-primario" onClick={() => setEdicion({ nit: "", nombre: "", activo: true })}><Plus className="h-4 w-4" /> Nuevo cliente</button>}>
         Clientes
       </Titulo>
       {error && <div className="mb-4"><Alerta>{error}</Alerta></div>}

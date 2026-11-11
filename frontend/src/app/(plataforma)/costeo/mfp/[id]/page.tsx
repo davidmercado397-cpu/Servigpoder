@@ -103,14 +103,15 @@ export default function DetalleMfp() {
                         <p className="font-medium">{it.tipo}{!it.cuenta_en_mfp && <span className="ml-1 text-xs text-slate-400">(bolsa interna)</span>}</p>
                         <p className="text-xs text-slate-500">{it.descripcion} · {UNIDAD[it.unidad]}{it.unidad === "pesos_mes" ? ` de ${pesos(it.pactado)}` : ""}</p>
                       </td>
-                      <td className="text-right tabular-nums">{valorItem(it.pactado_total, it.unidad)}{it.unidad === "horas" && <p className="text-xs text-slate-500">{it.pactado} h por año</p>}</td>
+                      <td className="text-right tabular-nums">{valorItem(it.pactado_total, it.unidad)}
+                        {it.unidad === "horas" && <p className="text-xs text-slate-500">total del contrato{it.anios.length ? ` (${it.anios.length} ${it.anios.length === 1 ? "año" : "años"})` : ""}<br />{it.pactado} h por año</p>}</td>
                       <td className="text-right tabular-nums">{valorItem(it.ejecutado, it.unidad)}{it.causado !== null && <p className="text-xs text-slate-500">causado {pesos(it.causado)}</p>}</td>
                       <td>
                         <div className="h-2 rounded-full bg-slate-100"><div className={`h-2 rounded-full ${it.excede ? "bg-red-500" : "bg-marca-600"}`} style={{ width: `${Math.min(100, avance * 100)}%` }} /></div>
                         <p className="mt-0.5 text-xs text-slate-500">{pct(it.pactado_total ? it.ejecutado / it.pactado_total : null, 0)}</p>
                       </td>
                       <td className={`text-right tabular-nums ${it.pendiente < 0 ? "font-semibold text-red-700" : ""}`}>
-                        {valorItem(it.pendiente, it.unidad)}{horasAnio && <p className="text-xs text-slate-500">año {horasAnio.anio}: {fecha(horasAnio.desde)}–{fecha(horasAnio.hasta)}</p>}
+                        {valorItem(it.pendiente, it.unidad)}{horasAnio && <p className="text-xs text-slate-500">disponibles del año {horasAnio.anio}<br />{fecha(horasAnio.desde)}–{fecha(horasAnio.hasta)}</p>}
                       </td>
                       <td className="text-right tabular-nums">{it.reembolsable && it.unidad !== "horas" ? pesos(it.reembolso) : "—"}</td>
                       <td className="whitespace-nowrap text-right">
@@ -238,9 +239,12 @@ function Dato({ titulo, valor, nota, rojo }: { titulo: string; valor: string; no
 function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) => void }) {
   const [pactado, setPactado] = useState(String(item.pactado));
   const [descripcion, setDescripcion] = useState(item.descripcion);
+  const [nombre, setNombre] = useState(item.nombre ?? "");
   const [error, setError] = useState("");
+  const otros = item.tipo_codigo === "OTROS";
   return (
     <div className="space-y-3">
+      {otros && <div><label className="label">¿Cuál?</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>}
       <div><label className="label">Pactado ({UNIDAD[item.unidad]})</label><input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} /></div>
       <div><label className="label">Descripción</label><input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
       {error && <Alerta>{error}</Alerta>}
@@ -251,7 +255,7 @@ function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) 
           }}>Eliminar ítem</button>
         ) : <span />}
         <button className="btn-primario" onClick={async () => {
-          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: Number(pactado), descripcion } })); } catch (e) { setError(mensajeError(e)); }
+          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: Number(pactado), descripcion, ...(otros ? { nombre } : {}) } })); } catch (e) { setError(mensajeError(e)); }
         }}>Guardar</button>
       </div>
     </div>
@@ -260,26 +264,29 @@ function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) 
 
 function NuevoItem({ mfpId, onGuardado }: { mfpId: number; onGuardado: (m: Mfp) => void }) {
   const [tipos, setTipos] = useState<TipoItem[]>([]);
-  const [f, setF] = useState({ tipo_id: "", pactado: "", descripcion: "" });
+  const [f, setF] = useState({ tipo_id: "", pactado: "", descripcion: "", nombre: "" });
   const [error, setError] = useState("");
   useEffect(() => {
     api<TipoItem[]>("/costeo/tipos-item").then((t) => setTipos(t.filter((x) => x.activo))).catch(() => {});
   }, []);
   const unidad = tipos.find((t) => String(t.id) === f.tipo_id)?.unidad;
+  const otros = tipos.find((t) => String(t.id) === f.tipo_id)?.codigo === "OTROS";
   return (
     <div className="space-y-3">
       <div><label className="label">Ítem</label>
         <select className="input" value={f.tipo_id} onChange={(e) => setF({ ...f, tipo_id: e.target.value })}>
           <option value="">Seleccione…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre} ({UNIDAD[t.unidad]})</option>)}
         </select></div>
+      {otros && <div><label className="label">¿Cuál?</label><input className="input" placeholder="Escriba cuál es" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>}
       <div><label className="label">{unidad === "horas" ? "Horas por año" : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
         <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} /></div>
       <div><label className="label">Descripción</label><input className="input" value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
       {error && <Alerta>{error}</Alerta>}
       <div className="flex justify-end">
-        <button className="btn-primario" disabled={!f.tipo_id || !f.pactado} onClick={async () => {
+        <button className="btn-primario" disabled={!f.tipo_id || !f.pactado || (otros && !f.nombre.trim())} onClick={async () => {
           try {
-            onGuardado(await api<Mfp>(`/costeo/mfp/${mfpId}/items`, { method: "POST", json: { tipo_id: Number(f.tipo_id), pactado: Number(f.pactado), descripcion: f.descripcion } }));
+            onGuardado(await api<Mfp>(`/costeo/mfp/${mfpId}/items`, { method: "POST", json: { tipo_id: Number(f.tipo_id), pactado: Number(f.pactado), descripcion: f.descripcion,
+              nombre: otros ? f.nombre : "" } }));
           } catch (e) { setError(mensajeError(e)); }
         }}>Agregar</button>
       </div>

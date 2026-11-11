@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, require
+from app.api.deps import CurrentUser, DbSession, require
 from app.apps.costeo.models import UNIDADES, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstSoporte, CstTipoDocumento, CstTipoItem
 from app.apps.costeo.services import importador
 from app.apps.costeo.services.mfp import HORAS, resumen, tope_movimiento
@@ -26,6 +26,16 @@ from app.models import Usuario
 
 router = APIRouter()
 VER, MOVIMIENTOS, GESTIONAR, CONFIGURAR, AUTORIZAR = "costeo.ver", "costeo.movimientos", "costeo.mfp", "costeo.configurar", "costeo.autorizar"
+CREAR = "costeo.mfp.crear"  # el comercial crea la MFP (y el cliente); editarla después es de quien gestiona MFP
+
+
+def require_alguno(*permisos: str):
+    def checker(user: CurrentUser) -> Usuario:
+        if not any(p in user.permisos for p in permisos):
+            raise ApiError(403, "No tiene permiso para realizar esta acción", details=[{"permiso": " o ".join(permisos)}])
+        return user
+
+    return checker
 
 
 def _mfps(db: DbSession, ids: list[int] | None = None) -> list[CstMfp]:
@@ -73,7 +83,7 @@ def clientes(db: DbSession, _=Depends(require(VER))):
 
 
 @router.post("/clientes", response_model=ApiResponse[dict], status_code=201)
-def crear_cliente(data: ClienteIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+def crear_cliente(data: ClienteIn, request: Request, db: DbSession, actual: Usuario = Depends(require_alguno(GESTIONAR, CREAR))):
     c = CstCliente(nit=data.nit.strip(), nombre=data.nombre.strip(), activo=data.activo)
     db.add(c)
     db.flush()
@@ -141,6 +151,7 @@ class ItemIn(BaseModel):
     tipo_id: int
     pactado: float = Field(ge=0, le=1e13)
     descripcion: str = Field(default="", max_length=300)
+    nombre: str = Field(default="", max_length=120)  # «Otros»: cuál es
 
 
 class MfpIn(BaseModel):
@@ -191,18 +202,27 @@ def listar(db: DbSession, q: str = Query("", max_length=100), cliente_id: int | 
 
 
 @router.post("/mfp", response_model=ApiResponse[dict], status_code=201)
-def crear(data: MfpIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+def crear(data: MfpIn, request: Request, db: DbSession, actual: Usuario = Depends(require_alguno(GESTIONAR, CREAR))):
     if db.get(CstCliente, data.cliente_id) is None:
         raise ApiError(422, "Cliente no encontrado")
     m = CstMfp(**data.model_dump(exclude={"items"}), creado_por=actual.id)
     db.add(m)
     db.flush()
     for it in data.items:
-        _validar_tipo(db, it.tipo_id)
-        db.add(CstMfpItem(mfp_id=m.id, tipo_id=it.tipo_id, pactado=it.pactado, descripcion=it.descripcion.strip()))
+        t = _validar_tipo(db, it.tipo_id)
+        db.add(CstMfpItem(mfp_id=m.id, tipo_id=it.tipo_id, pactado=it.pactado, descripcion=it.descripcion.strip(), nombre=_nombre(t, it.nombre)))
     auditar(db, request, "cst_mfp_creada", actual.id, numero=m.numero, cliente_id=m.cliente_id)
     db.commit()
     return ok(_detalle(_mfp(db, m.id), date.today()))
+
+
+def _nombre(t: CstTipoItem, nombre: str) -> str:
+    """En los ítems «Otros» hay que escribir cuál es; en los demás no se usa."""
+    if t.codigo != "OTROS":
+        return ""
+    if not nombre.strip():
+        raise ApiError(422, "Escriba cuál es el ítem «Otros»")
+    return nombre.strip()
 
 
 def _validar_tipo(db: DbSession, tipo_id: int) -> CstTipoItem:
@@ -272,7 +292,7 @@ def reactivar(mfp_id: int, request: Request, db: DbSession, actual: Usuario = De
 def agregar_item(mfp_id: int, data: ItemIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     m = _mfp(db, mfp_id)
     t = _validar_tipo(db, data.tipo_id)
-    db.add(CstMfpItem(mfp_id=m.id, tipo_id=t.id, pactado=data.pactado, descripcion=data.descripcion.strip()))
+    db.add(CstMfpItem(mfp_id=m.id, tipo_id=t.id, pactado=data.pactado, descripcion=data.descripcion.strip(), nombre=_nombre(t, data.nombre)))
     auditar(db, request, "cst_item_agregado", actual.id, numero=m.numero, tipo=t.codigo, pactado=data.pactado)
     db.commit()
     db.expire_all()
@@ -289,6 +309,7 @@ def _item(db: DbSession, item_id: int) -> CstMfpItem:
 class ItemEditar(BaseModel):
     pactado: float = Field(ge=0, le=1e13)
     descripcion: str = Field(default="", max_length=300)
+    nombre: str | None = Field(default=None, max_length=120)  # «Otros»: cuál es (None = no cambia)
 
 
 @router.put("/items/{item_id}", response_model=ApiResponse[dict])
@@ -296,6 +317,8 @@ def editar_item(item_id: int, data: ItemEditar, request: Request, db: DbSession,
     it = _item(db, item_id)
     antes = float(it.pactado)
     it.pactado, it.descripcion = data.pactado, data.descripcion.strip()
+    if data.nombre is not None:
+        it.nombre = _nombre(it.tipo, data.nombre)
     auditar(db, request, "cst_item_editado", actual.id, mfp_id=it.mfp_id, tipo=it.tipo.codigo, antes=antes, despues=data.pactado)
     db.commit()
     return ok(_detalle(_mfp(db, it.mfp_id), date.today()))

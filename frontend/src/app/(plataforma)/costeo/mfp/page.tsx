@@ -17,7 +17,10 @@ export default function ListaMfpPagina() {
 }
 
 function ListaMfp() {
-  const gestionar = usePermiso("costeo.mfp");
+  // Crear la MFP: quien gestiona MFP o el comercial (editarla después es de quien gestiona)
+  const puedeGestionar = usePermiso("costeo.mfp");
+  const puedeCrear = usePermiso("costeo.mfp.crear");
+  const gestionar = puedeGestionar || puedeCrear;
   const params = useSearchParams();
   const [lista, setLista] = useState<Omit<Mfp, "items">[] | null>(null);
   const [totales, setTotales] = useState<Totales | null>(null);
@@ -60,7 +63,7 @@ function ListaMfp() {
       <Titulo accion={
         <div className="flex flex-wrap gap-2">
           <a className="btn-secundario" href="/api/costeo/mfp-excel"><Download className="h-4 w-4" /> Excel</a>
-          {gestionar && <SubirArchivo texto="Importar Excel de MFP" onArchivo={importar} />}
+          {puedeGestionar && <SubirArchivo texto="Importar Excel de MFP" onArchivo={importar} />}
           {gestionar && <button className="btn-primario" onClick={() => setNueva(true)}><Plus className="h-4 w-4" /> Nueva MFP</button>}
         </div>
       }>MFP</Titulo>
@@ -130,7 +133,7 @@ function ListaMfp() {
   );
 }
 
-type ItemNuevo = { tipo_id: string; pactado: string; descripcion: string };
+type ItemNuevo = { tipo_id: string; pactado: string; descripcion: string; nombre: string };
 
 function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () => void }) {
   const router = useRouter();
@@ -150,7 +153,8 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
           numero: f.numero, cliente_id: Number(f.cliente_id), contrato: f.contrato, fecha_inicio: f.fecha_inicio || null,
           duracion_meses: f.duracion_meses ? Number(f.duracion_meses) : null, valor_mensual: Number(f.valor_mensual || 0),
           pct_comercial: f.pct_comercial ? Number(f.pct_comercial.replace(",", ".")) / 100 : null, notas: f.notas,
-          items: items.filter((i) => i.tipo_id && i.pactado).map((i) => ({ tipo_id: Number(i.tipo_id), pactado: Number(i.pactado), descripcion: i.descripcion })),
+          items: items.filter((i) => i.tipo_id && i.pactado).map((i) => ({ tipo_id: Number(i.tipo_id), pactado: Number(i.pactado), descripcion: i.descripcion,
+            nombre: esOtros(i.tipo_id) ? i.nombre : "" })),
         },
       });
       router.push(`/costeo/mfp/${m.id}`);
@@ -162,6 +166,9 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
     <div className={extra}><label className="label">{etiqueta}</label><input className="input" type={tipo} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></div>
   );
   const unidad = (id: string) => tipos.find((t) => String(t.id) === id)?.unidad;
+  const esOtros = (id: string) => tipos.find((t) => String(t.id) === id)?.codigo === "OTROS";
+  const faltaCual = items.some((i) => i.tipo_id && i.pactado && esOtros(i.tipo_id) && !i.nombre.trim());
+  const meses = Number(f.duracion_meses) || 0;
   return (
     <div className="tarjeta mb-5 space-y-4 p-5">
       <h2 className="font-semibold text-slate-800">Nueva MFP</h2>
@@ -183,23 +190,36 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
       </div>
       <div>
         <p className="label">Ítems pactados</p>
-        {items.map((it, i) => (
-          <div key={i} className="mb-2 grid gap-2 sm:grid-cols-[1.2fr_0.8fr_1.5fr_auto]">
-            <select className="input" value={it.tipo_id} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, tipo_id: e.target.value } : x)))}>
-              <option value="">Ítem…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-            </select>
-            <input className="input" type="number" placeholder={unidad(it.tipo_id) === "horas" ? "Horas por año" : unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"}
-              value={it.pactado} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, pactado: e.target.value } : x)))} />
-            <input className="input" placeholder="Descripción" value={it.descripcion} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, descripcion: e.target.value } : x)))} />
-            <button className="btn-secundario" onClick={() => setItems(items.filter((_, j) => j !== i))}>Quitar</button>
-          </div>
-        ))}
-        <button className="btn-secundario" onClick={() => setItems([...items, { tipo_id: "", pactado: "", descripcion: "" }])}><Plus className="h-4 w-4" /> Ítem</button>
+        {items.map((it, i) => {
+          const set = (x: Partial<ItemNuevo>) => setItems(items.map((y, j) => (j === i ? { ...y, ...x } : y)));
+          const otros = esOtros(it.tipo_id);
+          return (
+            <div key={i} className="mb-2">
+              <div className={`grid gap-2 ${otros ? "sm:grid-cols-[1fr_1.2fr_0.8fr_1.3fr_auto]" : "sm:grid-cols-[1.2fr_0.8fr_1.5fr_auto]"}`}>
+                <select className="input" value={it.tipo_id} onChange={(e) => set({ tipo_id: e.target.value })}>
+                  <option value="">Ítem…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                </select>
+                {otros && <input className={`input ${it.pactado && !it.nombre.trim() ? "border-red-400" : ""}`} placeholder="¿Cuál? (escríbalo)" autoFocus
+                  value={it.nombre} onChange={(e) => set({ nombre: e.target.value })} />}
+                <input className="input" type="number" placeholder={unidad(it.tipo_id) === "horas" ? "Horas por año" : unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"}
+                  value={it.pactado} onChange={(e) => set({ pactado: e.target.value })} />
+                <input className="input" placeholder="Descripción" value={it.descripcion} onChange={(e) => set({ descripcion: e.target.value })} />
+                <button className="btn-secundario" onClick={() => setItems(items.filter((_, j) => j !== i))}>Quitar</button>
+              </div>
+              {unidad(it.tipo_id) === "horas" && Number(it.pactado) > 0 && meses > 0 && (
+                <p className="mt-1 text-xs text-slate-500">{Number(it.pactado).toLocaleString("es-CO")} h por año · {(Number(it.pactado) * meses / 12).toLocaleString("es-CO")} h en total
+                  durante los {meses} meses del contrato</p>
+              )}
+            </div>
+          );
+        })}
+        <button className="btn-secundario" onClick={() => setItems([...items, { tipo_id: "", pactado: "", descripcion: "", nombre: "" }])}><Plus className="h-4 w-4" /> Ítem</button>
+        {faltaCual && <p className="mt-1 text-xs text-red-600">Escriba cuál es cada ítem «Otros».</p>}
       </div>
       {error && <Alerta>{error}</Alerta>}
       <div className="flex justify-end gap-2">
         <button className="btn-secundario" onClick={onCerrar}>Cancelar</button>
-        <button className="btn-primario" disabled={!f.numero || !f.cliente_id} onClick={guardar}>Crear MFP</button>
+        <button className="btn-primario" disabled={!f.numero || !f.cliente_id || faltaCual} onClick={guardar}>Crear MFP</button>
       </div>
     </div>
   );

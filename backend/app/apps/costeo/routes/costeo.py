@@ -362,7 +362,8 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
 
     def item(codigo: str, pactado: float, descripcion: str) -> None:
         if pactado > 0 and codigo in tipos:
-            db.add(CstMfpItem(mfp_id=m.id, tipo_id=tipos[codigo], pactado=round(pactado, 2), descripcion=descripcion[:300]))
+            db.add(CstMfpItem(mfp_id=m.id, tipo_id=tipos[codigo], pactado=round(pactado, 2), descripcion=descripcion[:300],
+                              nombre=descripcion[:120] if codigo == "OTROS" else ""))
 
     item("NOTA_CREDITO", r["mfp"]["nota_credito_total"], f"Nota crédito {r['mfp']['pct_nota_credito']:.2%} de la tarifa")
     item("REINVERSION", r["mfp"]["cupo_inversion_vp"], f"Cupo de inversión {r['mfp']['pct_cupo_inversion']:.2%} (valor presente)")

@@ -88,6 +88,7 @@ class EstadoItem:
     reembolso: float = 0.0
     excede: bool = False
     anios: list[dict] = field(default_factory=list)  # horas: [{anio, desde, hasta, pactado, usado, saldo, vencido}]
+    nombre: str = ""  # «Otros»: cuál es
 
     def a_dict(self) -> dict:
         return self.__dict__.copy()
@@ -98,8 +99,9 @@ def estado_item(m: CstMfp, it: CstMfpItem, hoy: date, fecha_reembolso: date | No
     pactado = float(it.pactado or 0)
     ejecutado = sum(float(x.valor) for x in it.movimientos)
     duracion = m.duracion_meses or 0
-    e = EstadoItem(it.id, tipo.nombre, tipo.codigo, tipo.unidad, it.descripcion, tipo.reembolsable, tipo.cuenta_en_mfp,
-                   pactado, pactado, ejecutado, pactado - ejecutado)
+    nombre = (it.nombre or "").strip()
+    e = EstadoItem(it.id, f"{tipo.nombre}: {nombre}" if nombre else tipo.nombre, tipo.codigo, tipo.unidad, it.descripcion,
+                   tipo.reembolsable, tipo.cuenta_en_mfp, pactado, pactado, ejecutado, pactado - ejecutado, nombre=nombre)
     if tipo.unidad == PESOS_MES:
         e.pactado_total = pactado * duracion
         e.pendiente = e.pactado_total - ejecutado

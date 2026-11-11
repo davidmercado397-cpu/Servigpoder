@@ -436,3 +436,24 @@ def test_comercial_no_cambia_lo_de_contable(admin):
     assert g["datos"]["ica_por_mil"] == 4.5 and g["datos"]["personal"][0]["salario"] == 2000000
     assert g["datos"]["personal"][0]["horas_extras"] == 900000 and g["datos"]["servicios"][0]["tarifa"] == 8000000
     assert admin.put(f"{API}/servicios", json={**servicio, "tarifa": 1}).status_code == 403
+
+
+def test_comercial_crea_mfp_y_otros_dice_cual(admin):
+    roles = {r["nombre"]: r["id"] for r in admin.get("/api/roles").json()["data"]}
+    admin.post("/api/usuarios", json={"accesos": ACCESOS, "username": "vendedor", "nombre": "Vendedor", "password": "clave-segura-1",
+                                      "roles": [roles["Comercial costeo"]]})
+    t = _tipos(admin)
+    admin.post("/api/auth/logout")
+    entrar(admin, "vendedor", "clave-segura-1")
+    cid = admin.post(f"{API}/clientes", json={"nit": "800", "nombre": "Cliente del comercial"}).json()["data"]["id"]
+    datos = {"numero": "901", "cliente_id": cid, "duracion_meses": 12, "valor_mensual": 1_000_000,
+             "items": [{"tipo_id": t["OTROS"], "pactado": 500_000, "descripcion": "Entrega en enero"}]}
+    r = admin.post(f"{API}/mfp", json=datos)
+    assert r.status_code == 422 and "cuál" in r.json()["error"]["message"]  # «Otros» sin decir cuál
+    datos["items"][0]["nombre"] = "Cafetera"
+    r = admin.post(f"{API}/mfp", json=datos)
+    assert r.status_code == 201, r.text
+    otros = _item(r.json()["data"], "OTROS")
+    assert otros["nombre"] == "Cafetera" and otros["tipo"] == "Otros: Cafetera" and otros["descripcion"] == "Entrega en enero"
+    # Editar lo pactado sigue siendo de quien gestiona las MFP
+    assert admin.put(f"{API}/items/{otros['id']}", json={"pactado": 1, "nombre": "Otra"}).status_code == 403

@@ -85,6 +85,8 @@ class CstMfpItem(Base):
     mfp_id: Mapped[int] = mapped_column(ForeignKey("cst_mfp.id", ondelete="CASCADE"), index=True)
     tipo_id: Mapped[int] = mapped_column(ForeignKey("cst_tipo_item.id", ondelete="RESTRICT"))
     descripcion: Mapped[str] = mapped_column(String(300), default="")
+    # Ítems del tipo «Otros»: cuál es (escrito a mano)
+    nombre: Mapped[str] = mapped_column(String(120), default="", server_default="")
     pactado: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

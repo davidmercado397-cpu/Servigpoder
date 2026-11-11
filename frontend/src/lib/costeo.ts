@@ -11,6 +11,8 @@ export type TipoDocumento = { codigo: string; nombre: string; activo: boolean };
 export type AnioBolsa = { anio: number; desde: string | null; hasta: string | null; pactado: number; usado: number; saldo: number; vencido: boolean; actual: boolean };
 export type ItemMfp = {
   id: number; tipo: string; tipo_codigo: string; unidad: TipoItem["unidad"]; descripcion: string; reembolsable: boolean; cuenta_en_mfp: boolean;
+  /** «Otros»: cuál es */
+  nombre?: string;
   pactado: number; pactado_total: number; ejecutado: number; pendiente: number; causado: number | null; reembolso: number; excede: boolean;
   anios: AnioBolsa[]; movimientos?: Movimiento[];
 };

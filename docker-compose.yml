@@ -43,7 +43,7 @@ services:
       SIESA_MODELO: ${SIESA_MODELO:-}
       SIESA_MAX_PDF_MB: ${SIESA_MAX_PDF_MB:-60}
       RESPALDO_COMERCIAL: ${RESPALDO_COMERCIAL:-false}
-      SMTP_HOST: ${SMTP_HOST:-smtp.office365.com}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USUARIO: ${SMTP_USUARIO:-}
       SMTP_CLAVE: ${SMTP_CLAVE:-}

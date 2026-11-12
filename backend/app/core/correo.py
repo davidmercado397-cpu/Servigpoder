@@ -1,4 +1,4 @@
-"""Envío de correos por SMTP (Microsoft 365: smtp.office365.com:587 con STARTTLS).
+"""Envío de correos por SMTP (Gmail / Google Workspace: smtp.gmail.com:587 con STARTTLS y contraseña de aplicación).
 
 Las credenciales van en variables de entorno (SMTP_USUARIO, SMTP_CLAVE…); sin ellas no se envía nada y quien llama
 lo registra como «correo no configurado».

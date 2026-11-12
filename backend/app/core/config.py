@@ -56,8 +56,9 @@ class Settings(BaseSettings):
     respaldo_comercial: bool = False
     siesa_max_pdf_mb: int = 60
 
-    # Correo saliente (Microsoft 365): avisos a las áreas cuando arranca un contrato. Sin usuario y clave no se envía nada.
-    smtp_host: str = "smtp.office365.com"
+    # Correo saliente (Gmail / Google Workspace, con contraseña de aplicación): avisos a las áreas cuando arranca un contrato.
+    # Sin usuario y clave no se envía nada.
+    smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_usuario: str = ""
     smtp_clave: str = ""

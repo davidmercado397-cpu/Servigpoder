@@ -44,6 +44,9 @@ class MatrizPuesto(Base):
     secuencia: Mapped[str] = mapped_column(String(80), default="")
     jornada: Mapped[str] = mapped_column(String(300), default="")  # texto original de la matriz
     incluye_festivos: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Horario flexible: se vendieron horas por día (p. ej. 8 h) sin hora fija; se cumple con las horas programadas
+    # en el día, en el turno que sea
+    horario_flexible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     requiere_revision: Mapped[bool] = mapped_column(Boolean, default=False)
     nota: Mapped[str] = mapped_column(Text, default="")
 
@@ -68,6 +71,8 @@ class MatrizFranja(Base):
     inicio: Mapped[time] = mapped_column(Time)
     fin: Mapped[time] = mapped_column(Time)  # fin <= inicio: termina al día siguiente
     cantidad: Mapped[int] = mapped_column(Integer, default=1)
+    # Horario de festivos: aplica en cualquier festivo de Colombia, sin importar el día (y reemplaza al normal ese día)
+    festivos: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class MatrizExcepcion(Base):

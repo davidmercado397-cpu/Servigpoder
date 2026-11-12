@@ -17,9 +17,9 @@ export function diasTexto(mascara: number) {
   return DIAS.filter((_, i) => mascara & (1 << i)).join(" ");
 }
 
-export function franjaTexto(f: { dias: number; inicio: string; fin: string; cantidad: number }) {
+export function franjaTexto(f: { dias: number; inicio: string; fin: string; cantidad: number; festivos?: boolean }) {
   const rango = f.inicio === f.fin ? "24 h" : `${hora(f.inicio)}–${hora(f.fin)}`;
-  return `${diasTexto(f.dias)} ${rango}${f.cantidad > 1 ? ` ×${f.cantidad}` : ""}`;
+  return `${f.festivos ? "Festivos" : diasTexto(f.dias)} ${rango}${f.cantidad > 1 ? ` ×${f.cantidad}` : ""}`;
 }
 
 export const ESTADO_COLOR: Record<string, string> = {

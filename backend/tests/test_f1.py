@@ -229,3 +229,45 @@ def test_archivo_subido_no_queda_en_el_servidor():
         except ApiError:
             assert not valido
         assert temporal.closed
+
+
+def test_horario_de_festivos_aplica_en_cualquier_festivo(admin):
+    pid = importar_matriz(admin, 2026, 12).json()["data"]["periodo_id"]
+    puestos = {p["puesto"]["codigo"]: p for p in admin.get(f"/api/capacidad/matriz/periodos/{pid}/puestos").json()["data"]}
+    mp = puestos["3"]
+    # Entre semana 06-18 y los festivos 24 h (sin escoger días)
+    franjas = [{"dias": 31, "inicio": "06:00", "fin": "18:00", "cantidad": 1},
+               {"dias": 0, "inicio": "00:00", "fin": "00:00", "cantidad": 1, "festivos": True}]
+    r = admin.patch(f"/api/capacidad/matriz/puestos/{mp['id']}", json={"franjas": franjas, "incluye_festivos": False})
+    assert r.status_code == 200, r.text
+    assert any(f["festivos"] for f in r.json()["data"]["franjas"])
+    dias = {d["fecha"]: d for d in admin.get(f"/api/capacidad/matriz/puestos/{mp['id']}/requerimiento").json()["data"]}
+    assert dias["2026-12-08"]["horas"] == 24  # martes festivo: 24 h, no 12 + 24
+    assert dias["2026-12-25"]["horas"] == 24  # viernes festivo
+    assert dias["2026-12-09"]["horas"] == 12 and dias["2026-12-13"]["horas"] == 0  # día normal y domingo sin servicio
+    # Un horario normal sin días no es válido
+    malo = [{"dias": 0, "inicio": "06:00", "fin": "18:00", "cantidad": 1}]
+    assert admin.patch(f"/api/capacidad/matriz/puestos/{mp['id']}", json={"franjas": malo}).status_code == 422
+
+
+def test_corregir_puesto_a_mano_no_lo_pisa_la_importacion(admin):
+    importar_matriz(admin)
+    p = next(x for x in admin.get("/api/capacidad/maestros/puestos?q=47A").json()["data"] if x["codigo"] == "47A")
+    assert p["ciudad"] == "CALI"
+    r = admin.patch(f"/api/capacidad/maestros/puestos/{p['id']}", json={"codigo": "47-B", "descripcion": "PORTERÍA NORTE", "ciudad": "popayán"})
+    assert r.status_code == 200, r.text
+    x = r.json()["data"]
+    assert (x["codigo"], x["descripcion"], x["ciudad"], x["descripcion_manual"]) == ("47-B", "PORTERÍA NORTE", "POPAYÁN", True)
+    assert "POPAYÁN" in admin.get("/api/capacidad/maestros/ciudades").json()["data"]
+    otro = next(x for x in admin.get("/api/capacidad/maestros/puestos?q=86").json()["data"] if x["codigo"] == "86")
+    assert admin.patch(f"/api/capacidad/maestros/puestos/{otro['id']}", json={"codigo": "47-B"}).status_code == 409
+
+    # La matriz del mes siguiente trae el código anterior, el nombre y la ciudad de siempre: se respeta lo corregido
+    r = importar_matriz(admin, 2026, 10)
+    assert r.status_code == 201
+    puestos = {m["puesto"]["codigo"]: m for m in admin.get(f"/api/capacidad/matriz/periodos/{r.json()['data']['periodo_id']}/puestos").json()["data"]}
+    assert "47A" not in puestos and puestos["47-B"]["puesto"]["descripcion"] == "PORTERÍA NORTE"
+    assert puestos["47-B"]["puesto"]["ciudad"] == "POPAYÁN" and puestos["86"]["puesto"]["ciudad"] == "CALI"
+    # Volver a la ciudad de la ubicación
+    x = admin.patch(f"/api/capacidad/maestros/puestos/{p['id']}", json={"ciudad": ""}).json()["data"]
+    assert x["ciudad"] == "CALI" and x["ciudad_manual"] is None

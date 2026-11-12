@@ -205,7 +205,7 @@ export default function CoberturaPage() {
                         </td>
                         <td>
                           <div>{p.puesto.ubicacion.nombre}</div>
-                          <div className="text-xs text-slate-500">{p.puesto.descripcion} · {p.puesto.ubicacion.ciudad}</div>
+                          <div className="text-xs text-slate-500">{p.puesto.descripcion} · {p.puesto.ciudad ?? p.puesto.ubicacion.ciudad}</div>
                         </td>
                         <td><EstadoInsignia estado={p.estado} /></td>
                         <td className="text-right tabular-nums">{num(p.hombres, 1)}</td>

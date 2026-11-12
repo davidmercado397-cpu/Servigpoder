@@ -62,7 +62,7 @@ function Detalle() {
           <h1 className="text-2xl font-bold text-marca-900">Puesto {p.codigo}</h1>
           <EstadoInsignia estado={r.estado} />
         </div>
-        <p className="text-slate-600">{p.ubicacion.nombre} · {p.descripcion} · {p.ubicacion.ciudad}</p>
+        <p className="text-slate-600">{p.ubicacion.nombre} · {p.descripcion} · {p.ciudad ?? p.ubicacion.ciudad}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
@@ -119,7 +119,7 @@ function Detalle() {
               <td className="sticky left-0 z-10 bg-white px-2 pt-2 text-left font-semibold">Resultado del día</td>
               {dias.map((x) => {
                 const e = ESTADOS[x.estado] ?? ESTADOS.ok;
-                const tip = x.detalle.map((t) => `${t.tipo === "hueco" ? "Falta" : "Sobra"} ${t.personas} de ${t.inicio} a ${t.fin}`).join("\n") || e.texto;
+                const tip = x.detalle.map((t) => tramoTexto(t)).join("\n") || e.texto;
                 return (
                   <td key={x.fecha} className={`h-8 rounded pt-2 font-semibold ${e.celda}`} title={tip}>
                     <span aria-label={e.texto}>{e.icono}</span>
@@ -154,9 +154,7 @@ function Detalle() {
                 <td className="text-right tabular-nums">{num(x.horas_programadas)} h</td>
                 <td>
                   {x.detalle.map((t, i) => (
-                    <div key={i}>
-                      {t.tipo === "hueco" ? "▼ Falta" : "▲ Sobra"} {t.personas} {t.personas === 1 ? "persona" : "personas"} de {t.inicio} a {t.fin}
-                    </div>
+                    <div key={i}>{t.tipo === "hueco" ? "▼" : "▲"} {tramoTexto(t)}</div>
                   ))}
                 </td>
               </tr>
@@ -183,4 +181,10 @@ export default function Page() {
       <Detalle />
     </Suspense>
   );
+}
+
+// Un tramo del detalle: con hora (falta o sobra gente en un horario) o, en horario flexible, horas del día
+function tramoTexto(t: { tipo: string; personas: number; inicio: string; fin: string; horas?: number; flexible?: boolean }) {
+  if (t.flexible) return `${t.tipo === "hueco" ? "Faltan" : "Sobran"} ${t.horas} h del día (horario flexible)`;
+  return `${t.tipo === "hueco" ? "Falta" : "Sobra"} ${t.personas} ${t.personas === 1 ? "persona" : "personas"} de ${t.inicio} a ${t.fin}`;
 }

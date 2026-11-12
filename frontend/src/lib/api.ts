@@ -92,7 +92,11 @@ export type Rol = RolResumen & { descripcion: string; permisos: string[] };
 export type Permiso = { codigo: string; modulo: string; descripcion: string };
 
 export type Ubicacion = { id: number; codigo: string; nombre: string; nit: string | null; ciudad: string | null };
-export type Puesto = { id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion };
+export type Puesto = {
+  id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion;
+  /** Ciudad (centro de operación) del puesto: la corregida a mano o la de la ubicación */
+  ciudad?: string | null; ciudad_manual?: string | null; descripcion_manual?: boolean;
+};
 export type Turno = { codigo: string; descripcion: string; clase: string; franjas: { inicio: string; fin: string }[] };
 export type Novedad = { codigo: string; descripcion: string; requiere_cubrimiento: boolean };
 export type PorAclarar = {
@@ -105,10 +109,13 @@ export type Periodo = {
   id: number; anio: number; mes: number; estado: string; proyectado_desde_id: number | null; creado_en: string;
   puestos: number; hombres: string; requieren_revision: number; excluidos: number;
 };
-export type Franja = { id?: number; dias: number; inicio: string; fin: string; cantidad: number };
+/** festivos: horario que aplica en cualquier festivo (los días no cuentan) */
+export type Franja = { id?: number; dias: number; inicio: string; fin: string; cantidad: number; festivos?: boolean };
 export type Excepcion = { id: number; fecha: string; sin_servicio: boolean; inicio: string | null; fin: string | null; cantidad: number; observacion: string };
 export type MatrizPuesto = {
   id: number; puesto: Puesto; hombres: string; secuencia: string; jornada: string; incluye_festivos: boolean;
+  /** Horas por día sin hora fija (se cumple con las horas programadas en el día) */
+  horario_flexible?: boolean;
   requiere_revision: boolean; nota: string; franjas: Franja[]; excepciones: Excepcion[];
 };
 export type DiaRequerido = { fecha: string; festivo: string | null; franjas: { inicio: string; fin: string }[]; horas: number };
@@ -136,7 +143,7 @@ export type PuestoAnalisis = {
   puesto: Puesto; hombres: string; fijos: number; personas: number; horas_requeridas: string; horas_programadas: string;
   horas_descubiertas: string; horas_exceso: string; dias_hueco: number; dias_exceso: number; estado: string;
 };
-export type Tramo = { tipo: "hueco" | "exceso"; inicio: string; fin: string; personas: number };
+export type Tramo = { tipo: "hueco" | "exceso"; inicio: string; fin: string; personas: number; /** horario flexible: horas del día que faltan o sobran */ horas?: number; flexible?: boolean };
 export type DiaAnalisis = { fecha: string; horas_requeridas: string; horas_programadas: string; horas_descubiertas: string; horas_exceso: string; estado: string; detalle: Tramo[] };
 export type PersonaPuesto = { cedula: string; nombre: string; titular: boolean; puesto_titular: string | null; dias: Record<string, string>; clases: Record<string, string> };
 export type DetallePuesto = { resumen: PuestoAnalisis; franjas: Franja[]; incluye_festivos: boolean | null; festivos: Record<string, string>; dias: DiaAnalisis[]; personas: PersonaPuesto[] };

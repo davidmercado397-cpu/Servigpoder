@@ -113,6 +113,27 @@ def evaluar(linea: Linea, desde: date, hasta: date) -> dict[date, ResultadoDia]:
     return dias
 
 
+def evaluar_flexible(linea: Linea, desde: date, hasta: date) -> dict[date, ResultadoDia]:
+    """Horario flexible: se compara el total de horas del día (vendidas contra programadas), sin importar a qué hora."""
+    dias: dict[date, ResultadoDia] = {desde + timedelta(n): ResultadoDia() for n in range((hasta - desde).days + 1)}
+    h = BLOQUE_MIN / 60
+    for b in set(linea.requerido) | set(linea.programado):
+        dia = dias.get(linea.dueno[b])
+        if dia is not None:
+            dia.requeridas += linea.requerido[b] * h
+            dia.programadas += linea.programado[b] * h
+    for dia in dias.values():
+        dif = round(dia.requeridas - dia.programadas, 2)
+        if dif > 0:
+            dia.descubiertas = dif
+        elif dif < 0:
+            dia.exceso = -dif
+        if dif:
+            dia.detalle.append({"tipo": HUECO if dif > 0 else EXCESO, "personas": 0, "inicio": "", "fin": "", "horas": abs(dif),
+                                "flexible": True})
+    return dias
+
+
 def _estado_puesto(dias_hueco: int, dias_exceso: int) -> str:
     if dias_hueco and dias_exceso:
         return MIXTO
@@ -185,10 +206,10 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
         p = puestos[pid]
         if p.excluido or p.tipo == BOLSA:
             continue
-        dias = evaluar(lineas[pid], desde, hasta)
+        mp = matriz.get(pid)
+        dias = (evaluar_flexible if mp and mp.horario_flexible else evaluar)(lineas[pid], desde, hasta)
         dh = sum(1 for d in dias.values() if d.descubiertas)
         de = sum(1 for d in dias.values() if d.exceso)
-        mp = matriz.get(pid)
         ap = AnalisisPuesto(
             puesto_id=pid,
             hombres=mp.hombres if mp else Decimal(0),
@@ -209,7 +230,7 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
         ]
         analisis.puestos.append(ap)
 
-        ciudad = (p.ubicacion.ciudad or "Sin ciudad").upper()
+        ciudad = (p.ciudad or "Sin ciudad").upper()
         for clave, valor in (("requeridas", ap.horas_requeridas), ("programadas", ap.horas_programadas),
                              ("descubiertas", ap.horas_descubiertas), ("exceso", ap.horas_exceso)):
             tot[clave] += float(valor)

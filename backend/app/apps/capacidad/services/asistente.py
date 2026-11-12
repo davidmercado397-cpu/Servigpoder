@@ -27,6 +27,7 @@ from app.apps.capacidad.services import alertas as svc_alertas
 from app.apps.capacidad.services import historico as svc_historico
 from app.apps.capacidad.services.codigos import canonico
 from app.apps.capacidad.services.cubrimientos import registros_carga, titulares
+from app.apps.capacidad.models.maestros import ciudad_puesto
 from app.apps.capacidad.services.matriz import festivos
 
 log = logging.getLogger("app.asistente")
@@ -186,12 +187,12 @@ def crear_herramientas(ctx: Contexto) -> list:
             elif estado == "fijos":
                 q = q.where((AnalisisPuesto.fijos > AnalisisPuesto.hombres + 0.5) | (AnalisisPuesto.fijos < AnalisisPuesto.hombres - 0.5))
             if ciudad:
-                q = q.where(Ubicacion.ciudad.ilike(ciudad))
+                q = q.where(ciudad_puesto().ilike(ciudad))
             ordenes = {"exceso": AnalisisPuesto.horas_exceso.desc(), "codigo": Puesto.codigo.asc()}
             q = q.order_by(ordenes.get(orden, AnalisisPuesto.horas_descubiertas.desc()))
             filas = list(ctx.db.scalars(q).unique())
             return {"total": len(filas), "mostrando": min(len(filas), MAX_FILAS), "puestos": [
-                {"codigo": ap.puesto.codigo, "ubicacion": ap.puesto.ubicacion.nombre, "ciudad": ap.puesto.ubicacion.ciudad,
+                {"codigo": ap.puesto.codigo, "ubicacion": ap.puesto.ubicacion.nombre, "ciudad": ap.puesto.ciudad,
                  "descripcion": ap.puesto.descripcion, "estado": ap.estado, "hombres": _num(ap.hombres), "titulares": ap.fijos,
                  "personas": ap.personas, "horas_vendidas": _num(ap.horas_requeridas), "horas_descubiertas": _num(ap.horas_descubiertas),
                  "horas_exceso": _num(ap.horas_exceso), "dias_hueco": ap.dias_hueco, "dias_exceso": ap.dias_exceso,
@@ -212,7 +213,7 @@ def crear_herramientas(ctx: Contexto) -> list:
             filas = list(ctx.db.scalars(select(Puesto).join(Puesto.ubicacion).where(
                 Puesto.codigo.ilike(patron) | Puesto.descripcion.ilike(patron) | Ubicacion.nombre.ilike(patron)
             ).order_by(Puesto.codigo).limit(MAX_FILAS)).unique())
-            return [{"codigo": p.codigo, "ubicacion": p.ubicacion.nombre, "ciudad": p.ubicacion.ciudad, "descripcion": p.descripcion,
+            return [{"codigo": p.codigo, "ubicacion": p.ubicacion.nombre, "ciudad": p.ciudad, "descripcion": p.descripcion,
                      "tipo": p.tipo, "excluido": p.excluido, "activo": p.activo} for p in filas]
         return envolver("buscar_puestos", f)
 
@@ -234,7 +235,7 @@ def crear_herramientas(ctx: Contexto) -> list:
             mp = ctx.db.scalar(select(MatrizPuesto).where(MatrizPuesto.periodo_id == periodo.id, MatrizPuesto.puesto_id == p.id)) if periodo else None
             fest = festivos(carga.anio, carga.mes)
             res: dict = {
-                "puesto": {"codigo": p.codigo, "ubicacion": p.ubicacion.nombre, "ciudad": p.ubicacion.ciudad,
+                "puesto": {"codigo": p.codigo, "ubicacion": p.ubicacion.nombre, "ciudad": p.ciudad,
                            "descripcion": p.descripcion, "tipo": p.tipo, "excluido": p.excluido},
                 "programacion": {"desde": carga.desde, "hasta": carga.hasta},
                 "vendido": None if mp is None else {

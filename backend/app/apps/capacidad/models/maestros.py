@@ -1,6 +1,6 @@
 from datetime import time
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Time
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import BaseEmpresa as Base
@@ -41,8 +41,21 @@ class Puesto(Base):
     # Escoltas, coordinadores, supervisores: fuera del control en el alcance 1
     excluido: Mapped[bool] = mapped_column(Boolean, default=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Corregidos a mano en capacidad operativa: mandan sobre lo que llega al importar (la matriz no los pisa)
+    ciudad_manual: Mapped[str | None] = mapped_column(String(80), nullable=True)  # vacío = la ciudad de la ubicación
+    descripcion_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     ubicacion: Mapped[Ubicacion] = relationship(back_populates="puestos", lazy="joined")
+
+    @property
+    def ciudad(self) -> str | None:
+        """Ciudad (centro de operación) del puesto: la corregida a mano o la de su ubicación."""
+        return self.ciudad_manual or self.ubicacion.ciudad
+
+
+def ciudad_puesto():
+    """La ciudad del puesto en una consulta (requiere el join con Ubicacion)."""
+    return func.coalesce(Puesto.ciudad_manual, Ubicacion.ciudad)
 
 
 class PuestoEquivalencia(Base):

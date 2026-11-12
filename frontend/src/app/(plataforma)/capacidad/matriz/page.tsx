@@ -175,7 +175,8 @@ export default function MatrizPage() {
                       </td>
                       <td>{Number(mp.hombres).toLocaleString("es-CO")}</td>
                       <td className="text-xs">{mp.secuencia}</td>
-                      <td className="text-xs">{mp.puesto.excluido ? "Excluido" : mp.franjas.map(franjaTexto).join(" · ") || "—"}</td>
+                      <td className="text-xs">{mp.puesto.excluido ? "Excluido" : mp.franjas.map(franjaTexto).join(" · ") || "—"}
+                        {mp.horario_flexible && <Insignia color="bg-sky-100 text-sky-800">Flexible</Insignia>}</td>
                       <td className="text-center" onClick={(e) => e.stopPropagation()}>
                         <label className="inline-flex cursor-pointer items-center gap-1.5">
                           <input
@@ -260,6 +261,7 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
   const [hombres, setHombres] = useState(mp.hombres);
   const [secuencia, setSecuencia] = useState(mp.secuencia);
   const [festivos, setFestivos] = useState(mp.incluye_festivos);
+  const [flexible, setFlexible] = useState(!!mp.horario_flexible);
   const [nota, setNota] = useState(mp.nota);
   const [franjas, setFranjas] = useState<Franja[]>(mp.franjas.map((f) => ({ ...f, inicio: hora(f.inicio), fin: hora(f.fin) })));
   const [dias, setDias] = useState<DiaRequerido[]>([]);
@@ -276,7 +278,7 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
     try {
       const r = await api<MatrizPuesto>(`/capacidad/matriz/puestos/${mp.id}`, {
         method: "PATCH",
-        json: { hombres, secuencia, incluye_festivos: festivos, nota, franjas, ...extra },
+        json: { hombres, secuencia, incluye_festivos: festivos, horario_flexible: flexible, nota, franjas, ...extra },
       });
       onGuardado(r);
       cargarDias();
@@ -335,16 +337,28 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
           </div>
         </div>
 
+        <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm">
+          <input type="checkbox" className="mt-0.5" checked={flexible} onChange={(e) => setFlexible(e.target.checked)} />
+          <span><span className="font-semibold text-slate-800">Horario flexible</span>
+            <span className="block text-xs text-slate-500">Se vendieron horas por día sin hora fija (por ejemplo 8 h, que pueden ser de 6 a 14, de 14 a 22 o de 22 a 6).
+              El día queda cubierto si se programan esas horas, en el turno que sea. Las franjas solo dicen los días y cuántas horas.</span></span>
+        </label>
+
         <div>
           <p className="label">Cobertura vendida (franjas)</p>
           <div className="space-y-2">
             {franjas.map((f, i) => (
-              <div key={i} className="rounded-md border border-slate-200 p-2">
-                <div className="mb-2 flex gap-1">
-                  {DIAS.map((d, b) => (
+              <div key={i} className={`rounded-md border p-2 ${f.festivos ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
+                <div className="mb-2 flex flex-wrap items-center gap-1">
+                  {f.festivos ? (
+                    <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-800">Cualquier festivo</span>
+                  ) : DIAS.map((d, b) => (
                     <button type="button" key={d} onClick={() => setFranja(i, { dias: f.dias ^ (1 << b) })}
                       className={`h-7 w-7 rounded text-xs font-semibold ${f.dias & (1 << b) ? "bg-marca-600 text-white" : "bg-slate-100 text-slate-500"}`}>{d}</button>
                   ))}
+                  <label className="ml-auto flex items-center gap-1 text-xs text-slate-600" title="Aplica en todos los festivos de Colombia, caigan el día que caigan, y ese día reemplaza al horario normal">
+                    <input type="checkbox" checked={!!f.festivos} onChange={(e) => setFranja(i, { festivos: e.target.checked, dias: e.target.checked ? 0 : 127 })} /> Horario de festivos
+                  </label>
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                   <input type="time" className="input w-28" value={f.inicio} onChange={(e) => setFranja(i, { inicio: e.target.value })} />
@@ -356,9 +370,16 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
               </div>
             ))}
           </div>
-          <button type="button" className="mt-2 text-sm text-marca-600 hover:underline"
-            onClick={() => setFranjas([...franjas, { dias: 127, inicio: "06:00", fin: "18:00", cantidad: 1 }])}>+ Agregar franja</button>
-          <p className="mt-1 text-xs text-slate-500">Si el fin es menor o igual al inicio, la franja termina al día siguiente (18:00 a 06:00). Igual inicio y fin = 24 horas.</p>
+          <div className="mt-2 flex flex-wrap gap-4">
+            <button type="button" className="text-sm text-marca-600 hover:underline"
+              onClick={() => setFranjas([...franjas, { dias: 127, inicio: "06:00", fin: "18:00", cantidad: 1 }])}>+ Agregar franja</button>
+            {!franjas.some((f) => f.festivos) && (
+              <button type="button" className="text-sm text-red-700 hover:underline"
+                onClick={() => setFranjas([...franjas, { dias: 0, inicio: "00:00", fin: "00:00", cantidad: 1, festivos: true }])}>+ Horario de festivos</button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Si el fin es menor o igual al inicio, la franja termina al día siguiente (18:00 a 06:00). Igual inicio y fin = 24 horas.
+            El horario de festivos se aplica en cualquier festivo de Colombia, caiga el día que caiga, y ese día reemplaza al horario normal.</p>
         </div>
 
         <div><label className="label">Nota</label><textarea className="input" rows={2} value={nota} onChange={(e) => setNota(e.target.value)} /></div>

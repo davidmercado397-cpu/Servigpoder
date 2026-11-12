@@ -86,7 +86,7 @@ def detectar(db: Session, analisis: Analisis, registros: list[Registro], puestos
         .where(AnalisisPuesto.analisis_id == analisis.id, AnalisisDia.estado.in_([EXCESO, MIXTO]))
     ):
         for t in detalle:
-            if t["tipo"] == EXCESO:
+            if t["tipo"] == EXCESO and t.get("inicio"):  # el horario flexible no tiene horas fijas
                 con_exceso[(pid, f)].update(_bloques(_t(t["inicio"]), _t(t["fin"])))
 
     conteo: Counter = Counter()

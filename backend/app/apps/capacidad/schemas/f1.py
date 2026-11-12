@@ -52,10 +52,17 @@ class PuestoOut(Orm):
     excluido: bool
     activo: bool
     ubicacion: UbicacionOut
+    # Ciudad (centro de operación) del puesto: la corregida a mano o la de la ubicación
+    ciudad: str | None = None
+    ciudad_manual: str | None = None
+    descripcion_manual: bool = False
 
 
 class PuestoEditar(BaseModel):
+    codigo: str | None = Field(default=None, min_length=1, max_length=30)
     descripcion: str | None = Field(default=None, max_length=200)
+    # Ciudad del puesto; "" = volver a la de la ubicación
+    ciudad: str | None = Field(default=None, max_length=80)
     excluido: bool | None = None
     activo: bool | None = None
 
@@ -132,10 +139,18 @@ class ResumenPeriodo(PeriodoOut):
 
 
 class FranjaIn(BaseModel):
-    dias: int = Field(ge=1, le=127)  # máscara: lunes = 1 ... domingo = 64
+    dias: int = Field(default=127, ge=0, le=127)  # máscara: lunes = 1 ... domingo = 64
     inicio: time
     fin: time
     cantidad: int = Field(default=1, ge=1, le=50)
+    # Horario de festivos: aplica en cualquier festivo (los días no cuentan)
+    festivos: bool = False
+
+    @model_validator(mode="after")
+    def _dias(self) -> "FranjaIn":
+        if not self.festivos and not self.dias:
+            raise ValueError("Escoja al menos un día, o marque el horario como de festivos")
+        return self
 
 
 class FranjaOut(FranjaIn, Orm):
@@ -168,6 +183,7 @@ class MatrizPuestoOut(Orm):
     secuencia: str
     jornada: str
     incluye_festivos: bool
+    horario_flexible: bool = False
     requiere_revision: bool
     nota: str
     franjas: list[FranjaOut]
@@ -178,6 +194,7 @@ class MatrizPuestoEditar(BaseModel):
     hombres: Decimal | None = Field(default=None, ge=0, le=500)
     secuencia: str | None = Field(default=None, max_length=80)
     incluye_festivos: bool | None = None
+    horario_flexible: bool | None = None
     requiere_revision: bool | None = None
     nota: str | None = Field(default=None, max_length=2000)
     franjas: list[FranjaIn] | None = Field(default=None, max_length=20)

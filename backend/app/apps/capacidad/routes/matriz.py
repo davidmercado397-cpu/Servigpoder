@@ -131,7 +131,7 @@ def editar_puesto(mp_id: int, data: MatrizPuestoEditar, request: Request, db: Db
     mp = _matriz_puesto(db, mp_id)
     _editable(mp.periodo)
     cambios = data.model_dump(exclude_unset=True)
-    for campo in ("hombres", "secuencia", "incluye_festivos", "requiere_revision", "nota"):
+    for campo in ("hombres", "secuencia", "incluye_festivos", "horario_flexible", "requiere_revision", "nota"):
         if campo in cambios and cambios[campo] is not None:
             setattr(mp, campo, cambios[campo])
     if data.franjas is not None:
@@ -207,9 +207,9 @@ def _dias_texto(mascara: int) -> str:
     return nombres.get(mascara) or " ".join(d for i, d in enumerate(DIAS_SEMANA) if mascara & (1 << i))
 
 
-def _franja_texto(dias: int, inicio, fin, cantidad: int) -> str:
+def _franja_texto(dias: int, inicio, fin, cantidad: int, festivos: bool = False) -> str:
     rango = "24 h" if inicio == fin else f"{inicio:%H:%M}-{fin:%H:%M}"
-    return f"{_dias_texto(dias)} {rango}" + (f" x{cantidad}" if cantidad > 1 else "")
+    return f"{'Festivos' if festivos else _dias_texto(dias)} {rango}" + (f" x{cantidad}" if cantidad > 1 else "")
 
 
 def _respaldo_habilitado() -> None:
@@ -285,9 +285,10 @@ def exportar(periodo_id: int, request: Request, db: DbSession, actual: Usuario =
         dias = svc.requerimiento(mp, p.anio, p.mes, fest)
         horas_mes = sum(svc.horas(f.inicio, f.fin) * f.cantidad for fr in dias.values() for f in fr)
         hoja.write_row(i, 0, [
-            pu.ubicacion.codigo, pu.ubicacion.nombre, pu.ubicacion.ciudad or "", pu.codigo, pu.descripcion, pu.tipo,
+            pu.ubicacion.codigo, pu.ubicacion.nombre, pu.ciudad or "", pu.codigo, pu.descripcion, pu.tipo,
             "Sí" if pu.excluido else "No", float(mp.hombres), mp.secuencia,
-            "; ".join(_franja_texto(f.dias, f.inicio, f.fin, f.cantidad) for f in mp.franjas),
+            "; ".join(_franja_texto(f.dias, f.inicio, f.fin, f.cantidad, f.festivos) for f in mp.franjas)
+            + (" (horario flexible: horas por día)" if mp.horario_flexible else ""),
             "Sí" if mp.incluye_festivos else "No", horas_mes, sum(1 for fr in dias.values() if fr), len(mp.excepciones),
             "Sí" if mp.requiere_revision else "No", mp.nota, mp.jornada,
         ])

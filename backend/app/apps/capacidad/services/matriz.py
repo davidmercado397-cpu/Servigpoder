@@ -9,7 +9,7 @@ import holidays
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.apps.capacidad.models import MatrizExcepcion, MatrizFranja, MatrizPeriodo, MatrizPuesto, Puesto, Ubicacion
+from app.apps.capacidad.models import MatrizExcepcion, MatrizFranja, MatrizPeriodo, MatrizPuesto, Puesto, PuestoEquivalencia, Ubicacion
 from app.apps.capacidad.models.maestros import BOLSA, OPERATIVO
 from app.apps.capacidad.models.matriz import BORRADOR
 from app.apps.capacidad.services import jornada
@@ -85,6 +85,9 @@ def importar_matriz(db: Session, contenido: bytes, anio: int, mes: int) -> Resul
     avisos: list[str] = []
     ubicaciones = {u.codigo: u for u in db.scalars(select(Ubicacion))}
     puestos = {canonico(p.codigo): p for p in db.scalars(select(Puesto))}
+    # Códigos anteriores de puestos a los que se les cambió el código a mano
+    for e in db.scalars(select(PuestoEquivalencia).where(PuestoEquivalencia.origen == "codigo_anterior")):
+        puestos.setdefault(canonico(e.codigo_siesa), e.puesto)
     periodo = MatrizPeriodo(anio=anio, mes=mes, estado=BORRADOR)
     db.add(periodo)
 
@@ -109,7 +112,8 @@ def importar_matriz(db: Session, contenido: bytes, anio: int, mes: int) -> Resul
             puesto = Puesto(codigo=codigo, ubicacion=ubi)
             db.add(puesto)
             puestos[canonico(codigo)] = puesto
-        puesto.descripcion = texto(f[C_DESC]) or texto(f[C_NOMBRE])
+        if not puesto.descripcion_manual:
+            puesto.descripcion = texto(f[C_DESC]) or texto(f[C_NOMBRE])
         puesto.tipo = BOLSA if es_bolsa else OPERATIVO
         puesto.excluido = prop.excluido
         puesto.activo = True
@@ -175,9 +179,10 @@ def proyectar(db: Session, periodo: MatrizPeriodo, copiar_excepciones: bool = Fa
             secuencia=mp.secuencia,
             jornada=mp.jornada,
             incluye_festivos=mp.incluye_festivos,
+            horario_flexible=mp.horario_flexible,
             requiere_revision=mp.requiere_revision,
             nota=mp.nota,
-            franjas=[MatrizFranja(dias=f.dias, inicio=f.inicio, fin=f.fin, cantidad=f.cantidad) for f in mp.franjas],
+            franjas=[MatrizFranja(dias=f.dias, inicio=f.inicio, fin=f.fin, cantidad=f.cantidad, festivos=f.festivos) for f in mp.franjas],
         )
         if copiar_excepciones:
             copia.excepciones = [_mover_excepcion(e, anio, mes) for e in mp.excepciones if _dia_existe(e.fecha.day, anio, mes)]
@@ -219,13 +224,18 @@ def requerimiento(mp: MatrizPuesto, anio: int, mes: int, fest: dict[date, str] |
     for e in mp.excepciones:
         excepciones[e.fecha].append(e)
 
+    # Horario de festivos: en cualquier festivo reemplaza al horario normal de ese día
+    de_festivo = [f for f in mp.franjas if f.festivos]
+    normales = [f for f in mp.franjas if not f.festivos]
     dias: dict[date, list[FranjaDia]] = {}
     for d in range(1, calendar.monthrange(anio, mes)[1] + 1):
         fecha = date(anio, mes, d)
         req: list[FranjaDia] = []
-        if mp.incluye_festivos or fecha not in fest:
+        if fecha in fest and de_festivo:
+            req = [FranjaDia(f.inicio, f.fin, f.cantidad) for f in de_festivo]
+        elif mp.incluye_festivos or fecha not in fest:
             bit = 1 << fecha.weekday()
-            req = [FranjaDia(f.inicio, f.fin, f.cantidad) for f in mp.franjas if f.dias & bit]
+            req = [FranjaDia(f.inicio, f.fin, f.cantidad) for f in normales if f.dias & bit]
         for e in excepciones.get(fecha, []):
             if e.sin_servicio:
                 req = []

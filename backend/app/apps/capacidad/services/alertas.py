@@ -133,7 +133,8 @@ def evaluar(db: Session, fecha: date | None = None) -> list[dict]:
                 CRITICA, f"{len({h[0] for h in huecos})} puestos con hueco entre hoy y el {hasta.isoformat()}",
                 "Horas vendidas sin nadie programado en los próximos días.", "/capacidad/cobertura",
                 [{"puesto_id": pid, "puesto": cod, "fecha": f.isoformat(), "horas": float(h),
-                  "franjas": ", ".join(f"{t['inicio']}-{t['fin']}" for t in det if t["tipo"] == "hueco")}
+                  "franjas": ", ".join(f"{t['inicio']}-{t['fin']}" if t.get("inicio") else f"{t.get('horas', 0):g} h (horario flexible)"
+                                       for t in det if t["tipo"] == "hueco")}
                  for pid, cod, f, h, det in huecos[:50]],
             ))
 

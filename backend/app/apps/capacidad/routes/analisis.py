@@ -16,7 +16,7 @@ from app.apps.capacidad.models import (
     Analisis, AnalisisDia, AnalisisPuesto, MatrizPeriodo, MatrizPuesto, ProgramacionCarga, ProgramacionDia,
     ProgramacionFila, Puesto, Ubicacion, Usuario,
 )
-from app.apps.capacidad.models.maestros import BOLSA, TRABAJO
+from app.apps.capacidad.models.maestros import BOLSA, TRABAJO, ciudad_puesto
 from app.apps.capacidad.schemas.analisis import (
     AnalisisIn, AnalisisOut, DetallePuesto, DiaAnalisisOut, MesDisponible, PersonaPuesto, PuestoAnalisisOut,
 )
@@ -117,7 +117,7 @@ def puestos(analisis_id: int, db: DbSession, estado: str = Query("", max_length=
         elif estado == "sin_programacion":
             consulta = consulta.where(AnalisisPuesto.personas == 0, AnalisisPuesto.horas_requeridas > 0)
     if ciudad:
-        consulta = consulta.where(Ubicacion.ciudad.ilike(ciudad))
+        consulta = consulta.where(ciudad_puesto().ilike(ciudad))
     if q.strip():
         patron = f"%{q.strip()}%"
         consulta = consulta.where(Puesto.codigo.ilike(patron) | Puesto.descripcion.ilike(patron) | Ubicacion.nombre.ilike(patron))
@@ -204,7 +204,7 @@ def exportar(analisis_id: int, request: Request, db: DbSession, actual: Usuario 
                           .order_by(AnalisisPuesto.horas_descubiertas.desc())).unique())
     for i, ap in enumerate(aps, start=1):
         p = ap.puesto
-        hoja.write_row(i, 0, [p.ubicacion.codigo, p.ubicacion.nombre, p.ubicacion.ciudad or "", p.codigo, p.descripcion,
+        hoja.write_row(i, 0, [p.ubicacion.codigo, p.ubicacion.nombre, p.ciudad or "", p.codigo, p.descripcion,
                               ap.estado, float(ap.hombres), ap.fijos, ap.personas, float(ap.horas_requeridas),
                               float(ap.horas_programadas), float(ap.horas_descubiertas), float(ap.horas_exceso),
                               ap.dias_hueco, ap.dias_exceso])
@@ -256,9 +256,9 @@ def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
     estados = {"hueco", "exceso", "mixto"} if tipo == "todos" else {tipo, "mixto"}
     consulta = (select(AnalisisPuesto).join(AnalisisPuesto.puesto).join(Puesto.ubicacion)
                 .where(AnalisisPuesto.analisis_id == a.id, AnalisisPuesto.estado.in_(estados))
-                .order_by(Ubicacion.ciudad, Ubicacion.codigo, Puesto.codigo))
+                .order_by(ciudad_puesto(), Ubicacion.codigo, Puesto.codigo))
     if ciudad.strip():
-        consulta = consulta.where(Ubicacion.ciudad == ciudad.strip())
+        consulta = consulta.where(ciudad_puesto() == ciudad.strip())
     aps = list(db.scalars(consulta).unique())
     fest = festivos(r["anio"], r["mes"])
 
@@ -274,7 +274,7 @@ def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
     hoja.write_row(0, 0, enc, negrita)
     for i, ap in enumerate(aps, start=1):
         pu = ap.puesto
-        hoja.write_row(i, 0, [pu.ubicacion.ciudad or "", pu.ubicacion.codigo, pu.ubicacion.nombre, pu.codigo, pu.descripcion,
+        hoja.write_row(i, 0, [pu.ciudad or "", pu.ubicacion.codigo, pu.ubicacion.nombre, pu.codigo, pu.descripcion,
                               ESTADOS_TEXTO.get(ap.estado, ap.estado), float(ap.hombres), ap.fijos, ap.personas,
                               float(ap.horas_requeridas), float(ap.horas_programadas), float(ap.horas_descubiertas),
                               float(ap.horas_exceso), ap.dias_hueco, ap.dias_exceso])
@@ -299,7 +299,7 @@ def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
             if t["tipo"] not in tipos:
                 continue
             horas = _horas_tramo(t["inicio"], t["fin"]) * t["personas"]
-            hoja.write_row(fila, 0, [ap.puesto.ubicacion.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, ap.puesto.descripcion,
+            hoja.write_row(fila, 0, [ap.puesto.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, ap.puesto.descripcion,
                                      d.fecha.isoformat(), DIAS_SEMANA[d.fecha.weekday()], fest.get(d.fecha, ""),
                                      "Hueco" if t["tipo"] == "hueco" else "Exceso", t["inicio"], t["fin"], t["personas"], horas],
                            hueco if t["tipo"] == "hueco" else exceso)
@@ -318,7 +318,7 @@ def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
         if tipo == "hueco" and not d.horas_descubiertas or tipo == "exceso" and not d.horas_exceso:
             continue
         ap = por_id[d.analisis_puesto_id]
-        hoja.write_row(fila, 0, [ap.puesto.ubicacion.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, d.fecha.isoformat(),
+        hoja.write_row(fila, 0, [ap.puesto.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, d.fecha.isoformat(),
                                  DIAS_SEMANA[d.fecha.weekday()], ESTADOS_TEXTO.get(d.estado, d.estado), float(d.horas_requeridas),
                                  float(d.horas_programadas), float(d.horas_descubiertas), float(d.horas_exceso)])
         fila += 1

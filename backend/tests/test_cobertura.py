@@ -161,3 +161,34 @@ def test_turno_creado_despues_cuenta_al_recalcular(admin):
     assert despues["programadas"] == 12 and despues["descubiertas"] == antes["descubiertas"] - 12
     carga = admin.get("/api/capacidad/programacion/cargas").json()["data"][0]
     assert not carga["resumen"].get("codigos_desconocidos")
+
+
+def test_horario_flexible_cuenta_las_horas_del_dia():
+    from app.apps.capacidad.services.cobertura import evaluar_flexible
+    l = Linea()
+    l.vender(BASE15, D15, time(6), time(14), 1)  # 8 h vendidas, a cualquier hora
+    l.vender(BASE15 + BLOQUES_DIA, D16, time(6), time(14), 1)
+    l.programar(BASE15, D15, time(14), time(22))  # 8 h en otro horario: cubierto
+    l.programar(BASE15 + BLOQUES_DIA, D16, time(22), time(4))  # 6 h: faltan 2
+    dias = evaluar_flexible(l, D15, D16)
+    assert (dias[D15].descubiertas, dias[D15].exceso, dias[D15].estado) == (0, 0, "ok")
+    assert (dias[D16].requeridas, dias[D16].programadas, dias[D16].descubiertas, dias[D16].estado) == (8, 6, 2, "hueco")
+    assert dias[D16].detalle == [{"tipo": "hueco", "personas": 0, "inicio": "", "fin": "", "horas": 2, "flexible": True}]
+    # Con horario fijo el mismo día 15 sería hueco y exceso
+    assert evaluar(l, D15, D15)[D15].estado == "mixto"
+
+
+def test_puesto_flexible_en_el_analisis(admin):
+    r = _preparar(admin, {"3": ["18:00 - 06:00"]})  # recepción de 6 a 18 programada de noche el 15
+    pid = r.json()["meta"]["extra"]["analisis_id"]
+    antes = next(p for p in admin.get(f"/api/capacidad/analisis/{pid}/puestos?q=3").json()["data"] if p["puesto"]["codigo"] == "3")
+    periodo = admin.get("/api/capacidad/matriz/periodos").json()["data"][0]["id"]
+    mp = next(m for m in admin.get(f"/api/capacidad/matriz/periodos/{periodo}/puestos?q=NUBIA").json()["data"] if m["puesto"]["codigo"] == "3")
+    assert admin.patch(f"/api/capacidad/matriz/puestos/{mp['id']}", json={"horario_flexible": True}).json()["data"]["horario_flexible"]
+    carga = admin.get("/api/capacidad/programacion/cargas").json()["data"][0]["id"]
+    nuevo = admin.post("/api/capacidad/analisis", json={"carga_id": carga})
+    assert nuevo.status_code == 201, nuevo.text
+    aid = nuevo.json()["data"]["id"]
+    # (en SQLite el análisis nuevo reutiliza el id y los puestos del anterior no se borran en cascada: se toma el último)
+    despues = [p for p in admin.get(f"/api/capacidad/analisis/{aid}/puestos?q=3").json()["data"] if p["puesto"]["codigo"] == "3"][-1]
+    assert float(antes["horas_exceso"]) == 12 and float(despues["horas_exceso"]) == 0  # las 12 h de noche cubren el día 15

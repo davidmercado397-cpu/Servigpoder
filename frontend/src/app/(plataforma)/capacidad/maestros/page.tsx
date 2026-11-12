@@ -167,10 +167,32 @@ function PuestosTab() {
 
   const [creando, setCreando] = useState(false);
   const [aviso, setAviso] = useState("");
+  const [error, setError] = useState("");
+  const [edicion, setEdicion] = useState<{ id: number; codigo: string; descripcion: string; ciudad: string } | null>(null);
+  const [ciudades, setCiudades] = useState<string[]>([]);
+  useEffect(() => {
+    api<string[]>("/capacidad/maestros/ciudades").then(setCiudades).catch(() => {});
+  }, []);
 
   async function cambiar(p: Puesto, campo: "excluido" | "activo", valor: boolean) {
     await api(`/capacidad/maestros/puestos/${p.id}`, { method: "PATCH", json: { [campo]: valor } });
     cargar();
+  }
+
+  async function guardarEdicion() {
+    if (!edicion) return;
+    setError("");
+    try {
+      const p = await api<Puesto>(`/capacidad/maestros/puestos/${edicion.id}`, {
+        method: "PATCH", json: { codigo: edicion.codigo, descripcion: edicion.descripcion, ciudad: edicion.ciudad },
+      });
+      setEdicion(null);
+      setAviso(`Puesto ${p.codigo} actualizado. Al importar la matriz o la programación de SIESA se respeta lo corregido aquí.`);
+      cargar();
+      api<string[]>("/capacidad/maestros/ciudades").then(setCiudades).catch(() => {});
+    } catch (e) {
+      setError(mensajeError(e));
+    }
   }
 
   return (
@@ -180,6 +202,8 @@ function PuestosTab() {
         {puedeEditar && <button className="btn-primario ml-auto" onClick={() => { setAviso(""); setCreando(true); }}>Nuevo puesto</button>}
       </div>
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
+      {error && <Alerta>{error}</Alerta>}
+      <datalist id="ciudades-puesto">{ciudades.map((c) => <option key={c} value={c} />)}</datalist>
       {creando && (
         <FormularioPuesto
           titulo="Nuevo puesto"
@@ -194,25 +218,44 @@ function PuestosTab() {
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead>
-            <tr><th>PODER</th><th>Ubicación</th><th>Puesto</th><th>Descripción</th><th>Tipo</th><th>Excluido</th><th>Activo</th></tr>
+            <tr><th>PODER</th><th>Ubicación</th><th>Puesto</th><th>Descripción</th><th>Ciudad</th><th>Tipo</th><th>Excluido</th><th>Activo</th><th /></tr>
           </thead>
           <tbody>
-            {puestos.map((p) => (
+            {puestos.map((p) => edicion?.id === p.id ? (
+              <tr key={p.id} className="bg-marca-50">
+                <td className="font-mono">{p.ubicacion.codigo}</td>
+                <td>{p.ubicacion.nombre}</td>
+                <td><input className="input w-28 font-mono" value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} /></td>
+                <td><input className="input min-w-48" value={edicion.descripcion} onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })} /></td>
+                <td><input className="input w-40" list="ciudades-puesto" placeholder={p.ubicacion.ciudad ?? "Ciudad"} value={edicion.ciudad}
+                  onChange={(e) => setEdicion({ ...edicion, ciudad: e.target.value })} title="Vacía = la ciudad de la ubicación" /></td>
+                <td colSpan={3} className="text-xs text-slate-500">El código anterior se sigue reconociendo al importar.</td>
+                <td className="whitespace-nowrap">
+                  <button className="btn-primario px-2 py-1 text-xs" onClick={guardarEdicion}>Guardar</button>
+                  <button className="ml-1 btn-secundario px-2 py-1 text-xs" onClick={() => { setEdicion(null); setError(""); }}>Cancelar</button>
+                </td>
+              </tr>
+            ) : (
               <tr key={p.id}>
                 <td className="font-mono">{p.ubicacion.codigo}</td>
                 <td>{p.ubicacion.nombre}</td>
                 <td className="font-mono font-semibold">{p.codigo}</td>
-                <td>{p.descripcion}</td>
+                <td>{p.descripcion}{p.descripcion_manual && <span className="ml-1 text-xs text-sky-700" title="Corregida a mano: la importación no la cambia">✎</span>}</td>
+                <td>{p.ciudad ?? p.ubicacion.ciudad ?? "—"}{p.ciudad_manual && <span className="ml-1 text-xs text-sky-700" title={`Corregida a mano (la ubicación dice ${p.ubicacion.ciudad ?? "—"}): la importación no la cambia`}>✎</span>}</td>
                 <td>{p.tipo === "bolsa" ? <Insignia color="bg-purple-100 text-purple-800">Bolsa</Insignia> : "Operativo"}</td>
                 <td><input type="checkbox" checked={p.excluido} disabled={!puedeEditar} onChange={(e) => cambiar(p, "excluido", e.target.checked)} /></td>
                 <td><input type="checkbox" checked={p.activo} disabled={!puedeEditar} onChange={(e) => cambiar(p, "activo", e.target.checked)} /></td>
+                <td>{puedeEditar && <button className="text-sm text-marca-600 hover:underline" onClick={() => {
+                  setError(""); setEdicion({ id: p.id, codigo: p.codigo, descripcion: p.descripcion, ciudad: p.ciudad_manual ?? "" });
+                }}>Editar</button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
         <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
-      <p className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos. Un puesto inactivo no se proyecta al mes siguiente; uno excluido no entra al control.</p>
+      <p className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos. Un puesto inactivo no se proyecta al mes siguiente; uno excluido no entra al control.
+        Lo corregido con «Editar» (código, descripción y ciudad, marcado con ✎) manda sobre lo que llega al importar la matriz o la programación de SIESA.</p>
     </div>
   );
 }

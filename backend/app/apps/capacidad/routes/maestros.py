@@ -111,11 +111,42 @@ def editar_puesto(puesto_id: int, data: PuestoEditar, request: Request, db: DbSe
     puesto = db.get(Puesto, puesto_id)
     if puesto is None:
         raise ApiError(404, "Puesto no encontrado")
-    for campo, valor in data.model_dump(exclude_none=True).items():
+    cambios = data.model_dump(exclude_none=True)
+    anterior = puesto.codigo
+    if "codigo" in cambios:
+        codigo = limpiar(cambios.pop("codigo"))
+        if codigo != puesto.codigo:
+            otro = db.scalar(select(Puesto).where(func.upper(Puesto.codigo) == codigo.upper(), Puesto.id != puesto.id))
+            if otro is not None:
+                raise ApiError(409, f"Ya existe el puesto {codigo}")
+            # El código anterior sigue llegando en SIESA y en la matriz: queda apuntando a este puesto
+            for viejo in {anterior, limpiar(anterior)}:
+                eq = db.get(PuestoEquivalencia, viejo) or PuestoEquivalencia(codigo_siesa=viejo)
+                eq.puesto_id, eq.origen = puesto.id, "codigo_anterior"
+                db.add(eq)
+            puesto.codigo = codigo
+    if "descripcion" in cambios:
+        nueva = cambios.pop("descripcion").strip()
+        if nueva != puesto.descripcion:
+            puesto.descripcion, puesto.descripcion_manual = nueva, True
+    if "ciudad" in cambios:
+        ciudad = cambios.pop("ciudad").strip().upper() or None
+        puesto.ciudad_manual = None if ciudad == (puesto.ubicacion.ciudad or "").strip().upper() else ciudad
+    for campo, valor in cambios.items():
         setattr(puesto, campo, valor)
-    auditar(db, request, "puesto_editado", actual.id, puesto=puesto.codigo, **data.model_dump(exclude_none=True))
+    auditar(db, request, "puesto_editado", actual.id, puesto=puesto.codigo, codigo_anterior=anterior if anterior != puesto.codigo else None,
+            **data.model_dump(exclude_none=True, exclude={"codigo"}))
     db.commit()
+    db.refresh(puesto)
     return ok(puesto)
+
+
+@router.get("/ciudades", response_model=ApiResponse[list[str]])
+def ciudades(db: DbSession, _=Depends(require("capacidad.maestros.ver"))):
+    """Ciudades (centros de operación) que ya existen, para escoger al corregir un puesto."""
+    nombres = {c.strip().upper() for c in db.scalars(select(Ubicacion.ciudad).distinct()) if c and c.strip()}
+    nombres |= {c.strip().upper() for c in db.scalars(select(Puesto.ciudad_manual).distinct()) if c and c.strip()}
+    return ok(sorted(nombres))
 
 
 @router.get("/equivalencias", response_model=ApiResponse[list[EquivalenciaOut]])

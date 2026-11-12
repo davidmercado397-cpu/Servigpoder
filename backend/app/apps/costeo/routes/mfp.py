@@ -15,8 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, require
-from app.apps.costeo.models import UNIDADES, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstSoporte, CstTipoDocumento, CstTipoItem
-from app.apps.costeo.services import importador
+from app.apps.costeo.models import (
+    UNIDADES, CstAreaCorreo, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstNotificacion, CstSoporte, CstTipoDocumento, CstTipoItem,
+)
+from app.apps.costeo.services import importador, notificaciones
 from app.apps.costeo.services.mfp import HORAS, resumen, tope_movimiento
 from app.core.archivos import leer_xlsx
 from app.core.rate_limit import limitar
@@ -469,6 +471,58 @@ class TipoDocumentoIn(BaseModel):
     codigo: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9_-]+$")
     nombre: str = Field(min_length=2, max_length=120)
     activo: bool = True
+
+
+# --- Avisos a las áreas al iniciar el contrato --------------------------------------------------------
+
+@router.get("/areas-correo", response_model=ApiResponse[list[dict]])
+def areas_correo(db: DbSession, _=Depends(require(VER))):
+    para = notificaciones.destinatarios(db)
+    return ok([{"area": a, "nombre": n, "correos": ", ".join(para[a])} for a, n in notificaciones.AREAS.items()])
+
+
+class AreaCorreoIn(BaseModel):
+    area: str = Field(pattern=r"^(compras|almacen|financiero|nomina|programacion)$")
+    correos: str = Field(default="", max_length=2000)
+
+
+@router.put("/areas-correo", response_model=ApiResponse[dict])
+def guardar_areas_correo(data: list[AreaCorreoIn], request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+    for x in data:
+        correos = [c.strip() for c in re.split(r"[,;\s]+", x.correos) if c.strip()]
+        malos = [c for c in correos if not re.fullmatch(r"[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+", c)]
+        if malos:
+            raise ApiError(422, f"Correo no válido en {notificaciones.AREAS[x.area]}: {malos[0]}")
+        a = db.get(CstAreaCorreo, x.area) or CstAreaCorreo(area=x.area)
+        a.correos = ", ".join(correos)
+        db.add(a)
+    auditar(db, request, "cst_areas_correo", actual.id, areas={x.area: x.correos for x in data})
+    db.commit()
+    return ok({"areas": len(data)})
+
+
+def _aviso_out(n: CstNotificacion) -> dict:
+    return {"id": n.id, "area": n.area, "area_nombre": notificaciones.AREAS.get(n.area, n.area), "destinatarios": n.destinatarios,
+            "asunto": n.asunto, "estado": n.estado, "error": n.error, "enviado_en": n.enviado_en.isoformat() if n.enviado_en else ""}
+
+
+@router.get("/mfp/{mfp_id}/avisos", response_model=ApiResponse[list[dict]])
+def avisos(mfp_id: int, db: DbSession, _=Depends(require(VER))):
+    _mfp(db, mfp_id)
+    return ok([_aviso_out(n) for n in db.scalars(select(CstNotificacion).where(CstNotificacion.mfp_id == mfp_id)
+                                                 .order_by(CstNotificacion.enviado_en.desc(), CstNotificacion.id.desc()))])
+
+
+@router.post("/mfp/{mfp_id}/avisos", response_model=ApiResponse[list[dict]], dependencies=[Depends(limitar("cst_avisos", 5, 60))])
+def reenviar_avisos(mfp_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Vuelve a enviar a las áreas los avisos de inicio del contrato (necesita la fecha de inicio)."""
+    m = _mfp(db, mfp_id)
+    if m.fecha_inicio is None:
+        raise ApiError(409, "La MFP no tiene fecha de inicio")
+    enviados = notificaciones.notificar(db, m, actual.id)
+    auditar(db, request, "cst_avisos_enviados", actual.id, numero=m.numero, estados={n.area: n.estado for n in enviados})
+    db.commit()
+    return ok([_aviso_out(n) for n in enviados])
 
 
 @router.get("/tipos-documento", response_model=ApiResponse[list[dict]])

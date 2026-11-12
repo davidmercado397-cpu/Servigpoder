@@ -12,7 +12,7 @@ from app.apps.costeo.models import (
     APROBADO, BORRADOR, ENVIADO, RECHAZADO, CstCatalogoCosto, CstCliente, CstComisionRango, CstCosteo, CstMfp, CstMfpItem,
     CstParametro, CstServicio, CstTipoItem,
 )
-from app.apps.costeo.services import calculo, configuracion, puestos
+from app.apps.costeo.services import calculo, configuracion, notificaciones, puestos
 from app.apps.costeo.services.calculo import Rango
 from app.core.auditoria import auditar
 from app.core.respuestas import ApiError, ApiResponse, ok
@@ -375,4 +375,8 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
     item("REPRESENTACION", r["bolsas"]["representacion"], "Reserva de gastos de representación del contrato")
     auditar(db, request, "cst_mfp_desde_costeo", actual.id, costeo=c.nombre, version=c.version, numero=m.numero)
     db.commit()
-    return ok({"mfp_id": m.id})
+    # Costeo aprobado + fecha de inicio: arranca el puesto y se avisa a las áreas (un fallo del correo no deshace la MFP)
+    db.expire_all()
+    avisos = notificaciones.notificar(db, db.get(CstMfp, m.id), actual.id)
+    db.commit()
+    return ok({"mfp_id": m.id, "avisos": {n.area: n.estado for n in avisos}})

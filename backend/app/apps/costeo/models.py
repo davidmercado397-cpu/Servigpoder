@@ -122,6 +122,31 @@ class CstMovimiento(Base):
                                                          passive_deletes=True, order_by="CstSoporte.id")
 
 
+class CstAreaCorreo(Base):
+    """Destinatarios de los avisos de inicio de contrato por área (compras, almacén, financiero, nómina, programación)."""
+
+    __tablename__ = "cst_area_correo"
+
+    area: Mapped[str] = mapped_column(String(20), primary_key=True)
+    correos: Mapped[str] = mapped_column(Text, default="")  # separados por coma
+
+
+class CstNotificacion(Base):
+    """Correo enviado (o intentado) a un área por el inicio de una MFP."""
+
+    __tablename__ = "cst_notificacion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mfp_id: Mapped[int] = mapped_column(ForeignKey("cst_mfp.id", ondelete="CASCADE"), index=True)
+    area: Mapped[str] = mapped_column(String(20))
+    destinatarios: Mapped[str] = mapped_column(Text, default="")
+    asunto: Mapped[str] = mapped_column(String(300), default="")
+    estado: Mapped[str] = mapped_column(String(20))  # enviado | error | sin_destinatarios
+    error: Mapped[str] = mapped_column(Text, default="")
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
+    enviado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CstTipoDocumento(Base):
     """Tipos de documento contable (comprobante de egreso, factura, nota crédito…): catálogo editable."""
 

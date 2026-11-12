@@ -79,6 +79,8 @@ export default function DetalleMfp() {
         </div>
       )}
 
+      <Avisos mfpId={m.id} conFecha={!!m.fecha_inicio} puede={gestionar} />
+
       <div className="tarjeta overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
           <h2 className="font-semibold text-slate-700">Ítems pactados</h2>
@@ -232,6 +234,53 @@ function Dato({ titulo, valor, nota, rojo }: { titulo: string; valor: string; no
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{titulo}</p>
       <p className={`mt-1 text-lg font-bold ${rojo ? "text-red-700" : "text-marca-900"}`}>{valor}</p>
       {nota && <p className={`text-xs ${rojo ? "text-red-600" : "text-slate-500"}`}>{nota}</p>}
+    </div>
+  );
+}
+
+type Aviso = { id: number; area: string; area_nombre: string; destinatarios: string; asunto: string; estado: string; error: string; enviado_en: string };
+const ESTADO_AVISO: Record<string, [string, string]> = {
+  enviado: ["Enviado", "bg-green-100 text-green-800"], error: ["No se envió", "bg-red-100 text-red-800"],
+  sin_destinatarios: ["Sin correos del área", "bg-amber-100 text-amber-800"],
+};
+
+// Correos a compras, almacén, financiero, nómina y programación al iniciar el contrato
+function Avisos({ mfpId, conFecha, puede }: { mfpId: number; conFecha: boolean; puede: boolean }) {
+  const [lista, setLista] = useState<Aviso[] | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState("");
+  const cargar = useCallback(() => api<Aviso[]>(`/costeo/mfp/${mfpId}/avisos`).then(setLista).catch(() => setLista([])), [mfpId]);
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+  if (!lista || (!lista.length && !puede)) return null;
+  // El último envío de cada área
+  const ultimos = Object.values(lista.reduce<Record<string, Aviso>>((acc, a) => (acc[a.area] ? acc : { ...acc, [a.area]: a }), {}));
+  return (
+    <div className="tarjeta p-4">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <h2 className="font-semibold text-slate-700">Avisos a las áreas</h2>
+        {puede && conFecha && (
+          <button className="btn-secundario ml-auto px-2 py-1 text-xs" disabled={ocupado} onClick={async () => {
+            if (!confirm("¿Enviar otra vez los correos a todas las áreas?")) return;
+            setOcupado(true); setError("");
+            try { await api(`/costeo/mfp/${mfpId}/avisos`, { method: "POST" }); await cargar(); } catch (e) { setError(mensajeError(e)); } finally { setOcupado(false); }
+          }}>{ocupado ? "Enviando…" : lista.length ? "Reenviar" : "Enviar avisos"}</button>
+        )}
+      </div>
+      {error && <Alerta>{error}</Alerta>}
+      {!ultimos.length ? <p className="text-sm text-slate-500">{conFecha ? "Aún no se han enviado." : "Se envían cuando la MFP tiene fecha de inicio."}</p> : (
+        <ul className="space-y-1 text-sm">
+          {ultimos.map((a) => (
+            <li key={a.area} className="flex flex-wrap items-center gap-2">
+              <span className="w-28 font-medium text-slate-700">{a.area_nombre}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs ${ESTADO_AVISO[a.estado]?.[1] ?? ""}`}>{ESTADO_AVISO[a.estado]?.[0] ?? a.estado}</span>
+              <span className="text-xs text-slate-500">{a.destinatarios || a.error} · {new Date(a.enviado_en).toLocaleString("es-CO")}</span>
+              {a.estado === "error" && <span className="text-xs text-red-700">{a.error}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

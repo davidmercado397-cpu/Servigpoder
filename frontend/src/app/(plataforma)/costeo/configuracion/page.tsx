@@ -7,7 +7,7 @@ import { api, mensajeError } from "@/lib/api";
 import { UNIDAD, pesos, type TipoDocumento, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
-type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "dotacion_puesto" | "otros" | "tipos" | "documentos";
+type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "dotacion_puesto" | "otros" | "tipos" | "documentos" | "correos";
 type Parametro = { clave: string; valor: number; nombre: string; grupo: string; ayuda: string };
 type RangoC = { hasta_pct: number | null; pct_comision: number; carga_prestacional: number };
 type Servicio = { id?: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
@@ -20,6 +20,7 @@ const APLICA: [string, string][] = [["", "Solo a mano"], ["todos", "Todos los pu
 const PESTANAS: [Pestana, string][] = [
   ["parametros", "Parámetros"], ["comisiones", "Comisiones"], ["servicios", "Servicios y tarifas"], ["dotacion_tarifa", "Dotación de la tarifa"],
   ["dotacion_puesto", "Dotación del puesto"], ["otros", "Otros costos directos"], ["tipos", "Ítems de MFP"], ["documentos", "Documentos contables"],
+  ["correos", "Avisos por correo"],
 ];
 
 export default function Configuracion() {
@@ -41,7 +42,48 @@ export default function Configuracion() {
       {(p === "dotacion_tarifa" || p === "dotacion_puesto" || p === "otros") && <Catalogo key={p} grupo={p} puede={puede || precios} />}
       {p === "tipos" && <Tipos puede={puede} />}
       {p === "documentos" && <Documentos puede={puede} />}
+      {p === "correos" && <Correos puede={puede} />}
     </>
+  );
+}
+
+type AreaCorreo = { area: string; nombre: string; correos: string };
+const QUE_RECIBE: Record<string, string> = {
+  compras: "Los ítems de la MFP y la dotación adicional, para cotizar.",
+  almacen: "La dotación de la primera entrega por puesto, para separarla.",
+  financiero: "El inicio del contrato, la facturación mensual y los servicios facturados.",
+  nomina: "El salario, las horas extras y recargos y los auxilios de cada tipo de personal.",
+  programacion: "Los servicios vendidos (24 h, 12 h…) por puesto, para crearlos en el sistema.",
+};
+
+function Correos({ puede }: { puede: boolean }) {
+  const [lista, setLista] = useState<AreaCorreo[]>([]);
+  const m = useMensaje();
+  const cargar = useCallback(() => api<AreaCorreo[]>("/costeo/areas-correo").then(setLista).catch(m.error), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+  return (
+    <div className="tarjeta p-4">{m.vista}
+      <p className="mb-4 text-sm text-slate-500">Cuando un costeo aprobado crea su MFP con la fecha de inicio, la plataforma le envía un correo a cada área.
+        Escriba los correos de cada una separados por coma; un área sin correos no recibe nada. Lo enviado queda registrado en la MFP, donde se puede reenviar.</p>
+      <div className="space-y-3">
+        {lista.map((a, i) => (
+          <div key={a.area} className="grid gap-2 sm:grid-cols-[14rem_1fr] sm:items-start">
+            <div><p className="font-medium text-slate-700">{a.nombre}</p><p className="text-xs text-slate-500">{QUE_RECIBE[a.area]}</p></div>
+            <input className="input" disabled={!puede} placeholder="persona@servigpoder.com, otra@servigpoder.com" value={a.correos}
+              onChange={(e) => setLista(lista.map((x, j) => (j === i ? { ...x, correos: e.target.value } : x)))} />
+          </div>
+        ))}
+      </div>
+      {puede && (
+        <div className="mt-4 flex justify-end">
+          <button className="btn-primario" onClick={async () => {
+            try { await api("/costeo/areas-correo", { method: "PUT", json: lista.map(({ area, correos }) => ({ area, correos })) }); m.ok("Correos guardados."); cargar(); } catch (e) { m.error(e); }
+          }}><Save className="h-4 w-4" /> Guardar</button>
+        </div>
+      )}
+    </div>
   );
 }
 

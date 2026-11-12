@@ -457,3 +457,46 @@ def test_comercial_crea_mfp_y_otros_dice_cual(admin):
     assert otros["nombre"] == "Cafetera" and otros["tipo"] == "Otros: Cafetera" and otros["descripcion"] == "Entrega en enero"
     # Editar lo pactado sigue siendo de quien gestiona las MFP
     assert admin.put(f"{API}/items/{otros['id']}", json={"pactado": 1, "nombre": "Otra"}).status_code == 403
+
+
+def test_al_crear_la_mfp_se_avisa_a_las_areas(admin, monkeypatch):
+    from app.core import correo
+    enviados = []
+    monkeypatch.setattr(correo, "enviar", lambda mensajes: [enviados.append(m) or None for m in mensajes])
+    malo = [{"area": "compras", "correos": "no-es-correo"}]
+    assert admin.put(f"{API}/areas-correo", json=malo).status_code == 422
+    areas = [{"area": "compras", "correos": "compras@empresa.co; cotiza@empresa.co"}, {"area": "almacen", "correos": "almacen@empresa.co"},
+             {"area": "nomina", "correos": "nomina@empresa.co"}, {"area": "programacion", "correos": "prog@empresa.co"}]
+    assert admin.put(f"{API}/areas-correo", json=areas).status_code == 200
+    assert {a["area"]: a["correos"] for a in admin.get(f"{API}/areas-correo").json()["data"]}["compras"] == "compras@empresa.co, cotiza@empresa.co"
+
+    servicio = next(s for s in admin.get(f"{API}/servicios").json()["data"] if s["hombres"] == 3)
+    cid = admin.post(f"{API}/clientes", json={"nit": "55", "nombre": "Cliente nuevo"}).json()["data"]["id"]
+    c = admin.post(f"{API}/costeos", json={"cliente_id": cid, "nombre": "Puesto nuevo"}).json()["data"]
+    datos = {**c["datos"], "servicios": [{"servicio_id": servicio["id"], "descripcion": servicio["descripcion"], "puesto": "Portería", "cantidad": 1,
+                                          "tarifa": servicio["tarifa"], "hombres": 3, "dotacion": "gala", "arma": "fogeo"}],
+             "personal": [{**c["datos"]["personal"][0], "horas_extras": 1_200_000}],
+             "otros": [{"nombre": "Cafetera", "valor_unitario": 900_000, "cantidad": 1, "tipo_item": "OTROS"}]}
+    admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Puesto nuevo", "datos": datos})
+    admin.post(f"{API}/costeos/{c['id']}/estado", json={"estado": "aprobado"})
+    r = admin.post(f"{API}/costeos/{c['id']}/crear-mfp", json={"numero": "777", "fecha_inicio": "2026-12-01"}).json()["data"]
+    assert r["avisos"] == {"compras": "enviado", "almacen": "enviado", "financiero": "sin_destinatarios", "nomina": "enviado",
+                           "programacion": "enviado"}
+    por_area = {m.para[0]: m for m in enviados}
+    assert por_area["compras@empresa.co"].para == ["compras@empresa.co", "cotiza@empresa.co"]
+    assert "Cafetera" in por_area["compras@empresa.co"].html and "Nota crédito" not in por_area["compras@empresa.co"].html
+    almacen = por_area["almacen@empresa.co"].html
+    assert "CAMISA" in almacen and "ARMA DE FOGEO" in almacen and "primera entrega" in almacen
+    assert "$1.200.000" in por_area["nomina@empresa.co"].html
+    assert servicio["descripcion"] in por_area["prog@empresa.co"].html and "01/12/2026" in por_area["prog@empresa.co"].asunto
+    # Quedan en la MFP y se pueden reenviar
+    avisos = admin.get(f"{API}/mfp/{r['mfp_id']}/avisos").json()["data"]
+    assert len(avisos) == 5 and {a["estado"] for a in avisos} == {"enviado", "sin_destinatarios"}
+    assert len(admin.post(f"{API}/mfp/{r['mfp_id']}/avisos").json()["data"]) == 5
+    assert len(admin.get(f"{API}/mfp/{r['mfp_id']}/avisos").json()["data"]) == 10
+
+
+def test_correo_sin_configurar_no_envia():
+    from app.core import correo
+    assert not correo.configurado()
+    assert correo.enviar([correo.Mensaje(["a@b.co"], "x", "<p>x</p>")])[0].startswith("El correo de la plataforma no está configurado")

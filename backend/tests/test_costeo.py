@@ -500,3 +500,44 @@ def test_correo_sin_configurar_no_envia():
     from app.core import correo
     assert not correo.configurado()
     assert correo.enviar([correo.Mensaje(["a@b.co"], "x", "<p>x</p>")])[0].startswith("El correo de la plataforma no está configurado")
+
+
+def test_correo_de_prueba_con_logo(admin, monkeypatch):
+    from app.core import correo
+    from app.core.config import get_settings
+
+    salientes = []
+
+    class SmtpFalso:
+        def __init__(self, host, port, timeout):
+            assert (host, port) == ("smtp.gmail.com", 587)
+
+        def starttls(self):
+            pass
+
+        def login(self, usuario, clave):
+            pass
+
+        def send_message(self, msg):
+            salientes.append(msg)
+
+        def quit(self):
+            pass
+
+    s = get_settings()
+    monkeypatch.setattr(s, "smtp_usuario", "plataforma@gmail.com")
+    monkeypatch.setattr(s, "smtp_clave", "clave-de-aplicacion")
+    monkeypatch.setattr(correo.smtplib, "SMTP", SmtpFalso)
+    assert admin.post(f"{API}/areas-correo/prueba", json={"para": "no-es-correo"}).status_code == 422
+    r = admin.post(f"{API}/areas-correo/prueba", json={"para": "yo@empresa.co"})
+    assert r.status_code == 200, r.text
+    msg = salientes[0]
+    assert msg["To"] == "yo@empresa.co" and msg["From"] == "plataforma@gmail.com" and "Prueba de correo" in msg["Subject"]
+    html = msg.get_body(("html",)).get_content()
+    assert "Desarrollos Z Servigpoder" in html and "Plataforma Servigpoder" in html  # la marca
+
+    # Con logo: va dentro del correo (cid), no como enlace
+    html, imagenes = "<img src='cid:logo'>", {"logo": (b"\x89PNG\r\n\x1a\nfalso", "image/png")}
+    assert correo.enviar([correo.Mensaje(["a@b.co"], "x", html, imagenes=imagenes)]) == [None]
+    partes = [p for p in salientes[-1].walk() if p.get_content_type() == "image/png"]
+    assert len(partes) == 1 and partes[0]["Content-ID"] == "<logo>"

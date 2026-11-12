@@ -26,6 +26,25 @@ ENVIADO, ERROR, SIN_DESTINATARIOS = "enviado", "error", "sin_destinatarios"
 NO_SE_COTIZAN = {"NOTA_CREDITO", "REINVERSION", "BOLSA_HORAS", "PUBLICIDAD", "REPRESENTACION"}
 
 
+def prueba(db: Session, para: str, quien: str, empresa: str | None = None) -> str | None:
+    """Correo de prueba con la marca de la plataforma. Devuelve None si salió o el error."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+
+    ahora = datetime.now(ZoneInfo("America/Bogota")).strftime("%d/%m/%Y %I:%M %p")
+    cuerpo = ('<p style="margin:0 0 14px">Esta es una prueba de envío de correo desde la plataforma de <b>Desarrollos Z Servigpoder</b>.</p>'
+              '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr>'
+              '<td style="background:#ecfdf3;border:1px solid #abefc6;border-radius:8px;padding:12px 14px;color:#067647">'
+              '<b>&#10003; El correo de la plataforma funciona.</b><br>Si está leyendo este mensaje, los avisos a las áreas '
+              '(compras, almacén, financiero, nómina y programación) van a llegar.</td></tr></table>'
+              + _tabla(["Dato", "Valor"], [["Enviado por", quien], ["Fecha y hora", ahora], ["Cuenta que envía", get_settings().smtp_usuario]]))
+    html, imagenes = correo.plantilla(db, "Prueba de envío de correo", cuerpo, empresa)
+    texto = "Esta es una prueba de envío de correo desde la plataforma de Desarrollos Z Servigpoder."
+    return correo.enviar([correo.Mensaje([para], "Prueba de correo · Desarrollos Z Servigpoder", html, texto, imagenes)])[0]
+
+
 def destinatarios(db: Session) -> dict[str, list[str]]:
     filas = {a.area: a.correos for a in db.scalars(select(CstAreaCorreo))}
     return {area: _correos(filas.get(area, "")) for area in AREAS}
@@ -60,13 +79,11 @@ def _tabla(encabezados: list[str], filas: list[list], derecha: set[int] = frozen
     return f'<table style="border-collapse:collapse;font-size:13px;margin:8px 0 16px">{"<thead><tr>" + th + "</tr></thead>"}<tbody>{cuerpo}</tbody></table>'
 
 
-def _pagina(titulo: str, m: CstMfp, cuerpo: str) -> str:
+def _pagina(m: CstMfp, cuerpo: str) -> str:
     cab = _tabla(["Dato", "Valor"], [["Cliente", f"{m.cliente.nombre} (NIT {m.cliente.nit or '—'})"], ["MFP", m.numero],
                                     ["Contrato", m.contrato or "—"], ["Inicio del contrato", _fecha(m.fecha_inicio)],
                                     ["Duración", f"{m.duracion_meses or '—'} meses"]])
-    return (f'<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;max-width:820px">'
-            f'<h2 style="color:#1e3a5f;margin:0 0 4px">{escape(titulo)}</h2>{cab}{cuerpo}'
-            f'<p style="font-size:12px;color:#6b7280;margin-top:20px">Correo automático de la plataforma Servigpoder (Costeo y MFP\'s).</p></div>')
+    return cab + cuerpo
 
 
 def _servicios_filas(datos: dict) -> list[list]:
@@ -164,8 +181,8 @@ def _programacion(m: CstMfp, c: CstCosteo | None) -> str:
             + f"<p><b>Total: {_num(total)} hombres.</b></p>")
 
 
-def mensajes(db: Session, m: CstMfp) -> dict[str, tuple[str, str]]:
-    """{área: (asunto, html)} de una MFP."""
+def mensajes(db: Session, m: CstMfp, empresa: str | None = None) -> dict[str, tuple[str, str, dict]]:
+    """{área: (asunto, html, imágenes)} de una MFP."""
     c = db.get(CstCosteo, m.costeo_id) if m.costeo_id else None
     base = f"MFP {m.numero} · {m.cliente.nombre} · inicia {_fecha(m.fecha_inicio)}"
     contenido = {
@@ -175,15 +192,20 @@ def mensajes(db: Session, m: CstMfp) -> dict[str, tuple[str, str]]:
         "nomina": ("Valores de nómina del puesto nuevo", _nomina(c)),
         "programacion": ("Servicios vendidos", _programacion(m, c)),
     }
-    return {area: (f"{titulo} · {base}", _pagina(f"{titulo} — {AREAS[area]}", m, cuerpo)) for area, (titulo, cuerpo) in contenido.items()}
+    salida = {}
+    for area, (titulo, cuerpo) in contenido.items():
+        html, imagenes = correo.plantilla(db, f"{titulo} — {AREAS[area]}", _pagina(m, cuerpo), empresa)
+        salida[area] = (f"{titulo} · {base}", html, imagenes)
+    return salida
 
 
-def notificar(db: Session, m: CstMfp, usuario_id: int | None) -> list[CstNotificacion]:
+def notificar(db: Session, m: CstMfp, usuario_id: int | None, empresa: str | None = None) -> list[CstNotificacion]:
     """Envía a cada área su correo y lo registra en la MFP (también si no hay destinatarios o falla)."""
     para = destinatarios(db)
-    contenido = mensajes(db, m)
+    contenido = mensajes(db, m, empresa)
     con_destino = [a for a in AREAS if para[a]]
-    errores = dict(zip(con_destino, correo.enviar([correo.Mensaje(para[a], *contenido[a]) for a in con_destino]), strict=True)) if con_destino else {}
+    salientes = [correo.Mensaje(para[a], contenido[a][0], contenido[a][1], imagenes=contenido[a][2]) for a in con_destino]
+    errores = dict(zip(con_destino, correo.enviar(salientes), strict=True)) if con_destino else {}
     registros = []
     for area in AREAS:
         if not para[area]:

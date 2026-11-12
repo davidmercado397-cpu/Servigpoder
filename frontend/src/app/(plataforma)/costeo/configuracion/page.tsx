@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil, Plus, Save, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Pestanas, Titulo } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
@@ -58,6 +58,8 @@ const QUE_RECIBE: Record<string, string> = {
 
 function Correos({ puede }: { puede: boolean }) {
   const [lista, setLista] = useState<AreaCorreo[]>([]);
+  const [prueba, setPrueba] = useState("");
+  const [enviando, setEnviando] = useState(false);
   const m = useMensaje();
   const cargar = useCallback(() => api<AreaCorreo[]>("/costeo/areas-correo").then(setLista).catch(m.error), []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -81,6 +83,20 @@ function Correos({ puede }: { puede: boolean }) {
           <button className="btn-primario" onClick={async () => {
             try { await api("/costeo/areas-correo", { method: "PUT", json: lista.map(({ area, correos }) => ({ area, correos })) }); m.ok("Correos guardados."); cargar(); } catch (e) { m.error(e); }
           }}><Save className="h-4 w-4" /> Guardar</button>
+        </div>
+      )}
+      {puede && (
+        <div className="mt-6 border-t border-slate-100 pt-4">
+          <p className="font-medium text-slate-700">Prueba de correo</p>
+          <p className="mb-2 text-xs text-slate-500">Envía un correo de prueba con el logo de la plataforma para comprobar que el envío está bien configurado.</p>
+          <div className="flex flex-wrap gap-2">
+            <input className="input max-w-sm" type="email" placeholder="correo@servigpoder.com" value={prueba} onChange={(e) => setPrueba(e.target.value)} />
+            <button className="btn-secundario inline-flex items-center gap-1.5" disabled={enviando || !prueba.includes("@")} onClick={async () => {
+              setEnviando(true);
+              try { await api("/costeo/areas-correo/prueba", { method: "POST", json: { para: prueba.trim() } }); m.ok(`Correo de prueba enviado a ${prueba.trim()}: revise la bandeja de entrada (y la de spam).`); }
+              catch (e) { m.error(e); } finally { setEnviando(false); }
+            }}><Send className="h-4 w-4" /> {enviando ? "Enviando…" : "Enviar prueba"}</button>
+          </div>
         </div>
       )}
     </div>

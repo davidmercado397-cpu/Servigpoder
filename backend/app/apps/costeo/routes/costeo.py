@@ -377,6 +377,6 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
     db.commit()
     # Costeo aprobado + fecha de inicio: arranca el puesto y se avisa a las áreas (un fallo del correo no deshace la MFP)
     db.expire_all()
-    avisos = notificaciones.notificar(db, db.get(CstMfp, m.id), actual.id)
+    avisos = notificaciones.notificar(db, db.get(CstMfp, m.id), actual.id, getattr(request.state, "empresa", None))
     db.commit()
     return ok({"mfp_id": m.id, "avisos": {n.area: n.estado for n in avisos}})

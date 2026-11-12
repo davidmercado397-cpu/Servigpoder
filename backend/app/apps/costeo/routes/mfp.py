@@ -501,6 +501,21 @@ def guardar_areas_correo(data: list[AreaCorreoIn], request: Request, db: DbSessi
     return ok({"areas": len(data)})
 
 
+class PruebaCorreoIn(BaseModel):
+    para: str = Field(min_length=5, max_length=200, pattern=r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+@router.post("/areas-correo/prueba", response_model=ApiResponse[dict], dependencies=[Depends(limitar("cst_correo_prueba", 5, 60))])
+def correo_prueba(data: PruebaCorreoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+    """Envía un correo de prueba con la marca de la plataforma para verificar la configuración."""
+    error = notificaciones.prueba(db, data.para.strip(), actual.nombre, getattr(request.state, "empresa", None))
+    auditar(db, request, "cst_correo_prueba", actual.id, para=data.para, enviado=error is None)
+    db.commit()
+    if error:
+        raise ApiError(502, f"No se pudo enviar: {error}")
+    return ok({"enviado": True, "para": data.para})
+
+
 def _aviso_out(n: CstNotificacion) -> dict:
     return {"id": n.id, "area": n.area, "area_nombre": notificaciones.AREAS.get(n.area, n.area), "destinatarios": n.destinatarios,
             "asunto": n.asunto, "estado": n.estado, "error": n.error, "enviado_en": n.enviado_en.isoformat() if n.enviado_en else ""}
@@ -519,7 +534,7 @@ def reenviar_avisos(mfp_id: int, request: Request, db: DbSession, actual: Usuari
     m = _mfp(db, mfp_id)
     if m.fecha_inicio is None:
         raise ApiError(409, "La MFP no tiene fecha de inicio")
-    enviados = notificaciones.notificar(db, m, actual.id)
+    enviados = notificaciones.notificar(db, m, actual.id, getattr(request.state, "empresa", None))
     auditar(db, request, "cst_avisos_enviados", actual.id, numero=m.numero, estados={n.area: n.estado for n in enviados})
     db.commit()
     return ok([_aviso_out(n) for n in enviados])

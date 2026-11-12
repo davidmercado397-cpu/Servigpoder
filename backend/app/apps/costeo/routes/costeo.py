@@ -253,7 +253,7 @@ def crear_costeo(data: CosteoIn, request: Request, db: DbSession, actual: Usuari
     datos = data.datos or {"duracion_meses": 12, "pct_nota_credito": 0, "pct_cupo_inversion": 0, "servicios": [],
                            "personal": [{"nombre": "Guarda", "hombres": 0, "horas_extras": 0, "auxilio_transporte": True,
                                          "auxilios_no_salariales": 0, "rodamiento": 0}],
-                           "otros": [], "dotacion_tarifa": [], "dotacion_puesto": [], "horas_bolsa_anual": 0, "donaciones": 0,
+                           "otros": [], "dotacion_tarifa": [], "dotacion_puesto": [], "horas_bolsa_total": 0, "donaciones": 0,
                            "automatico": True}
     datos = _preparar(db, _proteger(db, actual, datos, {"automatico": True}))
     c = CstCosteo(cliente_id=data.cliente_id, nombre=data.nombre.strip(), datos=datos, creado_por=actual.id)
@@ -370,7 +370,13 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
     for o in r.get("otros") or []:
         total = o["mensual"] * r["meses"]
         item(o.get("tipo_item") or "OTROS", total, o.get("nombre", ""))
-    item("BOLSA_HORAS", r["bolsas"]["horas_anuales"], "Horas adicionales de vigilancia por año de contrato")
+    # La bolsa de la MFP es por año de contrato: el total del costeo repartido en los años (el último puede ser parcial).
+    # Los costeos de antes traen las horas por año.
+    if c.datos.get("horas_bolsa_total") not in (None, ""):
+        horas_total = float(c.datos["horas_bolsa_total"])
+        item("BOLSA_HORAS", horas_total / max(1, -(-r["meses"] // 12)), f"Horas de obsequio: {horas_total:g} h en todo el contrato")
+    else:
+        item("BOLSA_HORAS", r["bolsas"]["horas_anuales"], "Horas adicionales de vigilancia por año de contrato")
     item("PUBLICIDAD", r["bolsas"]["publicidad"], "Bolsa de publicidad del contrato")
     item("REPRESENTACION", r["bolsas"]["representacion"], "Reserva de gastos de representación del contrato")
     auditar(db, request, "cst_mfp_desde_costeo", actual.id, costeo=c.nombre, version=c.version, numero=m.numero)

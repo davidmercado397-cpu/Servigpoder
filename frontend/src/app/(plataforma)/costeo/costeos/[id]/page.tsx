@@ -16,7 +16,9 @@ type Personal = { nombre: string; hombres: number; salario?: number | null; hora
 type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string;
   aplica?: string; por_hombre?: boolean };
 type Datos = {
-  duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual: number; donaciones: number;
+  duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual?: number; donaciones: number;
+  /** Horas de obsequio de todo el contrato (las del año salen de aquí) */
+  horas_bolsa_total?: number | null;
   pct_comision_vendedor?: number | null; pct_comision_director?: number | null; ica_por_mil?: number | null;
   /** Costeo por puestos: hombres del personal y dotación de la tarifa automáticos */
   automatico?: boolean;
@@ -25,7 +27,7 @@ type Datos = {
 type Resultado = {
   meses: number; tarifa_decreto: number; descuento_nota_credito: number; tarifa_neta: number; hombres_servicios: number; hombres_personal: number;
   costo_por_hombre: number; mfp: { pct_nota_credito: number; pct_cupo_inversion: number; pct_otros: number; pct_total: number; cupo_inversion_vp: number };
-  bolsas: { publicidad: number; representacion: number; horas_anuales: number; valor_hora: number };
+  bolsas: { publicidad: number; representacion: number; horas_anuales: number; horas_total?: number; valor_hora: number };
   comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean;
     pct_director?: number; carga_director?: number; director_elegida?: boolean };
   facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number; ica_por_mil?: number; ica_por_mil_parametro?: number };
@@ -53,7 +55,7 @@ const ARMAS: [string, string][] = [["sin", "Sin arma"], ["fuego", "Fuego"], ["fo
 const APLICA: Record<string, string> = { todos: "Todos los puestos", gala: "Gala", overol: "Overol", arma: "Puestos con arma", fuego: "Arma de fuego",
   fogeo: "Arma de fogeo", traumatica: "Arma traumática" };
 const PESTANAS: [string, string][] = [["condiciones", "Condiciones"], ["puestos", "Puestos y dotación"], ["personal", "Personal"], ["otros", "Otros costos (MFP)"]];
-const VACIO: Datos = { duracion_meses: 12, pct_nota_credito: 0, pct_cupo_inversion: 0, horas_bolsa_anual: 0, donaciones: 0, servicios: [], personal: [], otros: [], dotacion_tarifa: [], dotacion_puesto: [] };
+const VACIO: Datos = { duracion_meses: 12, pct_nota_credito: 0, pct_cupo_inversion: 0, horas_bolsa_total: 0, donaciones: 0, servicios: [], personal: [], otros: [], dotacion_tarifa: [], dotacion_puesto: [] };
 const n = (v: string) => (v === "" ? 0 : Number(v));
 
 export default function EditorCosteo() {
@@ -172,7 +174,10 @@ export default function EditorCosteo() {
                 nota={r.descuento_nota_credito ? `${pesos(r.descuento_nota_credito)} al mes · ${pesos(r.descuento_nota_credito * r.meses)} en ${r.meses} meses` : undefined} />
               <Num etiqueta="Cupo de inversión (%)" v={+(d.pct_cupo_inversion * 100).toFixed(4)} on={(v) => cambiar({ pct_cupo_inversion: v / 100 })} off={!editable}
                 nota={r.mfp.cupo_inversion_vp ? `${pesos(r.mfp.cupo_inversion_vp)} hoy (valor presente) · ${pesos(r.costos.cupo_inversion ?? 0)} al mes` : undefined} />
-              <Num etiqueta="Horas de obsequio por año" v={d.horas_bolsa_anual} on={(v) => cambiar({ horas_bolsa_anual: v })} off={!editable} />
+              <Num etiqueta="Horas de obsequio (todo el contrato)" off={!editable}
+                v={+(d.horas_bolsa_total ?? (d.horas_bolsa_anual ?? 0) * (d.duracion_meses || 12) / 12).toFixed(2)}
+                on={(v) => cambiar({ horas_bolsa_total: v, horas_bolsa_anual: undefined })}
+                nota={r.bolsas.horas_anuales ? horasPorAnio(r.bolsas.horas_total ?? r.bolsas.horas_anuales * r.meses / 12, r.meses) : undefined} />
               <Num etiqueta="Donaciones (total)" v={d.donaciones} on={(v) => cambiar({ donaciones: v })} off={!editable} />
               <Comision etiqueta="Comisión del vendedor (%)" v={d.pct_comision_vendedor} automatica={r.comision.pct} off={!editable}
                 on={(v) => cambiar({ pct_comision_vendedor: v })} nota={notaComision(r.comision.vendedor_total, r.meses)} />
@@ -332,7 +337,7 @@ function PanelResultado({ r }: { r: Resultado }) {
         <p className="text-xs text-slate-500">Comisión vendedor {pct(r.comision.pct_vendedor ?? r.comision.pct, 2)} ({r.comision.vendedor_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_vendedor ?? r.comision.carga_prestacional} · {pesos(r.comision.vendedor_total)}</p>
         <p className="text-xs text-slate-500">Comisión director {pct(r.comision.pct_director ?? r.comision.pct, 2)} ({r.comision.director_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_director ?? r.comision.carga_prestacional} · {pesos(r.comision.director_total)}</p>
         <p className="text-xs text-slate-500">Bolsas del contrato: publicidad {pesos(r.bolsas.publicidad)} · representación {pesos(r.bolsas.representacion)}
-          {r.bolsas.horas_anuales ? ` · ${r.bolsas.horas_anuales} h/año a ${pesos(r.bolsas.valor_hora)} la hora` : ""}</p>
+          {r.bolsas.horas_anuales ? ` · ${horas(r.bolsas.horas_total ?? r.bolsas.horas_anuales * r.meses / 12)} h de obsequio en el contrato a ${pesos(r.bolsas.valor_hora)} la hora` : ""}</p>
         <div className="my-2 border-t border-slate-100" />
         <p className="text-xs text-slate-500">Hombres: servicios {r.hombres_servicios} · personal {r.hombres_personal} · costo promedio {pesos(r.costo_por_hombre)}</p>
         <p className="text-xs text-slate-500">Factura: AIU {pesos(r.facturacion.aiu)} · IVA {pesos(r.facturacion.iva)} · total a pagar {pesos(r.facturacion.total_a_pagar)}</p>
@@ -431,6 +436,13 @@ function Num({ etiqueta, v, on, off, nota }: { etiqueta: string; v: number; on: 
     <div><label className="label">{etiqueta}</label><input className="input" type="number" disabled={off} value={v} onChange={(e) => on(n(e.target.value))} />
       {nota && <p className="mt-1 text-xs text-slate-500">{nota}</p>}</div>
   );
+}
+
+const horas = (v: number) => (+v.toFixed(2)).toLocaleString("es-CO");
+// Cuánto es por cada año de contrato: el total repartido en los años (así queda la bolsa en la MFP; el último puede ser parcial)
+function horasPorAnio(total: number, meses: number) {
+  const anios = Math.max(1, Math.ceil(meses / 12)), resto = meses % 12;
+  return `${horas(total / anios)} h por cada año de contrato (${anios} ${anios === 1 ? "año" : "años"}${resto && anios > 1 ? `; el último de ${resto} meses` : ""})`;
 }
 
 const notaComision = (total: number, meses: number) => total ? `${pesos(total)} en el contrato · ${pesos(total / meses)} al mes (con carga prestacional)` : undefined;

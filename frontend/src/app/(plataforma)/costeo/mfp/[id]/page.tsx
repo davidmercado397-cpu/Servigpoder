@@ -7,7 +7,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ACEPTA_SOPORTE, MAX_SOPORTES, Modal, ModalMovimiento, subirSoportes } from "@/components/costeo";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
-import { ESTADO_MFP, SEVERIDAD, UNIDAD, fecha, hoyISO, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
+import { ESTADO_MFP, SEVERIDAD, UNIDAD, aniosContrato, fecha, hoyISO, notaHorasTotal, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
 export default function DetalleMfp() {
@@ -189,12 +189,12 @@ export default function DetalleMfp() {
       {movItem && <ModalMovimiento item={movItem} onCerrar={() => setMovItem(null)} onGuardado={(x) => { setM(x); setMovItem(null); }} />}
       {editarItem && (
         <Modal titulo={`Editar ${editarItem.tipo}`} onCerrar={() => setEditarItem(null)}>
-          <EditarItem item={editarItem} onGuardado={(x) => { setM(x); setEditarItem(null); }} />
+          <EditarItem item={editarItem} meses={m.duracion_meses} onGuardado={(x) => { setM(x); setEditarItem(null); }} />
         </Modal>
       )}
       {nuevoItem && (
         <Modal titulo="Agregar ítem pactado" onCerrar={() => setNuevoItem(false)}>
-          <NuevoItem mfpId={m.id} onGuardado={(x) => { setM(x); setNuevoItem(false); }} />
+          <NuevoItem mfpId={m.id} meses={m.duracion_meses} onGuardado={(x) => { setM(x); setNuevoItem(false); }} />
         </Modal>
       )}
       {terminar && (
@@ -285,8 +285,10 @@ function Avisos({ mfpId, conFecha, puede }: { mfpId: number; conFecha: boolean; 
   );
 }
 
-function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) => void }) {
-  const [pactado, setPactado] = useState(String(item.pactado));
+function EditarItem({ item, meses, onGuardado }: { item: ItemMfp; meses: number | null; onGuardado: (m: Mfp) => void }) {
+  // Horas: se editan por todo el contrato (la bolsa queda por año de contrato)
+  const esHoras = item.unidad === "horas";
+  const [pactado, setPactado] = useState(String(esHoras ? +(item.pactado * aniosContrato(meses)).toFixed(2) : item.pactado));
   const [descripcion, setDescripcion] = useState(item.descripcion);
   const [nombre, setNombre] = useState(item.nombre ?? "");
   const [error, setError] = useState("");
@@ -294,7 +296,9 @@ function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) 
   return (
     <div className="space-y-3">
       {otros && <div><label className="label">¿Cuál?</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>}
-      <div><label className="label">Pactado ({UNIDAD[item.unidad]})</label><input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} /></div>
+      <div><label className="label">{esHoras ? "Horas de todo el contrato" : `Pactado (${UNIDAD[item.unidad]})`}</label>
+        <input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} />
+        {esHoras && Number(pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
       {error && <Alerta>{error}</Alerta>}
       <div className="flex justify-between">
@@ -304,14 +308,14 @@ function EditarItem({ item, onGuardado }: { item: ItemMfp; onGuardado: (m: Mfp) 
           }}>Eliminar ítem</button>
         ) : <span />}
         <button className="btn-primario" onClick={async () => {
-          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: Number(pactado), descripcion, ...(otros ? { nombre } : {}) } })); } catch (e) { setError(mensajeError(e)); }
+          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: esHoras ? Number(pactado) / aniosContrato(meses) : Number(pactado), descripcion, ...(otros ? { nombre } : {}) } })); } catch (e) { setError(mensajeError(e)); }
         }}>Guardar</button>
       </div>
     </div>
   );
 }
 
-function NuevoItem({ mfpId, onGuardado }: { mfpId: number; onGuardado: (m: Mfp) => void }) {
+function NuevoItem({ mfpId, meses, onGuardado }: { mfpId: number; meses: number | null; onGuardado: (m: Mfp) => void }) {
   const [tipos, setTipos] = useState<TipoItem[]>([]);
   const [f, setF] = useState({ tipo_id: "", pactado: "", descripcion: "", nombre: "" });
   const [error, setError] = useState("");
@@ -327,14 +331,15 @@ function NuevoItem({ mfpId, onGuardado }: { mfpId: number; onGuardado: (m: Mfp) 
           <option value="">Seleccione…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre} ({UNIDAD[t.unidad]})</option>)}
         </select></div>
       {otros && <div><label className="label">¿Cuál?</label><input className="input" placeholder="Escriba cuál es" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>}
-      <div><label className="label">{unidad === "horas" ? "Horas por año" : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
-        <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} /></div>
+      <div><label className="label">{unidad === "horas" ? "Horas de todo el contrato" : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
+        <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} />
+        {unidad === "horas" && Number(f.pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(f.pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
       {error && <Alerta>{error}</Alerta>}
       <div className="flex justify-end">
         <button className="btn-primario" disabled={!f.tipo_id || !f.pactado || (otros && !f.nombre.trim())} onClick={async () => {
           try {
-            onGuardado(await api<Mfp>(`/costeo/mfp/${mfpId}/items`, { method: "POST", json: { tipo_id: Number(f.tipo_id), pactado: Number(f.pactado), descripcion: f.descripcion,
+            onGuardado(await api<Mfp>(`/costeo/mfp/${mfpId}/items`, { method: "POST", json: { tipo_id: Number(f.tipo_id), pactado: unidad === "horas" ? Number(f.pactado) / aniosContrato(meses) : Number(f.pactado), descripcion: f.descripcion,
               nombre: otros ? f.nombre : "" } }));
           } catch (e) { setError(mensajeError(e)); }
         }}>Agregar</button>

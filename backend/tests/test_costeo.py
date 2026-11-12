@@ -541,3 +541,19 @@ def test_correo_de_prueba_con_logo(admin, monkeypatch):
     assert correo.enviar([correo.Mensaje(["a@b.co"], "x", html, imagenes=imagenes)]) == [None]
     partes = [p for p in salientes[-1].walk() if p.get_content_type() == "image/png"]
     assert len(partes) == 1 and partes[0]["Content-ID"] == "<logo>"
+
+
+def test_horas_de_obsequio_por_todo_el_contrato(admin):
+    # 72 h en 36 meses = 24 h por año; se costean igual que 24 h por año
+    r = calculo.calcular({**PALMASECA, "duracion_meses": 36, "horas_bolsa_total": 72}, P, RANGOS)
+    viejo = calculo.calcular({**PALMASECA, "duracion_meses": 36, "horas_bolsa_anual": 24}, P, RANGOS)
+    assert r["bolsas"]["horas_anuales"] == 24 and r["bolsas"]["horas_total"] == 72
+    assert r["costos"]["horas_adicionales"] == pytest.approx(viejo["costos"]["horas_adicionales"])
+    # En la MFP la bolsa queda por año de contrato: 30 h en 18 meses = 15 h en cada uno de los 2 años
+    cid = admin.post(f"{API}/clientes", json={"nit": "66", "nombre": "Horas"}).json()["data"]["id"]
+    c = admin.post(f"{API}/costeos", json={"cliente_id": cid, "nombre": "Horas",
+                                           "datos": {**PALMASECA, "duracion_meses": 18, "horas_bolsa_total": 30}}).json()["data"]
+    admin.post(f"{API}/costeos/{c['id']}/estado", json={"estado": "aprobado"})
+    mid = admin.post(f"{API}/costeos/{c['id']}/crear-mfp", json={"numero": "1", "fecha_inicio": "2026-01-01"}).json()["data"]["mfp_id"]
+    horas = _item(admin.get(f"{API}/mfp/{mid}").json()["data"], "BOLSA_HORAS")
+    assert horas["pactado"] == 15 and horas["pactado_total"] == 30

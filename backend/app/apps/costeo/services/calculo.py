@@ -146,7 +146,13 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     dot_tarifa, dot_tarifa_m = bloque("dotacion_tarifa")
     dot_puesto, dot_puesto_m = bloque("dotacion_puesto")
     otros, otros_m = bloque("otros")
-    horas_bolsa = _n(datos.get("horas_bolsa_anual"))
+    # Horas de obsequio: se digitan por el total del contrato (las del año salen de ahí); los costeos viejos traen las del año
+    if datos.get("horas_bolsa_total") not in (None, ""):
+        horas_total = _n(datos.get("horas_bolsa_total"))
+        horas_bolsa = horas_total * 12 / meses
+    else:
+        horas_bolsa = _n(datos.get("horas_bolsa_anual"))
+        horas_total = horas_bolsa * meses / 12
     valor_hora = costo_por_hombre / 30 / p["horas_turno_bolsa"] if p["horas_turno_bolsa"] else 0.0
     horas_m = valor_hora * horas_bolsa / 12
 
@@ -219,7 +225,7 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
         "hombres_servicios": hombres_servicios, "hombres_personal": hombres_personal, "costo_por_hombre": costo_por_hombre,
         "mfp": {"pct_nota_credito": pct_nc, "pct_cupo_inversion": pct_cupo, "pct_otros": pct_otros, "pct_total": pct_mfp,
                 "nota_credito_total": descuento * meses, "cupo_inversion_vp": cupo_vp, "otros_total": otros_m * meses},
-        "bolsas": {"publicidad": publicidad_bolsa, "representacion": representacion_bolsa, "horas_anuales": horas_bolsa,
+        "bolsas": {"publicidad": publicidad_bolsa, "representacion": representacion_bolsa, "horas_anuales": horas_bolsa, "horas_total": horas_total,
                    "valor_hora": valor_hora, "pct_publicidad": pct_publicidad},
         "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director,
                      "pct_vendedor": rv.pct, "carga_vendedor": rv.carga, "vendedor_elegida": rv is not r,

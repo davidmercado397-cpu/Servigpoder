@@ -9,6 +9,18 @@ export type Movimiento = { id: number; fecha: string; valor: number; descripcion
   soportes: Soporte[]; soporte: string; excede: boolean; autorizacion: string; creado_en: string };
 export type TipoDocumento = { codigo: string; nombre: string; activo: boolean };
 export type AnioBolsa = { anio: number; desde: string | null; hasta: string | null; pactado: number; usado: number; saldo: number; vencido: boolean; actual: boolean };
+/** Años de contrato (el último puede ser parcial): la bolsa de horas se reparte en ellos. */
+export function aniosContrato(meses: number | null | undefined): number {
+  return Math.max(1, Math.ceil((meses || 12) / 12));
+}
+
+/** Las horas de obsequio se digitan por todo el contrato: cuántas quedan por cada año. */
+export function notaHorasTotal(total: number, meses: number | null | undefined): string {
+  const anios = aniosContrato(meses), resto = (meses || 12) % 12;
+  const porAnio = (+(total / anios).toFixed(2)).toLocaleString("es-CO");
+  return `${porAnio} h por cada año de contrato (${anios} ${anios === 1 ? "año" : "años"}${resto && anios > 1 ? `; el último de ${resto} meses` : ""})`;
+}
+
 export type ItemMfp = {
   id: number; tipo: string; tipo_codigo: string; unidad: TipoItem["unidad"]; descripcion: string; reembolsable: boolean; cuenta_en_mfp: boolean;
   /** «Otros»: cuál es */

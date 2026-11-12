@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { Alerta, SubirArchivo, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
-import { ESTADO_MFP, fecha, pct, pesos, type Cliente, type Mfp, type TipoItem } from "@/lib/costeo";
+import { ESTADO_MFP, aniosContrato, notaHorasTotal, fecha, pct, pesos, type Cliente, type Mfp, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
 type Totales = { facturacion_total: number; pactado: number; ejecutado: number; pendiente: number; reembolso: number };
@@ -153,7 +153,9 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
           numero: f.numero, cliente_id: Number(f.cliente_id), contrato: f.contrato, fecha_inicio: f.fecha_inicio || null,
           duracion_meses: f.duracion_meses ? Number(f.duracion_meses) : null, valor_mensual: Number(f.valor_mensual || 0),
           pct_comercial: f.pct_comercial ? Number(f.pct_comercial.replace(",", ".")) / 100 : null, notas: f.notas,
-          items: items.filter((i) => i.tipo_id && i.pactado).map((i) => ({ tipo_id: Number(i.tipo_id), pactado: Number(i.pactado), descripcion: i.descripcion,
+          // Horas: se digitan por todo el contrato y la bolsa queda por año de contrato
+          items: items.filter((i) => i.tipo_id && i.pactado).map((i) => ({ tipo_id: Number(i.tipo_id), descripcion: i.descripcion,
+            pactado: unidad(i.tipo_id) === "horas" ? Number(i.pactado) / aniosContrato(meses) : Number(i.pactado),
             nombre: esOtros(i.tipo_id) ? i.nombre : "" })),
         },
       });
@@ -201,14 +203,13 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
                 </select>
                 {otros && <input className={`input ${it.pactado && !it.nombre.trim() ? "border-red-400" : ""}`} placeholder="¿Cuál? (escríbalo)" autoFocus
                   value={it.nombre} onChange={(e) => set({ nombre: e.target.value })} />}
-                <input className="input" type="number" placeholder={unidad(it.tipo_id) === "horas" ? "Horas por año" : unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"}
+                <input className="input" type="number" placeholder={unidad(it.tipo_id) === "horas" ? "Horas de todo el contrato" : unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"}
                   value={it.pactado} onChange={(e) => set({ pactado: e.target.value })} />
                 <input className="input" placeholder="Descripción" value={it.descripcion} onChange={(e) => set({ descripcion: e.target.value })} />
                 <button className="btn-secundario" onClick={() => setItems(items.filter((_, j) => j !== i))}>Quitar</button>
               </div>
-              {unidad(it.tipo_id) === "horas" && Number(it.pactado) > 0 && meses > 0 && (
-                <p className="mt-1 text-xs text-slate-500">{Number(it.pactado).toLocaleString("es-CO")} h por año · {(Number(it.pactado) * meses / 12).toLocaleString("es-CO")} h en total
-                  durante los {meses} meses del contrato</p>
+              {unidad(it.tipo_id) === "horas" && Number(it.pactado) > 0 && (
+                <p className="mt-1 text-xs text-slate-500">{Number(it.pactado).toLocaleString("es-CO")} h en los {meses || 12} meses del contrato · {notaHorasTotal(Number(it.pactado), meses)}</p>
               )}
             </div>
           );

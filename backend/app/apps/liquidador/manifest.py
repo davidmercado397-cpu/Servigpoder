@@ -52,7 +52,7 @@ def _seed(db: Session) -> None:
 
 APP = App(
     codigo="liquidador",
-    nombre="Liquidador de horas",
+    nombre="SERA 360",
     descripcion="Cuenta las horas de cada turno por quincena o mes (diurnas, nocturnas, dominicales, festivas y extras) y liquida la nómina.",
     icono="calculator",
     color="#0f766e",

@@ -228,3 +228,21 @@ def test_controles_de_nombres_en_la_base_y_en_la_nomina(admin):
     assert _ficha(admin, "5004")["nombre"] == "LUIS PENSIONADO"
     avisos = admin.get(f"{API}/periodos/{pid}").json()["data"]["advertencias"]
     assert any("es de LUIS PENSIONADO en la ficha" in a for a in avisos)
+
+
+def test_retirar_desde_la_base_de_empleados(admin):
+    admin.post(f"{API}/personal/importar-base", files=archivo(_base(), "base.xlsx"))
+    ana = _ficha(admin, "5001")
+    assert ana["estado"] == "activo"
+    url = f"{API}/empleados/{ana['id']}/retiro"
+    assert admin.post(url, json={"fecha_retiro": "2020-01-01", "motivo_retiro": "Renuncia voluntaria"}).status_code == 422  # antes del inicio
+    r = admin.post(url, json={"fecha_retiro": "2026-11-15", "motivo_retiro": "Renuncia voluntaria", "observacion": "Carta del 1/11"})
+    assert r.status_code == 200, r.text
+    ana = _ficha(admin, "5001")
+    assert ana["estado"] == "retirado" and ana["fecha_retiro"] == "2026-11-15"
+    c = next(x for x in ana["contratos"] if x["fecha_retiro"] == "2026-11-15")
+    assert (c["motivo_retiro"], c["observacion"]) == ("Renuncia voluntaria", "Carta del 1/11")
+    assert admin.post(url, json={"fecha_retiro": "2026-11-20", "motivo_retiro": "Otra"}).status_code == 409  # ya retirada
+    assert "5001" in [e["documento"] for e in admin.get(f"{API}/empleados?estado=retirado").json()["data"]]
+    motivos = admin.get(f"{API}/personal/motivos-retiro").json()["data"]
+    assert motivos[0] == "Renuncia voluntaria" and "ABANDONO DEL PUESTO" not in motivos and "RENUNCIA VOLUNTARIA" not in motivos

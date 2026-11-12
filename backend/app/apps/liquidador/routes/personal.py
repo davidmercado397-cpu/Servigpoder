@@ -229,6 +229,55 @@ def guardar_datos(empleado_id: int, data: DatosPersonalesIn, request: Request, d
     return ok({"id": e.id, "cambios": cambios, "personal": datos_personales(e)})
 
 
+class RetiroIn(BaseModel):
+    fecha_retiro: date
+    motivo_retiro: str = Field(min_length=2, max_length=200)
+    observacion: str | None = Field(None, max_length=300)
+
+
+# Motivos de retiro de siempre (más los que ya se han usado)
+MOTIVOS_RETIRO = ["Renuncia voluntaria", "Terminación del contrato", "Despido con justa causa", "Despido sin justa causa",
+                  "Terminación en periodo de prueba", "Fin de la obra o labor", "Abandono del cargo", "Mutuo acuerdo", "Pensión",
+                  "Fallecimiento"]
+
+
+@router.get("/personal/motivos-retiro", response_model=ApiResponse[list[str]])
+def motivos_retiro(db: DbSession, _=Depends(require(VER))):
+    usados = [m.strip() for m in db.scalars(select(LiqContrato.motivo_retiro).where(LiqContrato.motivo_retiro.is_not(None)).distinct()) if m and m.strip()]
+    vistos = {m.lower() for m in MOTIVOS_RETIRO}
+    return ok(MOTIVOS_RETIRO + sorted({m for m in usados if m.lower() not in vistos}, key=str.lower))
+
+
+@router.post("/empleados/{empleado_id}/retiro", response_model=ApiResponse[dict])
+def retirar(empleado_id: int, data: RetiroIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
+    """Retira a la persona: cierra su contrato abierto con la fecha y el motivo del retiro."""
+    e = _empleado(db, empleado_id)
+    contratos = list(db.scalars(select(LiqContrato).where(LiqContrato.empleado_id == e.id).order_by(LiqContrato.fecha_inicio)))
+    abiertos = [c for c in contratos if c.fecha_retiro is None]
+    if not abiertos:
+        if contratos:
+            raise ApiError(409, "La persona ya está retirada")
+        if e.fecha_ingreso is None:
+            raise ApiError(422, "La persona no tiene contrato ni fecha de ingreso: registre su contrato en el historial laboral")
+        c = LiqContrato(empleado_id=e.id, fecha_inicio=e.fecha_ingreso, tipo_contrato=e.tipo_contrato, cargo=e.cargo)
+        db.add(c)
+        abiertos = [c]
+    actual_c = abiertos[-1]
+    if data.fecha_retiro < actual_c.fecha_inicio:
+        raise ApiError(422, f"La fecha de retiro no puede ser anterior al inicio del contrato ({actual_c.fecha_inicio:%d/%m/%Y})")
+    for c in abiertos:  # si quedaron varios abiertos, todos terminan con el retiro
+        c.fecha_retiro = max(data.fecha_retiro, c.fecha_inicio)
+        c.motivo_retiro = data.motivo_retiro.strip()
+        c.observacion = (data.observacion or "").strip() or c.observacion
+    db.flush()
+    personal.sincronizar_estado(db, e)
+    auditar(db, request, "liq_empleado_retirado", actual.id, documento=e.documento, fecha=data.fecha_retiro.isoformat(),
+            motivo=data.motivo_retiro.strip())
+    db.commit()
+    return ok({"id": e.id, "estado": e.estado, "fecha_retiro": e.fecha_retiro.isoformat() if e.fecha_retiro else None,
+               "contrato": contrato_out(actual_c)})
+
+
 @router.post("/empleados/{empleado_id}/contratos", response_model=ApiResponse[dict], status_code=201)
 def crear_contrato(empleado_id: int, data: ContratoIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     e = _empleado(db, empleado_id)

@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, Pencil, Plus, Trash2, TriangleAlert, UserMinus } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { DatosPersonalesForm, HistorialLaboral, HistorialVacaciones } from "@/components/ficha-personal";
 import { FormularioAuxilio } from "@/components/formulario-auxilio";
 import { FormularioDescuento } from "@/components/formulario-descuento";
+import { RetirarEmpleado } from "@/components/retirar-empleado";
 import { Alerta, Insignia, Modal } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { MESES, pesos } from "@/lib/formato";
@@ -48,6 +49,7 @@ export default function FichaEmpleado() {
   const [editDesc, setEditDesc] = useState<{ registro: Descuento | null } | null>(null);
   const [editAux, setEditAux] = useState<{ registro: Auxilio | null } | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [retirar, setRetirar] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
 
@@ -126,7 +128,18 @@ export default function FichaEmpleado() {
             {" "}· {f.quincenas} {f.quincenas === 1 ? "nómina" : "nóminas"}{f.ultima ? ` · última ${f.ultima}` : ""}
           </p>
         </div>
+        {gestionarPersonal && f.estado !== "retirado" && (
+          <button className="btn-secundario ml-auto inline-flex items-center gap-1.5 text-rose-700" onClick={() => setRetirar(true)}>
+            <UserMinus className="h-4 w-4" /> Retirar
+          </button>
+        )}
       </div>
+      {retirar && (
+        <Modal onCerrar={() => setRetirar(false)}>
+          <RetirarEmpleado empleado={f} onCancelar={() => setRetirar(false)}
+            onRetirado={() => { setRetirar(false); cargarFicha().catch((e) => setError(mensajeError(e))); }} />
+        </Modal>
+      )}
       {error && <Alerta>{error}</Alerta>}
       {aviso && <Alerta tipo="ok">{aviso}</Alerta>}
 

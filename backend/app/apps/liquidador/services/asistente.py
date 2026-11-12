@@ -26,7 +26,7 @@ TIPOS_DIA = {d.value: n for d, n in DAY_LABELS.items()}
 CLASES = {"trabajado": "días trabajados", "descanso_pago": "descansos pagos (Z)", "libre": "libres (L)",
           "ausencia": "ausencias (AUS)", "incapacidad": "incapacidades", "novedad": "días con novedad (vacaciones, licencias…)"}
 
-INSTRUCCIONES = """Eres el asistente del "Liquidador de horas", una aplicación interna de una empresa de seguridad \
+INSTRUCCIONES = """Eres el asistente de "SERA 360" (antes Liquidador de horas), una aplicación interna de una empresa de seguridad \
 privada en Colombia que cuenta las horas de los turnos de cada empleado por quincena. Respondes en español, claro \
 y breve, a la persona que carga el Excel, revisa y aprueba cada quincena. La aplicación NO calcula salarios: solo \
 horas y días.

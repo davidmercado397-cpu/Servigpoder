@@ -59,7 +59,7 @@ const ASISTENTE = {
 
 export default function LiquidadorLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ShellApp nombre="Liquidador de horas" subtitulo="Quincenas y meses" icono={Calculator} inicio="/liquidador" menu={MENU} asistente={ASISTENTE}>
+    <ShellApp nombre="SERA 360" subtitulo="Quincenas y meses" icono={Calculator} inicio="/liquidador" menu={MENU} asistente={ASISTENTE}>
       {children}
     </ShellApp>
   );

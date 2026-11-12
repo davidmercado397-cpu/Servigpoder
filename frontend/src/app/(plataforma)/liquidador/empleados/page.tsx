@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronRight, FileDown, FileUp, Search, UserPlus } from "lucide-react";
+import { ChevronRight, FileDown, FileUp, Search, UserMinus, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ImportarPersonal } from "@/components/importar-personal";
 import { NuevoEmpleado } from "@/components/nuevo-empleado";
+import { RetirarEmpleado } from "@/components/retirar-empleado";
 import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Insignia, Modal, Titulo } from "@/components/ui";
 import { apiEnvelope, mensajeError } from "@/lib/api";
@@ -27,6 +28,7 @@ export default function Empleados() {
   const [tipo, setTipo] = useState("todos");
   const [importar, setImportar] = useState(false);
   const [nuevo, setNuevo] = useState(false);
+  const [retirar, setRetirar] = useState<Empleado | null>(null);
   const [lista, setLista] = useState<Empleado[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
   const [q, setQ] = useState("");
@@ -72,6 +74,11 @@ export default function Empleados() {
       </p>
       {error && <Alerta>{error}</Alerta>}
       {nuevo && <Modal onCerrar={() => setNuevo(false)}><NuevoEmpleado onCancelar={() => setNuevo(false)} onCreado={(id) => router.push(`/liquidador/empleados/${id}`)} /></Modal>}
+      {retirar && (
+        <Modal onCerrar={() => setRetirar(null)}>
+          <RetirarEmpleado empleado={retirar} onCancelar={() => setRetirar(null)} onRetirado={() => { setRetirar(null); cargar().catch(() => {}); }} />
+        </Modal>
+      )}
       {importar && <ImportarPersonal onImportado={() => cargar().catch(() => {})} />}
       <div className="tarjeta overflow-hidden">
         <div className="px-4 py-3">
@@ -127,7 +134,15 @@ export default function Empleados() {
                       </span>
                     ) : <span className="text-slate-500">Sin fecha de ingreso</span>}
                   </td>
-                  <td className="text-right text-slate-400"><ChevronRight className="inline h-4 w-4" aria-label="Abrir ficha" /></td>
+                  <td className="whitespace-nowrap text-right text-slate-400">
+                    {gestionarPersonal && e.estado !== "retirado" && (
+                      <button className="mr-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                        title="Marcar el retiro: fecha y motivo" onClick={(ev) => { ev.stopPropagation(); setRetirar(e); }}>
+                        <UserMinus className="h-3.5 w-3.5" /> Retirar
+                      </button>
+                    )}
+                    <ChevronRight className="inline h-4 w-4" aria-label="Abrir ficha" />
+                  </td>
                 </tr>
               ))}
             </tbody>

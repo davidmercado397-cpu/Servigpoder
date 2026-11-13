@@ -31,6 +31,7 @@ class DocumentoOut(BaseModel):
     modulo: str
     fecha: date | None
     objetivo: str
+    enlace: str
     secciones: int
     paginas: int
     paginas_sin_texto: int
@@ -40,7 +41,7 @@ class DocumentoOut(BaseModel):
 
 def _doc_out(d: SiesaDocumento, secciones: int = 0) -> DocumentoOut:
     return DocumentoOut(id=d.id, nombre=d.nombre, titulo=d.titulo, modulo=d.modulo, fecha=d.fecha, objetivo=d.objetivo or "",
-                        secciones=secciones,
+                        enlace=d.enlace or "", secciones=secciones,
                         paginas=d.paginas, paginas_sin_texto=d.paginas_sin_texto, fragmentos=d.fragmentos,
                         cargado_en=d.cargado_en.isoformat() if d.cargado_en else "")
 
@@ -68,6 +69,7 @@ class DocumentoEditar(BaseModel):
     modulo: str | None = Field(default=None, max_length=80)
     fecha: date | None = None
     objetivo: str | None = Field(default=None, max_length=1000)
+    enlace: str | None = Field(default=None, max_length=1000)  # OneDrive/SharePoint; vacío = sin enlace
 
 
 @router.patch("/documentos/{documento_id}", response_model=ApiResponse[DocumentoOut])
@@ -86,6 +88,11 @@ def editar_documento(documento_id: int, data: DocumentoEditar, request: Request,
         d.fecha = data.fecha
     if "objetivo" in cambios:
         d.objetivo = (data.objetivo or "").strip()
+    if "enlace" in cambios:
+        try:
+            d.enlace = services.validar_enlace(data.enlace)
+        except services.EnlaceInvalido as e:
+            raise ApiError(422, str(e)) from e
     services.actualizar_encabezados(d)
     auditar(db, request, "siesa_documento_editado", actual.id, archivo=d.nombre, campos=sorted(cambios))
     db.commit()
@@ -120,16 +127,22 @@ async def _leer_pdf(archivo: UploadFile) -> bytes:
 
 @router.post("/documentos", response_model=ApiResponse[list[dict]], dependencies=[Depends(limitar("siesa_cargar", 10, 60))])
 async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = File(...), modulo: str = Form("", max_length=80),
-                 actual: Usuario = Depends(require(GESTIONAR))):
-    """Carga uno o varios PDF. De cada uno queda solo su texto; el archivo no se guarda."""
+                 enlaces: list[str] = Form(default=[]), actual: Usuario = Depends(require(GESTIONAR))):
+    """Carga uno o varios PDF. De cada uno queda solo su texto; el archivo no se guarda. `enlaces`: el de OneDrive/SharePoint
+    de cada PDF, en el mismo orden (vacío = sin enlace)."""
     if len(archivos) > MAX_ARCHIVOS:
         raise ApiError(400, f"Cargue máximo {MAX_ARCHIVOS} PDF a la vez")
     resultados = []
-    for archivo in archivos:
+    for i, archivo in enumerate(archivos):
         nombre = (archivo.filename or "documento.pdf")[:255]
         try:
+            try:
+                enlace = services.validar_enlace(enlaces[i] if i < len(enlaces) else "")
+            except services.EnlaceInvalido as e:
+                await archivo.close()
+                raise ApiError(422, str(e)) from e
             contenido = await _leer_pdf(archivo)
-            c = services.cargar(db, nombre, contenido, actual.id, modulo)
+            c = services.cargar(db, nombre, contenido, actual.id, modulo, enlace)
             del contenido
             if not c.duplicado:
                 auditar(db, request, "siesa_documento_cargado", actual.id, archivo=nombre, modulo=c.documento.modulo,
@@ -137,7 +150,7 @@ async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = F
             db.commit()
             resultados.append({"archivo": nombre, "ok": True, "duplicado": c.duplicado, "advertencias": c.advertencias,
                                "documento": _doc_out(c.documento, len({f.seccion for f in c.documento.partes if f.seccion})).model_dump(mode="json")})
-        except (ApiError, services.ErrorPDF) as e:
+        except (ApiError, services.ErrorPDF) as e:  # noqa: PERF203
             db.rollback()
             resultados.append({"archivo": nombre, "ok": False, "error": e.detail if isinstance(e, ApiError) else str(e)})
     return ok(resultados)
@@ -193,5 +206,5 @@ def chat(data: PreguntaIn, request: Request, db: DbSession, actual: Usuario = De
             tokens_entrada=uso.tokens_entrada if uso else 0, tokens_salida=uso.tokens_salida if uso else 0,
             modelo=uso.modelo if uso else "")
     db.commit()
-    return ok({"texto": r.texto, "encontrado": r.encontrado, "fuentes": r.fuentes,
+    return ok({"texto": r.texto, "encontrado": r.encontrado, "fuentes": r.fuentes, "instructivos": r.instructivos,
                "usadas_hoy": usadas + 1, "limite_diario": s.asistente_max_diario})

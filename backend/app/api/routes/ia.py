@@ -34,6 +34,7 @@ class ConfigIn(BaseModel):
     borrar_clave: bool = False
     modelo: str = Field(default="", max_length=150, pattern=MODELO)
     modelo_costeo: str = Field(default="", max_length=150, pattern=MODELO)
+    modelo_siesa: str = Field(default="", max_length=150, pattern=MODELO)
 
 
 class PruebaIn(BaseModel):
@@ -58,9 +59,11 @@ def _out(db: DbSession) -> dict:
         "clave_final": (c.api_key_final if c and a.origen_clave == "panel" else (s.ia_api_key[-4:] if s.ia_api_key else "")),
         "modelo": (c.modelo if c else None) or "",
         "modelo_costeo": (c.modelo_costeo if c else None) or "",
+        "modelo_siesa": (c.modelo_siesa if c else None) or "",
         "modelo_servidor": s.ia_modelo,
         "modelo_vigente": a.modelo,
         "modelo_costeo_vigente": a.modelo_costeo,
+        "modelo_siesa_vigente": a.modelo_siesa,
         "proveedor": s.ia_base_url,
         "retencion_cero": s.ia_zdr,
     }
@@ -85,7 +88,7 @@ def guardar(data: ConfigIn, request: Request, db: DbSession, actual: Usuario = D
         c.api_key_cifrada = cifrar_secreto(data.api_key, "ia")
         c.api_key_final = data.api_key[-4:]
         cambios.append("clave nueva")
-    for campo in ("modelo", "modelo_costeo"):
+    for campo in ("modelo", "modelo_costeo", "modelo_siesa"):
         nuevo = getattr(data, campo).strip() or None
         if getattr(c, campo) != nuevo:
             cambios.append(f"{campo}: {getattr(c, campo) or '(servidor)'} → {nuevo or '(servidor)'}")

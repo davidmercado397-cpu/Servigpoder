@@ -91,6 +91,7 @@ class Ajustes:
     base_url: str
     modelo: str
     modelo_costeo: str
+    modelo_siesa: str
     zdr: bool
     origen_clave: str  # panel | servidor | "" (sin clave)
 
@@ -118,6 +119,8 @@ def cargar(db) -> None:
             nuevo["modelo"] = c.modelo
         if c.modelo_costeo:
             nuevo["modelo_costeo"] = c.modelo_costeo
+        if getattr(c, "modelo_siesa", None):
+            nuevo["modelo_siesa"] = c.modelo_siesa
     _panel.clear()
     _panel.update(nuevo)
 
@@ -128,6 +131,7 @@ def ajustes() -> Ajustes:
     origen = "panel" if _panel.get("api_key") else ("servidor" if s.ia_api_key else "")
     modelo = _panel.get("modelo") or s.ia_modelo
     return Ajustes(api_key=clave, base_url=s.ia_base_url, modelo=modelo, modelo_costeo=_panel.get("modelo_costeo") or modelo,
+                   modelo_siesa=_panel.get("modelo_siesa") or s.siesa_modelo or modelo,
                    zdr=s.ia_zdr, origen_clave=origen)
 
 

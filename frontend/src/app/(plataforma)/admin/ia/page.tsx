@@ -7,8 +7,8 @@ import { api, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Config = {
-  configurada: boolean; origen_clave: "panel" | "servidor" | ""; clave_final: string; modelo: string; modelo_costeo: string;
-  modelo_servidor: string; modelo_vigente: string; modelo_costeo_vigente: string; proveedor: string; retencion_cero: boolean;
+  configurada: boolean; origen_clave: "panel" | "servidor" | ""; clave_final: string; modelo: string; modelo_costeo: string; modelo_siesa: string;
+  modelo_servidor: string; modelo_vigente: string; modelo_costeo_vigente: string; modelo_siesa_vigente: string; proveedor: string; retencion_cero: boolean;
 };
 type Modelo = { id: string; nombre: string; contexto: number | null; precio_entrada: number | null; precio_salida: number | null; imagenes: boolean; archivos: boolean };
 
@@ -38,11 +38,12 @@ export default function IAPage() {
   const [clave, setClave] = useState("");
   const [modelo, setModelo] = useState("");
   const [modeloCosteo, setModeloCosteo] = useState("");
+  const [modeloSiesa, setModeloSiesa] = useState("");
   const [modelos, setModelos] = useState<Modelo[]>([]);
   const [ocupado, setOcupado] = useState<"" | "guardar" | "probar" | "borrar">("");
   const [msg, setMsg] = useState<{ tipo: "ok" | "error" | "info"; texto: string } | null>(null);
 
-  function tomar(x: Config) { setC(x); setModelo(x.modelo); setModeloCosteo(x.modelo_costeo); setClave(""); }
+  function tomar(x: Config) { setC(x); setModelo(x.modelo); setModeloCosteo(x.modelo_costeo); setModeloSiesa(x.modelo_siesa); setClave(""); }
   useEffect(() => {
     if (!puede) return;
     api<Config>("/ia/config").then(tomar).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
@@ -52,13 +53,13 @@ export default function IAPage() {
 
   if (!puede) return <Alerta>No tiene permiso para configurar la inteligencia artificial.</Alerta>;
   if (!c) return msg ? <Alerta>{msg.texto}</Alerta> : <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</div>;
-  const cambios = !!clave || modelo !== c.modelo || modeloCosteo !== c.modelo_costeo;
+  const cambios = !!clave || modelo !== c.modelo || modeloCosteo !== c.modelo_costeo || modeloSiesa !== c.modelo_siesa;
 
   async function guardar(borrar = false) {
     setMsg(null);
     setOcupado(borrar ? "borrar" : "guardar");
     try {
-      tomar(await api<Config>("/ia/config", { method: "PUT", json: { api_key: borrar ? "" : clave, borrar_clave: borrar, modelo, modelo_costeo: modeloCosteo } }));
+      tomar(await api<Config>("/ia/config", { method: "PUT", json: { api_key: borrar ? "" : clave, borrar_clave: borrar, modelo, modelo_costeo: modeloCosteo, modelo_siesa: modeloSiesa } }));
       setMsg({ tipo: "ok", texto: borrar ? "Clave borrada del panel." : "Configuración guardada." });
     } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
   }
@@ -104,10 +105,12 @@ export default function IAPage() {
       <section className="tarjeta space-y-4 p-5">
         <h2 className="font-semibold text-slate-800">Modelos</h2>
         <datalist id="modelos-ia">{opciones}</datalist>
-        <CampoModelo etiqueta="Modelo general" ayuda="Asistentes de Capacidad operativa, SERA 360 y chat de SIESA." valor={modelo}
+        <CampoModelo etiqueta="Modelo general" ayuda="Asistentes de Capacidad operativa y SERA 360." valor={modelo}
           porDefecto={c.modelo_servidor} modelos={modelos} on={setModelo} />
         <CampoModelo etiqueta="Modelo para llenar costeos desde archivos" ayuda="Lee solicitudes, pliegos, Excel y fotos: conviene uno que lea imágenes y PDF."
           valor={modeloCosteo} porDefecto={modelo || c.modelo_servidor} modelos={modelos} on={setModeloCosteo} />
+        <CampoModelo etiqueta="Modelo para el chat de instructivos SIESA" ayuda="Conversa con el usuario usando solo los instructivos cargados: basta uno rápido y económico."
+          valor={modeloSiesa} porDefecto={modelo || c.modelo_servidor} modelos={modelos} on={setModeloSiesa} />
         <p className="text-xs text-slate-500">
           {modelos.length ? `${modelos.length} modelos disponibles en el proveedor: escriba para buscar.` : "Escriba el identificador del modelo, p. ej. anthropic/claude-opus-5."}
           {c.retencion_cero && " Solo se usan proveedores que no guardan los datos ni entrenan con ellos (retención cero): algunos modelos pueden no estar disponibles."}
@@ -125,6 +128,11 @@ export default function IAPage() {
         {c.modelo_costeo_vigente !== c.modelo_vigente && (
           <button className="btn-secundario" disabled={!c.configurada || cambios || !!ocupado} onClick={() => probar(c.modelo_costeo_vigente)}>
             <PlugZap className="h-4 w-4" /> Probar el de costeos
+          </button>
+        )}
+        {c.modelo_siesa_vigente !== c.modelo_vigente && c.modelo_siesa_vigente !== c.modelo_costeo_vigente && (
+          <button className="btn-secundario" disabled={!c.configurada || cambios || !!ocupado} onClick={() => probar(c.modelo_siesa_vigente)}>
+            <PlugZap className="h-4 w-4" /> Probar el de SIESA
           </button>
         )}
       </div>

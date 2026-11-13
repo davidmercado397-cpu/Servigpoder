@@ -1,16 +1,22 @@
 "use client";
 
-import { Check, FileText, Loader2, Pencil, Search, Trash2, TriangleAlert, Upload, X } from "lucide-react";
+import { Check, ExternalLink, FileText, Link2, Loader2, Pencil, Search, Trash2, TriangleAlert, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alerta, Titulo } from "@/components/ui";
 import { api, apiEnvelope, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Documento = {
-  id: number; nombre: string; titulo: string; modulo: string; fecha: string | null; objetivo: string; secciones: number;
+  id: number; nombre: string; titulo: string; modulo: string; fecha: string | null; objetivo: string; enlace: string; secciones: number;
   paginas: number; paginas_sin_texto: number; fragmentos: number; cargado_en: string;
 };
-type Edicion = { id: number; titulo: string; modulo: string; fecha: string; objetivo: string };
+type Edicion = { id: number; titulo: string; modulo: string; fecha: string; objetivo: string; enlace: string };
+type Pendiente = { archivo: File; enlace: string };
+
+// Enlaces de OneDrive/SharePoint (los mismos que acepta el servidor)
+const ENLACE = /^https:\/\/([a-z0-9-]+\.)*(sharepoint\.com|onedrive\.live\.com|1drv\.ms|onedrive\.com)(\/|$)/i;
+const enlaceValido = (e: string) => !e.trim() || ENLACE.test(e.trim());
+const AYUDA_ENLACE = "En OneDrive o SharePoint: clic derecho al PDF → Compartir → en la configuración del vínculo elija «Cualquier persona con el vínculo» y «Puede ver» → Copiar vínculo.";
 type ResultadoCarga = { archivo: string; ok: boolean; duplicado?: boolean; advertencias?: string[]; error?: string; documento?: Documento };
 
 const LOTE = 5; // PDF por petición, para no esperar demasiado en cada una
@@ -27,6 +33,8 @@ export default function BaseConocimiento() {
   const [modulos, setModulos] = useState<string[]>([]);
   const [filtroModulo, setFiltroModulo] = useState("");
   const [edicion, setEdicion] = useState<Edicion | null>(null);
+  // PDF elegidos que esperan su enlace antes de cargarse
+  const [pendientes, setPendientes] = useState<Pendiente[]>([]);
   const input = useRef<HTMLInputElement>(null);
 
   const cargar = useCallback(() => apiEnvelope<Documento[]>("/siesa/documentos").then((r) => {
@@ -37,17 +45,25 @@ export default function BaseConocimiento() {
     cargar();
   }, [cargar]);
 
-  async function subir(lista: File[]) {
+  // Al elegir los PDF quedan pendientes para escribirles el enlace; luego se cargan
+  function elegir(lista: File[]) {
     const pdfs = lista.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
     const otros = lista.filter((f) => !f.name.toLowerCase().endsWith(".pdf")).map((f) => ({ archivo: f.name, ok: false, error: "No es un PDF" }));
-    if (!pdfs.length && !otros.length) return;
-    setError("");
     setResultados(otros);
+    setPendientes((p) => [...p, ...pdfs.filter((f) => !p.some((x) => x.archivo.name === f.name)).map((archivo) => ({ archivo, enlace: "" }))]);
+  }
+
+  async function subir(lista: Pendiente[]) {
+    const pdfs = lista;
+    if (!pdfs.length) return;
+    setError("");
+    setPendientes([]);
+    setResultados([]);
     setProgreso({ hechos: 0, total: pdfs.length });
     try {
       for (let i = 0; i < pdfs.length; i += LOTE) {
         const form = new FormData();
-        pdfs.slice(i, i + LOTE).forEach((f) => form.append("archivos", f));
+        pdfs.slice(i, i + LOTE).forEach((p) => { form.append("archivos", p.archivo); form.append("enlaces", p.enlace.trim()); });
         form.append("modulo", modulo.trim());
         const r = await api<ResultadoCarga[]>("/siesa/documentos", { method: "POST", body: form });
         setResultados((ant) => [...ant, ...r]);
@@ -61,13 +77,13 @@ export default function BaseConocimiento() {
     }
   }
 
-  const editar = (d: Documento) => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "", objetivo: d.objetivo });
+  const editar = (d: Documento) => setEdicion({ id: d.id, titulo: d.titulo, modulo: d.modulo, fecha: d.fecha ?? "", objetivo: d.objetivo, enlace: d.enlace });
 
   async function guardarEdicion() {
     if (!edicion) return;
     try {
       await api(`/siesa/documentos/${edicion.id}`, {
-        method: "PATCH", json: { titulo: edicion.titulo, modulo: edicion.modulo, fecha: edicion.fecha || null, objetivo: edicion.objetivo },
+        method: "PATCH", json: { titulo: edicion.titulo, modulo: edicion.modulo, fecha: edicion.fecha || null, objetivo: edicion.objetivo, enlace: edicion.enlace.trim() },
       });
       setEdicion(null);
       cargar();
@@ -96,7 +112,8 @@ export default function BaseConocimiento() {
       <Titulo>Base de conocimiento</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
         Instructivos de SIESA que el chat puede consultar. De cada PDF se guarda solo su texto, dividido por secciones (del índice
-        del PDF o de sus títulos), con el módulo, el instructivo, la sección y la página; el archivo no se almacena. Los PDF
+        del PDF o de sus títulos), con el módulo, el instructivo, la sección y la página; el archivo no se almacena. Para que el chat
+        entregue el instructivo con la respuesta, cada uno lleva el enlace de OneDrive o SharePoint donde está el PDF. Los PDF
         escaneados como imagen no tienen texto y no se pueden consultar.
       </p>
       {error && <Alerta>{error}</Alerta>}
@@ -105,7 +122,7 @@ export default function BaseConocimiento() {
         <div
           onDragOver={(e) => { e.preventDefault(); setArrastrando(true); }}
           onDragLeave={() => setArrastrando(false)}
-          onDrop={(e) => { e.preventDefault(); setArrastrando(false); subir(Array.from(e.dataTransfer.files)); }}
+          onDrop={(e) => { e.preventDefault(); setArrastrando(false); elegir(Array.from(e.dataTransfer.files)); }}
           className={`tarjeta flex flex-col items-center gap-2 border-2 border-dashed p-8 text-center transition ${arrastrando ? "border-marca-600 bg-marca-50" : "border-slate-200"}`}>
           {progreso ? (
             <>
@@ -124,9 +141,34 @@ export default function BaseConocimiento() {
               </div>
               <button className="btn-primario" onClick={() => input.current?.click()}>Seleccionar PDF</button>
               <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden
-                onChange={(e) => { subir(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+                onChange={(e) => { elegir(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
             </>
           )}
+        </div>
+      )}
+
+      {pendientes.length > 0 && !progreso && (
+        <div className="tarjeta space-y-3 p-4">
+          <div>
+            <p className="font-medium text-slate-800"><Link2 className="mr-1 inline h-4 w-4" />Enlace de cada instructivo</p>
+            <p className="text-xs text-slate-500">{AYUDA_ENLACE} Sin enlace se carga igual, pero el chat no podrá entregar el instructivo.</p>
+          </div>
+          {pendientes.map((p, i) => (
+            <div key={p.archivo.name} className="grid items-center gap-2 sm:grid-cols-[minmax(0,16rem)_1fr_auto]">
+              <span className="flex min-w-0 items-center gap-2 text-sm"><FileText className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate" title={p.archivo.name}>{p.archivo.name}</span></span>
+              <input className={`input ${enlaceValido(p.enlace) ? "" : "border-red-400"}`} placeholder="https://…sharepoint.com/… o https://1drv.ms/…" value={p.enlace}
+                onChange={(e) => setPendientes(pendientes.map((x, j) => (j === i ? { ...x, enlace: e.target.value } : x)))} />
+              <button className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Quitar" onClick={() => setPendientes(pendientes.filter((_, j) => j !== i))}><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+          {pendientes.some((p) => !enlaceValido(p.enlace)) && <p className="text-xs text-red-700">Los enlaces deben ser de OneDrive o SharePoint.</p>}
+          <div className="flex justify-end gap-2">
+            <button className="btn-secundario" onClick={() => setPendientes([])}>Cancelar</button>
+            <button className="btn-primario" disabled={pendientes.some((p) => !enlaceValido(p.enlace))} onClick={() => subir(pendientes)}>
+              <Upload className="h-4 w-4" /> Cargar {pendientes.length} {pendientes.length === 1 ? "instructivo" : "instructivos"}
+              {pendientes.some((p) => !p.enlace.trim()) ? ` (${pendientes.filter((p) => !p.enlace.trim()).length} sin enlace)` : ""}
+            </button>
+          </div>
         </div>
       )}
 
@@ -183,6 +225,10 @@ export default function BaseConocimiento() {
                   <textarea className="input min-h-[4.5rem]" maxLength={1000} aria-label="Objetivo" autoFocus
                     placeholder="Objetivo: para qué sirve este instructivo, qué procesos cubre y a quién va dirigido"
                     value={edicion.objetivo} onChange={(e) => setEdicion({ ...edicion, objetivo: e.target.value })} />
+                  <label className="label mb-0">Enlace de OneDrive o SharePoint</label>
+                  <input className={`input ${enlaceValido(edicion.enlace) ? "" : "border-red-400"}`} maxLength={1000} aria-label="Enlace"
+                    placeholder="https://…sharepoint.com/… o https://1drv.ms/…" value={edicion.enlace} onChange={(e) => setEdicion({ ...edicion, enlace: e.target.value })} />
+                  <p className="text-xs text-slate-500">{AYUDA_ENLACE}</p>
                 </td>
                 <td className="align-top"><input className="input w-40" list="modulos-siesa" maxLength={80} aria-label="Módulo" value={edicion.modulo} onChange={(e) => setEdicion({ ...edicion, modulo: e.target.value })} /></td>
                 <td className="align-top"><input className="input w-40" type="date" aria-label="Fecha" value={edicion.fecha} onChange={(e) => setEdicion({ ...edicion, fecha: e.target.value })} /></td>
@@ -190,7 +236,7 @@ export default function BaseConocimiento() {
                   El módulo y el título forman el encabezado de cada fragmento; el objetivo le dice a la IA para qué sirve el instructivo.
                 </td>
                 <td className="whitespace-nowrap text-right">
-                  <button className="btn-primario inline-flex items-center gap-1" onClick={guardarEdicion}><Check className="h-4 w-4" /> Guardar</button>
+                  <button className="btn-primario inline-flex items-center gap-1" disabled={!enlaceValido(edicion.enlace)} onClick={guardarEdicion}><Check className="h-4 w-4" /> Guardar</button>
                   <button className="ml-1 rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
                 </td>
               </tr>
@@ -206,6 +252,13 @@ export default function BaseConocimiento() {
                           + Agregar objetivo
                         </button>
                       : <span className="block pl-6 text-xs text-amber-700">Sin objetivo</span>}
+                  {d.enlace
+                    ? <a className="ml-6 mt-1 inline-flex items-center gap-1 text-xs text-marca-700 hover:underline" href={d.enlace} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3 w-3" /> Abrir instructivo</a>
+                    : gestionar
+                      ? <button className="ml-6 mt-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100" onClick={() => editar(d)}>
+                          + Agregar enlace
+                        </button>
+                      : <span className="block pl-6 text-xs text-amber-700">Sin enlace</span>}
                   {d.paginas_sin_texto > 0 && <span className="block pl-6 text-xs text-amber-700">{d.paginas_sin_texto} páginas sin texto (imagen)</span>}
                 </td>
                 <td>{d.modulo || <span className="text-xs text-amber-700">Sin módulo</span>}</td>
@@ -218,7 +271,7 @@ export default function BaseConocimiento() {
                 {gestionar && (
                   <td className="whitespace-nowrap text-right">
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Editar"
-                      title="Editar título, objetivo, módulo y fecha" onClick={() => editar(d)}><Pencil className="h-4 w-4" /></button>
+                      title="Editar título, objetivo, enlace, módulo y fecha" onClick={() => editar(d)}><Pencil className="h-4 w-4" /></button>
                     <button className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700" onClick={() => eliminar(d)} aria-label="Quitar"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 )}

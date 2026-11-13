@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, FileText, Loader2, RotateCcw, SearchX, Send } from "lucide-react";
+import { BookOpen, ExternalLink, FileText, Loader2, RotateCcw, SearchX, Send } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -8,9 +8,11 @@ import { api, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Fuente = { n: number; documento: string; archivo: string; pagina: number; seccion: string; modulo: string; objetivo: string; fecha: string | null; extracto: string };
-type Mensaje = { rol: "usuario" | "asistente"; texto: string; fuentes?: Fuente[]; encontrado?: boolean; error?: boolean };
+/** Instructivo citado en la respuesta: se entrega con su enlace de OneDrive/SharePoint */
+type Instructivo = { id: number; titulo: string; modulo: string; enlace: string; paginas: number[] };
+type Mensaje = { rol: "usuario" | "asistente"; texto: string; fuentes?: Fuente[]; instructivos?: Instructivo[]; encontrado?: boolean; error?: boolean };
 type Estado = { configurado: boolean; documentos: number; paginas: number; usadas_hoy: number; limite_diario: number };
-type Respuesta = { texto: string; encontrado: boolean; fuentes: Fuente[]; usadas_hoy: number; limite_diario: number };
+type Respuesta = { texto: string; encontrado: boolean; fuentes: Fuente[]; instructivos?: Instructivo[]; usadas_hoy: number; limite_diario: number };
 
 const CLAVE = "siesa-chat";
 
@@ -57,7 +59,7 @@ export default function ChatSiesa() {
         method: "POST",
         json: { mensajes: historial.slice(-10).map(({ rol, texto }) => ({ rol, texto })), modulo: modulo || null },
       });
-      setMensajes((m) => [...m, { rol: "asistente", texto: r.texto, fuentes: r.fuentes, encontrado: r.encontrado }]);
+      setMensajes((m) => [...m, { rol: "asistente", texto: r.texto, fuentes: r.fuentes, instructivos: r.instructivos, encontrado: r.encontrado }]);
       setEstado((e) => (e ? { ...e, usadas_hoy: r.usadas_hoy } : e));
     } catch (e) {
       setMensajes((m) => [...m, { rol: "asistente", texto: mensajeError(e), error: true }]);
@@ -103,6 +105,21 @@ export default function ChatSiesa() {
                 {m.encontrado === false && <SearchX className="mb-1 h-4 w-4 text-slate-500" />}
                 <div className="prose-asistente text-sm"><ReactMarkdown>{m.texto}</ReactMarkdown></div>
               </div>
+              {m.instructivos && m.instructivos.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{m.instructivos.length === 1 ? "Instructivo" : "Instructivos"}</p>
+                  {m.instructivos.map((d) => (
+                    <div key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-marca-100 bg-marca-50/40 px-3 py-2 text-sm">
+                      <FileText className="h-4 w-4 shrink-0 text-marca-600" />
+                      <span className="min-w-0 flex-1 font-medium text-slate-800">{d.modulo && <span className="font-normal text-slate-500">{d.modulo} · </span>}{d.titulo}
+                        <span className="ml-1 text-xs font-normal text-slate-500">· {d.paginas.length === 1 ? "pág." : "págs."} {d.paginas.join(", ")}</span></span>
+                      {d.enlace
+                        ? <a className="btn-primario px-2.5 py-1 text-xs" href={d.enlace} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" /> Abrir instructivo</a>
+                        : <span className="text-xs text-amber-700">Sin enlace: pídale al administrador que lo agregue</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               {m.fuentes && m.fuentes.length > 0 && (
                 <div className="mt-2 space-y-1.5">
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Fuentes</p>

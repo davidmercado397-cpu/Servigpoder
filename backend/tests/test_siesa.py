@@ -238,3 +238,39 @@ def test_historial_corto():
                              {"role": "user", "content": "dos"}, {"role": "assistant", "content": largo},
                              {"role": "user", "content": "tres"}])
     assert [m["content"][:4] for m in h] == ["dos", "xxxx", "tres"] and len(h[1]["content"]) == 400
+
+
+ENLACE = "https://servigpoder.sharepoint.com/:b:/s/Calidad/EaBcD123?e=xyz"
+
+
+def test_enlace_del_instructivo_y_el_chat_lo_entrega(admin, monkeypatch):
+    """Cada instructivo lleva el enlace de OneDrive/SharePoint; el chat lo entrega con las páginas citadas."""
+    r = admin.post(f"{API}/documentos", data={"enlaces": [ENLACE, "https://drive.google.com/file/d/1"]},
+                   files=[("archivos", ("terceros.pdf", INSTRUCTIVO, "application/pdf")),
+                          ("archivos", ("otro.pdf", _pdf([["Manual de otro proceso de cartera"]]), "application/pdf"))])
+    bueno, malo = r.json()["data"]
+    assert bueno["ok"] and bueno["documento"]["enlace"] == ENLACE and not any("Sin enlace" in a for a in bueno["advertencias"])
+    assert not malo["ok"] and "OneDrive o SharePoint" in malo["error"]  # no se carga con un enlace que no es de Microsoft 365
+    doc_id = bueno["documento"]["id"]
+
+    # Se corrige o se quita desde la edición
+    assert admin.patch(f"{API}/documentos/{doc_id}", json={"enlace": "http://1drv.ms/b/abc"}).status_code == 422  # sin https
+    assert admin.patch(f"{API}/documentos/{doc_id}", json={"enlace": "https://1drv.ms/b/s!Abc"}).json()["data"]["enlace"] == "https://1drv.ms/b/s!Abc"
+    admin.patch(f"{API}/documentos/{doc_id}", json={"enlace": ENLACE})
+
+    pedidos = []
+
+    def falso(instrucciones, mensajes, **kw):
+        pedidos.append(kw)
+        return ia.Respuesta(texto="Ingrese a Generales > Terceros [1] y anule en Contabilidad [2].", modelo="prueba")
+
+    monkeypatch.setattr(ia, "completar", falso)
+    monkeypatch.setattr(ia, "configurada", lambda: True)
+    # El chat usa el modelo de SIESA elegido en Administración → Inteligencia artificial (la clave es la misma de toda la plataforma)
+    admin.put("/api/ia/config", json={"api_key": "sk-or-v1-clave-de-prueba-1234", "modelo": "openai/gpt-5.5", "modelo_siesa": "google/gemini-3.8-flash"})
+    r = admin.post(f"{API}/chat", json={"mensajes": [{"rol": "usuario", "texto": "¿Cómo creo un tercero y anulo un documento contable?"}]}).json()["data"]
+    assert pedidos[-1]["modelo"] == "google/gemini-3.8-flash"
+    assert r["encontrado"] and len(r["instructivos"]) == 1
+    i = r["instructivos"][0]
+    assert (i["titulo"], i["enlace"]) == ("Manual de terceros y documentos", ENLACE) and i["paginas"] == sorted(set(i["paginas"]))
+    assert all(f["enlace"] == ENLACE for f in r["fuentes"])

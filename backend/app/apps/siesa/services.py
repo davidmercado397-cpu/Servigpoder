@@ -30,7 +30,6 @@ from sqlalchemy.orm import Session
 
 from app.apps.siesa.models import SiesaDocumento, SiesaFragmento
 from app.core import ia
-from app.core.config import get_settings
 
 TAMANO_FRAGMENTO = 1000  # caracteres del texto (sin el encabezado)
 SOLAPE = 150  # dentro de una misma sección, para no cortar un paso a la mitad
@@ -81,6 +80,30 @@ GENERICAS_RAICES = {w[:6] for w in _GENERICAS}
 
 class ErrorPDF(ValueError):
     pass
+
+
+class EnlaceInvalido(ValueError):
+    pass
+
+
+# Dónde pueden vivir los instructivos: OneDrive y SharePoint de Microsoft 365
+HOSTS_ENLACE = ("sharepoint.com", "onedrive.live.com", "1drv.ms", "onedrive.com")
+
+
+def validar_enlace(enlace: str | None) -> str:
+    """Enlace de OneDrive/SharePoint (https) o vacío. No se valida si es público: eso lo define quien lo comparte."""
+    from urllib.parse import urlparse
+
+    enlace = (enlace or "").strip()
+    if not enlace:
+        return ""
+    if len(enlace) > 1000:
+        raise EnlaceInvalido("El enlace es demasiado largo")
+    u = urlparse(enlace)
+    host = (u.hostname or "").lower()
+    if u.scheme != "https" or not any(host == h or host.endswith("." + h) for h in HOSTS_ENLACE):
+        raise EnlaceInvalido("El enlace debe ser de OneDrive o SharePoint (https://…sharepoint.com/… o https://1drv.ms/…)")
+    return enlace
 
 
 @dataclass
@@ -320,11 +343,15 @@ def objetivo_del_texto(fragmentos: list[Fragmento]) -> str:
     return ""
 
 
-def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, modulo: str = "") -> Carga:
+def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, modulo: str = "", enlace: str = "") -> Carga:
     huella = hashlib.sha256(contenido).hexdigest()
     existente = db.scalar(select(SiesaDocumento).where(SiesaDocumento.huella == huella))
     if existente:
-        return Carga(existente, duplicado=True, advertencias=[f"Ya estaba cargado como «{existente.nombre}»"])
+        avisos = [f"Ya estaba cargado como «{existente.nombre}»"]
+        if enlace and not existente.enlace:
+            existente.enlace = enlace
+            avisos.append("se le agregó el enlace")
+        return Carga(existente, duplicado=True, advertencias=avisos)
     pdf = leer_pdf(contenido)
     fragmentos = trocear(pdf.paginas, pdf.marcadores)
     sin_texto = sum(1 for p in pdf.paginas if len(p) < 20)
@@ -332,7 +359,7 @@ def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, m
         raise ErrorPDF("El PDF no tiene texto que se pueda leer (parece escaneado como imagen). "
                        "Cárguelo en una versión con texto seleccionable.")
     titulo = (pdf.titulo or re.sub(r"\s+", " ", re.sub(r"\.pdf$", "", nombre, flags=re.I).replace("_", " ")).strip())[:255]
-    doc = SiesaDocumento(nombre=nombre[:255], titulo=titulo, huella=huella, modulo=modulo.strip()[:80], fecha=pdf.fecha,
+    doc = SiesaDocumento(nombre=nombre[:255], titulo=titulo, huella=huella, modulo=modulo.strip()[:80], fecha=pdf.fecha, enlace=enlace,
                          objetivo=objetivo_del_texto(fragmentos),
                          paginas=len(pdf.paginas), paginas_sin_texto=sin_texto, fragmentos=len(fragmentos),
                          caracteres=sum(len(f.texto) for f in fragmentos), cargado_por=usuario_id)
@@ -343,6 +370,8 @@ def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, m
     advertencias = []
     if sin_texto:
         advertencias.append(f"{sin_texto} de {len(pdf.paginas)} páginas no tienen texto (imágenes o escaneadas): su contenido no se podrá consultar")
+    if not enlace:
+        advertencias.append("Sin enlace de OneDrive/SharePoint: el chat citará el instructivo pero no podrá entregarlo")
     if not any(f.seccion for f in fragmentos):
         advertencias.append("No se encontraron secciones (el PDF no tiene índice ni títulos reconocibles): se usará solo el nombre del documento como contexto")
     return Carga(doc, advertencias=advertencias)
@@ -434,6 +463,8 @@ class Resultado:
     encontrado: bool
     fuentes: list[dict]
     respuesta_ia: ia.Respuesta | None = None
+    # Los instructivos citados, una vez cada uno, con su enlace y las páginas citadas: el chat los entrega
+    instructivos: list[dict] = field(default_factory=list)
 
 
 def _consulta(mensajes: list[dict]) -> str:
@@ -485,7 +516,7 @@ def responder(db: Session, mensajes: list[dict], modulo: str | None = None) -> R
     refs = _referencias(fragmentos)
     bloque = "\n\n".join(_bloque(i, f, refs[f.documento_id]) for i, f in enumerate(fragmentos, 1))
     instrucciones = INSTRUCCIONES.format(no_encontrado=NO_ENCONTRADO, instructivos=_instructivos(fragmentos, refs), fragmentos=bloque)
-    r = ia.completar(instrucciones, _historial(mensajes), modelo=get_settings().siesa_modelo, max_tokens=MAX_TOKENS_RESPUESTA)
+    r = ia.completar(instrucciones, _historial(mensajes), modelo=ia.ajustes().modelo_siesa, max_tokens=MAX_TOKENS_RESPUESTA)
     texto = r.texto.strip()
     citados = sorted({int(n) for n in re.findall(r"\[(\d{1,2})\]", texto) if 1 <= int(n) <= len(fragmentos)})
     if not texto or NO_ENCONTRADO[:40] in texto or not citados:
@@ -494,7 +525,14 @@ def responder(db: Session, mensajes: list[dict], modulo: str | None = None) -> R
     fuentes = []
     for n in citados:
         f = fragmentos[n - 1]
-        fuentes.append({"n": n, "documento": f.documento.titulo, "archivo": f.documento.nombre, "pagina": f.pagina,
+        fuentes.append({"n": n, "documento_id": f.documento_id, "documento": f.documento.titulo, "archivo": f.documento.nombre,
+                        "pagina": f.pagina, "enlace": f.documento.enlace or "",
                         "seccion": f.seccion, "modulo": f.documento.modulo, "objetivo": f.documento.objetivo or "",
                         "fecha": f.documento.fecha.isoformat() if f.documento.fecha else None, "extracto": f.texto[:600]})
-    return Resultado(texto, True, fuentes, r)
+    instructivos: dict[int, dict] = {}
+    for x in fuentes:
+        i = instructivos.setdefault(x["documento_id"], {"id": x["documento_id"], "titulo": x["documento"], "modulo": x["modulo"],
+                                                        "enlace": x["enlace"], "paginas": []})
+        if x["pagina"] not in i["paginas"]:
+            i["paginas"].append(x["pagina"])
+    return Resultado(texto, True, fuentes, r, [{**i, "paginas": sorted(i["paginas"])} for i in instructivos.values()])

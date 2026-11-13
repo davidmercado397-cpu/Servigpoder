@@ -1,6 +1,7 @@
 """Base de conocimiento de instructivos de SIESA: solo el texto extraído de cada PDF, por fragmentos.
 
-El PDF no se guarda: se lee en memoria, se extrae el texto por página y se descarta.
+El PDF no se guarda: se lee en memoria, se extrae el texto por página y se descarta. Para entregar el instructivo
+completo, cada uno lleva el enlace de OneDrive/SharePoint donde vive el PDF (compartido para ver con el enlace).
 """
 
 from datetime import date, datetime
@@ -24,6 +25,8 @@ class SiesaDocumento(Base):
     fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Para qué sirve el instructivo: contexto para la IA (y apoyo a la búsqueda)
     objetivo: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Enlace para ver el PDF en OneDrive/SharePoint («cualquier persona con el vínculo puede ver»): el chat lo entrega
+    enlace: Mapped[str] = mapped_column(String(1000), default="", server_default="")
     huella: Mapped[str] = mapped_column(String(64), unique=True)  # SHA-256 del PDF: evita cargar dos veces el mismo
     paginas: Mapped[int] = mapped_column(Integer, default=0)
     paginas_sin_texto: Mapped[int] = mapped_column(Integer, default=0)  # escaneadas (imagen): no se pueden consultar

@@ -22,5 +22,7 @@ class IAConfig(Base):
     modelo: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # Modelo para llenar costeos desde archivos (vacío = el general)
     modelo_costeo: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Modelo del chat de instructivos SIESA (vacío = SIESA_MODELO del servidor o el general)
+    modelo_siesa: Mapped[str | None] = mapped_column(String(150), nullable=True)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     actualizado_por: Mapped[int | None] = mapped_column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)

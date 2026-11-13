@@ -110,28 +110,33 @@ def estado(db: DbSession, actual: Usuario = Depends(require(CONSULTAR))):
 
 
 async def _leer_pdf(archivo: UploadFile) -> bytes:
-    """Valida y lee el PDF en memoria; el archivo temporal de la subida se cierra (y se borra) aquí mismo."""
+    """Valida y lee el PDF o el Word (.docx) en memoria; el archivo temporal de la subida se cierra (y se borra) aquí mismo."""
+    nombre = (archivo.filename or "").lower()
     try:
-        if not (archivo.filename or "").lower().endswith(".pdf"):
-            raise ApiError(415, "Solo se aceptan archivos PDF")
+        if nombre.endswith(".doc"):
+            raise ApiError(415, "El Word antiguo (.doc) no se puede leer: ábralo en Word y guárdelo como .docx")
+        if not nombre.endswith((".pdf", ".docx")):
+            raise ApiError(415, "Solo se aceptan archivos PDF o Word (.docx)")
         limite = get_settings().siesa_max_pdf_mb * 1024 * 1024
         contenido = await archivo.read(limite + 1)
     finally:
         await archivo.close()
     if len(contenido) > limite:
         raise ApiError(413, f"El archivo supera el tamaño máximo de {get_settings().siesa_max_pdf_mb} MB")
-    if not contenido.startswith(b"%PDF-"):
+    if nombre.endswith(".pdf") and not contenido.startswith(b"%PDF-"):
         raise ApiError(415, "El archivo no es un PDF válido")
+    if nombre.endswith(".docx") and not contenido.startswith(b"PK\x03\x04"):
+        raise ApiError(415, "El archivo no es un Word (.docx) válido")
     return contenido
 
 
 @router.post("/documentos", response_model=ApiResponse[list[dict]], dependencies=[Depends(limitar("siesa_cargar", 10, 60))])
 async def cargar(request: Request, db: DbSession, archivos: list[UploadFile] = File(...), modulo: str = Form("", max_length=80),
                  enlaces: list[str] = Form(default=[]), actual: Usuario = Depends(require(GESTIONAR))):
-    """Carga uno o varios PDF. De cada uno queda solo su texto; el archivo no se guarda. `enlaces`: el de OneDrive/SharePoint
+    """Carga uno o varios PDF o Word (.docx). De cada uno queda solo su texto; el archivo no se guarda. `enlaces`: el de OneDrive/SharePoint
     de cada PDF, en el mismo orden (vacío = sin enlace)."""
     if len(archivos) > MAX_ARCHIVOS:
-        raise ApiError(400, f"Cargue máximo {MAX_ARCHIVOS} PDF a la vez")
+        raise ApiError(400, f"Cargue máximo {MAX_ARCHIVOS} archivos a la vez")
     resultados = []
     for i, archivo in enumerate(archivos):
         nombre = (archivo.filename or "documento.pdf")[:255]

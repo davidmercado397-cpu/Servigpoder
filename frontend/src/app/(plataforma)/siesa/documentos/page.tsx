@@ -16,7 +16,7 @@ type Pendiente = { archivo: File; enlace: string };
 // Enlaces de OneDrive/SharePoint (los mismos que acepta el servidor)
 const ENLACE = /^https:\/\/([a-z0-9-]+\.)*(sharepoint\.com|onedrive\.live\.com|1drv\.ms|onedrive\.com)(\/|$)/i;
 const enlaceValido = (e: string) => !e.trim() || ENLACE.test(e.trim());
-const AYUDA_ENLACE = "En OneDrive o SharePoint: clic derecho al PDF → Compartir → en la configuración del vínculo elija «Cualquier persona con el vínculo» y «Puede ver» → Copiar vínculo.";
+const AYUDA_ENLACE = "En OneDrive o SharePoint: clic derecho al archivo → Compartir → en la configuración del vínculo elija «Cualquier persona con el vínculo» y «Puede ver» → Copiar vínculo.";
 type ResultadoCarga = { archivo: string; ok: boolean; duplicado?: boolean; advertencias?: string[]; error?: string; documento?: Documento };
 
 const LOTE = 5; // PDF por petición, para no esperar demasiado en cada una
@@ -47,8 +47,11 @@ export default function BaseConocimiento() {
 
   // Al elegir los PDF quedan pendientes para escribirles el enlace; luego se cargan
   function elegir(lista: File[]) {
-    const pdfs = lista.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
-    const otros = lista.filter((f) => !f.name.toLowerCase().endsWith(".pdf")).map((f) => ({ archivo: f.name, ok: false, error: "No es un PDF" }));
+    // PDF y Word (.docx); el Word antiguo (.doc) se rechaza con la indicación de guardarlo como .docx
+    const admitido = (f: File) => /\.(pdf|docx)$/i.test(f.name);
+    const pdfs = lista.filter(admitido);
+    const otros = lista.filter((f) => !admitido(f)).map((f) => ({ archivo: f.name, ok: false,
+      error: /\.doc$/i.test(f.name) ? "Word antiguo (.doc): ábralo en Word y guárdelo como .docx" : "No es un PDF ni un Word (.docx)" }));
     setResultados(otros);
     setPendientes((p) => [...p, ...pdfs.filter((f) => !p.some((x) => x.archivo.name === f.name)).map((archivo) => ({ archivo, enlace: "" }))]);
   }
@@ -111,10 +114,10 @@ export default function BaseConocimiento() {
     <div className="space-y-5">
       <Titulo>Base de conocimiento</Titulo>
       <p className="-mt-4 text-sm text-slate-500">
-        Instructivos de SIESA que el chat puede consultar. De cada PDF se guarda solo su texto, dividido por secciones (del índice
+        Instructivos de SIESA que el chat puede consultar (PDF o Word .docx). De cada archivo se guarda solo su texto, dividido por secciones (del índice
         del PDF o de sus títulos), con el módulo, el instructivo, la sección y la página; el archivo no se almacena. Para que el chat
-        entregue el instructivo con la respuesta, cada uno lleva el enlace de OneDrive o SharePoint donde está el PDF. Los PDF
-        escaneados como imagen no tienen texto y no se pueden consultar.
+        entregue el instructivo con la respuesta, cada uno lleva el enlace de OneDrive o SharePoint donde está el archivo. En Word, las
+        secciones salen de los estilos de título (Título 1, Título 2…). Los PDF escaneados como imagen no tienen texto y no se pueden consultar.
       </p>
       {error && <Alerta>{error}</Alerta>}
 
@@ -132,15 +135,15 @@ export default function BaseConocimiento() {
           ) : (
             <>
               <Upload className="h-8 w-8 text-slate-400" />
-              <p className="text-sm text-slate-600">Arrastre aquí los PDF de los instructivos (puede seleccionar muchos a la vez)</p>
+              <p className="text-sm text-slate-600">Arrastre aquí los instructivos en PDF o Word (.docx); puede seleccionar muchos a la vez</p>
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
-                <label htmlFor="modulo-carga" className="text-slate-600">Módulo de SIESA de estos PDF:</label>
+                <label htmlFor="modulo-carga" className="text-slate-600">Módulo de SIESA de estos instructivos:</label>
                 <input id="modulo-carga" className="input w-56" list="modulos-siesa" maxLength={80} placeholder="p. ej. Nómina, Contabilidad"
                   value={modulo} onChange={(e) => setModulo(e.target.value)} />
                 <datalist id="modulos-siesa">{modulos.map((m) => <option key={m} value={m} />)}</datalist>
               </div>
-              <button className="btn-primario" onClick={() => input.current?.click()}>Seleccionar PDF</button>
-              <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden
+              <button className="btn-primario" onClick={() => input.current?.click()}>Seleccionar archivos</button>
+              <input ref={input} type="file" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden
                 onChange={(e) => { elegir(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
             </>
           )}

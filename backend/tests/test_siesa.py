@@ -274,3 +274,50 @@ def test_enlace_del_instructivo_y_el_chat_lo_entrega(admin, monkeypatch):
     i = r["instructivos"][0]
     assert (i["titulo"], i["enlace"]) == ("Manual de terceros y documentos", ENLACE) and i["paginas"] == sorted(set(i["paginas"]))
     assert all(f["enlace"] == ENLACE for f in r["fuentes"])
+
+
+def _docx(bloques: list[tuple[str, str]], titulo: str = "") -> bytes:
+    """Word mínimo: (estilo, texto); estilo "salto" = salto de página, "tabla" = fila "a|b"."""
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    cuerpo = []
+    for estilo, texto in bloques:
+        if estilo == "salto":
+            cuerpo.append('<w:p><w:r><w:br w:type="page"/></w:r></w:p>')
+        elif estilo == "tabla":
+            celdas = "".join(f"<w:tc><w:p><w:r><w:t>{c}</w:t></w:r></w:p></w:tc>" for c in texto.split("|"))
+            cuerpo.append(f"<w:tbl><w:tr>{celdas}</w:tr></w:tbl>")
+        else:
+            ppr = f'<w:pPr><w:pStyle w:val="{estilo}"/></w:pPr>' if estilo else ""
+            cuerpo.append(f"<w:p>{ppr}<w:r><w:t>{texto}</w:t></w:r></w:p>")
+    estilos = (f'<w:styles {w}><w:style w:type="paragraph" w:styleId="Ttulo1"><w:name w:val="heading 1"/></w:style>'
+               f'<w:style w:type="paragraph" w:styleId="Ttulo2"><w:name w:val="heading 2"/></w:style></w:styles>')
+    core = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">'
+            f'<dc:title>{titulo}</dc:title><dcterms:modified>2026-05-04T10:00:00Z</dcterms:modified></cp:coreProperties>')
+    buf = BytesIO()
+    import zipfile
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", f"<w:document {w}><w:body>{''.join(cuerpo)}</w:body></w:document>")
+        z.writestr("word/styles.xml", estilos)
+        z.writestr("docProps/core.xml", core)
+    return buf.getvalue()
+
+
+def test_carga_word_con_titulos_paginas_y_tablas(admin, en_empresa):
+    word = _docx([("Ttulo1", "Cartera"), ("", "Instructivo para el recaudo de cartera en SIESA."),
+                  ("Ttulo2", "Aplicar pagos"), ("", "Ingrese a Cartera, Movimiento, Recibos de caja y seleccione la factura."),
+                  ("salto", ""), ("Ttulo2", "Anular recibo"), ("", "Use la opcion Anular del recibo de caja."),
+                  ("tabla", "Campo|Valor por defecto"), ("tabla", "Centro de operacion|001")], titulo="Manual de cartera")
+    r = admin.post(f"{API}/documentos", files=[("archivos", ("cartera.docx", word, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+                                               ("archivos", ("viejo.doc", b"\xd0\xcf\x11\xe0", "application/msword"))])
+    bueno, viejo = r.json()["data"]
+    assert bueno["ok"], bueno
+    d = bueno["documento"]
+    assert (d["titulo"], d["paginas"], d["fecha"]) == ("Manual de cartera", 2, "2026-05-04") and d["secciones"] >= 2
+    assert not viejo["ok"] and ".docx" in viejo["error"]
+    with en_empresa("servigpoder") as s:
+        anular = services.buscar(s, "anular recibo de caja")
+        assert anular and anular[0].pagina == 2 and anular[0].seccion == "Cartera > Anular recibo"
+        tabla = services.buscar(s, "centro de operacion por defecto")
+        assert tabla and "Centro de operacion | 001" in tabla[0].texto

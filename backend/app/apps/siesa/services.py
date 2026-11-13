@@ -1,6 +1,8 @@
 """Base de conocimiento de instructivos de SIESA y respuestas limitadas a ella.
 
-1. Carga: el PDF se lee en memoria y se descarta; solo queda su texto, en fragmentos.
+1. Carga: el PDF o el Word (.docx) se lee en memoria y se descarta; solo queda su texto, en fragmentos.
+   - Word: las páginas son las que Word dejó marcadas al guardar (saltos de página) y las secciones salen de los
+     estilos de título (Título 1, Título 2…); las tablas se leen fila por fila.
    - Cada fragmento pertenece a una sola sección (marcadores del PDF o títulos detectados en el texto) y
      lleva metadatos: documento, sección, página, módulo y fecha del instructivo.
    - Su encabezado da el contexto, p. ej. "Nómina · Manual de vacaciones > Solicitud > Plazos"; el
@@ -14,6 +16,7 @@
 
 import hashlib
 import io
+import zipfile
 import math
 import re
 import unicodedata
@@ -22,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from itertools import combinations
 
+from defusedxml import ElementTree
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 from sqlalchemy import cast, desc, func, literal_column, select, text
@@ -185,6 +189,112 @@ def leer_pdf(contenido: bytes) -> PDF:
     except (PdfReadError, ValueError, KeyError, TypeError) as e:
         raise ErrorPDF("No se pudo leer el PDF: está dañado o no es un PDF válido") from e
     return PDF(paginas, titulo, fecha, marcadores)
+
+
+# --- Word (.docx) ---
+
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_TITULO_ESTILO = re.compile(r"^(heading|t[ií]tulo|titulo)\s*(\d)$", re.I)
+
+
+def _niveles_de_estilos(z: zipfile.ZipFile) -> dict[str, int]:
+    """Estilos de título del documento → nivel (Título 1 = 1…): por su nombre o por su nivel de esquema."""
+    try:
+        raiz = ElementTree.fromstring(z.read("word/styles.xml"))
+    except (KeyError, ElementTree.ParseError):
+        return {}
+    niveles = {}
+    for st in raiz.iter(f"{_W}style"):
+        sid = st.get(f"{_W}styleId") or ""
+        nombre = st.find(f"{_W}name")
+        m = _TITULO_ESTILO.match((nombre.get(f"{_W}val") if nombre is not None else "") or sid)
+        esquema = st.find(f"{_W}pPr/{_W}outlineLvl")
+        if m:
+            niveles[sid] = int(m.group(2))
+        elif esquema is not None and (esquema.get(f"{_W}val") or "").isdigit() and int(esquema.get(f"{_W}val")) < 9:
+            niveles[sid] = int(esquema.get(f"{_W}val")) + 1
+    return niveles
+
+
+def _texto_parrafo(p) -> tuple[str, bool]:
+    """Texto del párrafo y si empieza en una página nueva (salto de página o el que Word marcó al guardar)."""
+    partes, salto = [], False
+    for e in p.iter():
+        if e.tag == f"{_W}t":
+            partes.append(e.text or "")
+        elif e.tag == f"{_W}tab":
+            partes.append(" ")
+        elif e.tag in (f"{_W}br", f"{_W}cr"):
+            # Salto de página antes del texto del párrafo: el párrafo va en la hoja siguiente
+            if e.get(f"{_W}type") == "page" and not "".join(partes).strip():
+                salto = True
+            partes.append("\n")
+        elif e.tag == f"{_W}lastRenderedPageBreak" and not "".join(partes).strip():
+            salto = True
+    return "".join(partes), salto
+
+
+def leer_docx(contenido: bytes) -> PDF:
+    """Word (.docx) como si fuera un PDF: páginas (según los saltos que Word dejó marcados), títulos por estilo y metadatos."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(contenido)) as z:
+            raiz = ElementTree.fromstring(z.read("word/document.xml"))
+            niveles = _niveles_de_estilos(z)
+            titulo, fecha = "", None
+            try:
+                core = ElementTree.fromstring(z.read("docProps/core.xml"))
+                for e in core:
+                    etiqueta = e.tag.rsplit("}", 1)[-1]
+                    if etiqueta == "title" and (e.text or "").strip():
+                        titulo = e.text.strip()
+                    elif etiqueta in ("modified", "created") and e.text and (fecha is None or etiqueta == "modified"):
+                        try:
+                            fecha = date.fromisoformat(e.text.strip()[:10])
+                        except ValueError:
+                            pass
+            except (KeyError, ElementTree.ParseError):
+                pass
+    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError) as e:
+        raise ErrorPDF("No se pudo leer el Word: está dañado o no es un .docx válido") from e
+
+    cuerpo = raiz.find(f"{_W}body")
+    paginas: list[list[str]] = [[]]
+    marcadores: dict[int, list[tuple[int, str]]] = {}
+    for bloque in (list(cuerpo) if cuerpo is not None else []):
+        if bloque.tag == f"{_W}p":
+            texto, salto = _texto_parrafo(bloque)
+            if salto and any(paginas[-1]):
+                paginas.append([])
+            texto = texto.strip()
+            if not texto:
+                continue
+            estilo = bloque.find(f"{_W}pPr/{_W}pStyle")
+            esquema = bloque.find(f"{_W}pPr/{_W}outlineLvl")
+            nivel = niveles.get(estilo.get(f"{_W}val") if estilo is not None else "")
+            if nivel is None and esquema is not None and (esquema.get(f"{_W}val") or "").isdigit() and int(esquema.get(f"{_W}val")) < 9:
+                nivel = int(esquema.get(f"{_W}val")) + 1
+            if nivel and len(texto) <= 200:
+                marcadores.setdefault(len(paginas), []).append((nivel, re.sub(r"\s+", " ", texto)))
+            paginas[-1].append(texto)
+        elif bloque.tag == f"{_W}tbl":
+            for fila in bloque.iter(f"{_W}tr"):
+                celdas = []
+                for celda in fila.iter(f"{_W}tc"):
+                    t = " ".join(x for x in (_texto_parrafo(p)[0].strip() for p in celda.iter(f"{_W}p")) if x)
+                    if t:
+                        celdas.append(t)
+                if celdas:
+                    paginas[-1].append(" | ".join(celdas))
+        if len(paginas) > MAX_PAGINAS:
+            raise ErrorPDF(f"El Word tiene más de {MAX_PAGINAS} páginas")
+    return PDF([_limpiar("\n".join(p)) for p in paginas], titulo, fecha, marcadores)
+
+
+def leer(nombre: str, contenido: bytes) -> PDF:
+    """PDF o Word (.docx) según el archivo."""
+    if nombre.lower().endswith(".docx"):
+        return leer_docx(contenido)
+    return leer_pdf(contenido)
 
 
 _NUMERO_PAGINA = re.compile(r"^(p[aá]g(ina)?\.?\s*)?\d{1,4}(\s*(de|/)\s*\d{1,4})?$", re.I)
@@ -352,13 +462,13 @@ def cargar(db: Session, nombre: str, contenido: bytes, usuario_id: int | None, m
             existente.enlace = enlace
             avisos.append("se le agregó el enlace")
         return Carga(existente, duplicado=True, advertencias=avisos)
-    pdf = leer_pdf(contenido)
+    pdf = leer(nombre, contenido)
     fragmentos = trocear(pdf.paginas, pdf.marcadores)
     sin_texto = sum(1 for p in pdf.paginas if len(p) < 20)
     if not fragmentos:
-        raise ErrorPDF("El PDF no tiene texto que se pueda leer (parece escaneado como imagen). "
+        raise ErrorPDF("El documento no tiene texto que se pueda leer (parece escaneado como imagen). "
                        "Cárguelo en una versión con texto seleccionable.")
-    titulo = (pdf.titulo or re.sub(r"\s+", " ", re.sub(r"\.pdf$", "", nombre, flags=re.I).replace("_", " ")).strip())[:255]
+    titulo = (pdf.titulo or re.sub(r"\s+", " ", re.sub(r"\.(pdf|docx)$", "", nombre, flags=re.I).replace("_", " ")).strip())[:255]
     doc = SiesaDocumento(nombre=nombre[:255], titulo=titulo, huella=huella, modulo=modulo.strip()[:80], fecha=pdf.fecha, enlace=enlace,
                          objetivo=objetivo_del_texto(fragmentos),
                          paginas=len(pdf.paginas), paginas_sin_texto=sin_texto, fragmentos=len(fragmentos),

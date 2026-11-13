@@ -104,7 +104,7 @@ def probar(data: PruebaIn, request: Request, db: DbSession, actual: Usuario = De
     inicio = time.monotonic()
     try:
         r = ia.completar("Eres una prueba de conexión. Responde únicamente: Conexión correcta.",
-                         [{"role": "user", "content": "Prueba de conexión"}], modelo=modelo, max_tokens=30)
+                         [{"role": "user", "content": "Prueba de conexión"}], modelo=modelo, max_tokens=600)
     except ia.IANoConfigurada as e:
         raise ApiError(422, "Falta la clave de la API: escríbala y guarde antes de probar.") from e
     except ia.IAError as e:

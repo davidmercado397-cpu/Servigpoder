@@ -24,7 +24,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Subidas por el proxy /api: lotes de hasta 5 PDF de instructivos (60 MB c/u) y los Excel de SIESA.
   // El backend valida el tamaño real de cada archivo.
-  experimental: { middlewareClientMaxBodySize: "320mb" },
+  // proxyTimeout: el proxy espera hasta 5 minutos al backend (por defecto corta a los 30 s). Llenar un costeo con IA
+  // desde varios archivos tarda uno o dos minutos con los modelos que razonan.
+  experimental: { middlewareClientMaxBodySize: "320mb", proxyTimeout: 300_000 },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }];
   },

@@ -145,7 +145,8 @@ def configurada() -> bool:
 
 
 def cliente_http() -> httpx.Client:
-    return httpx.Client(timeout=120.0)
+    # Los modelos que razonan pueden tardar varios minutos con documentos largos (costeo con IA)
+    return httpx.Client(timeout=httpx.Timeout(280.0, connect=15.0))
 
 
 def _es_openrouter(base_url: str) -> bool:

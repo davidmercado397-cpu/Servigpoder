@@ -48,7 +48,9 @@ export async function apiEnvelope<T>(path: string, options: Opciones = {}): Prom
   }
   if (!res.ok || !body?.success) {
     const e = body?.error;
-    throw new ApiError(res.status, e?.message ?? `Error ${res.status}`, e?.code, body?.meta?.request_id, e?.details ?? null);
+    // Sin respuesta del backend (el proxy cortó o el servidor no contestó): un mensaje que se entienda
+    const sinRespuesta = !e && res.status >= 500 ? "El servidor no respondió a tiempo. Intente de nuevo en un momento." : `Error ${res.status}`;
+    throw new ApiError(res.status, e?.message ?? sinRespuesta, e?.code, body?.meta?.request_id, e?.details ?? null);
   }
   return body;
 }

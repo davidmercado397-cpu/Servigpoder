@@ -212,3 +212,38 @@ def test_beneficios_del_costeo_a_la_mfp(admin):
     pol = next(i for i in m["items"] if i["nombre"] == "Poligrafías")
     assert [a["usado"] for a in pol["anios"]] == [3, 1] and pol["valor_ejecutado"] == 800_000
     assert m["ejecutado"] >= 800_000  # el valor de los beneficios entra en lo ejecutado de la MFP
+
+
+def test_chat_con_la_ia_actualiza_la_propuesta(admin, proveedor):
+    """El comercial le contesta a la IA y la propuesta se actualiza; los documentos (su texto) vienen del navegador."""
+    admin.put("/api/ia/config", json={"api_key": CLAVE, "modelo_costeo": "anthropic/claude-opus-5"})
+    servicio = next(s for s in admin.get(f"{API}/servicios").json()["data"] if "24 horas" in s["descripcion"])
+    cid = admin.post(f"{API}/clientes", json={"nit": "77", "nombre": "Chat prueba"}).json()["data"]["id"]
+    c = admin.post(f"{API}/costeos", json={"cliente_id": cid, "nombre": "Chat prueba"}).json()["data"]
+    primera = {**PROPUESTA, "servicios": [{**PROPUESTA["servicios"][0], "servicio_id": servicio["id"]}],
+               "lectura_adjuntos": "FT-CM-01: NIT 900111222, inicio 2026-12-01"}
+    proveedor.contenido = json.dumps(primera, ensure_ascii=False)
+    r = admin.post(f"{API}/costeos/{c['id']}/ia", files=[("archivos", ("pliego.txt", "Portería 24 horas con arma".encode(), "text/plain"))])
+    assert r.status_code == 200, r.text
+    x = r.json()["data"]
+    assert [d["nombre"] for d in x["documentos"]] == ["pliego.txt", "Lo que la IA leyó de los adjuntos escaneados"]
+
+    # El comercial contesta: las poligrafías valen 150.000 y no van beneficios sin costo
+    segunda = {**primera, "beneficios": [{"nombre": "Poligrafías", "detalle": "3 al año", "cantidad": 3, "periodo": "anio", "valor_unitario": 150000}],
+               "otros": [], "dotacion_puesto": [{"nombre": "LINTERNAS", "cantidad": 2}], "faltantes": [], "respuesta": "Listo: puse las poligrafías a $150.000 y quité el estudio de seguridad."}
+    proveedor.contenido = json.dumps(segunda, ensure_ascii=False)
+    mensajes = [{"rol": "asistente", "texto": "¿Cuánto vale cada poligrafía?"},
+                {"rol": "usuario", "texto": "150.000 cada una, y quita el estudio de seguridad"}]
+    r = admin.post(f"{API}/costeos/{c['id']}/ia/chat", json={"mensajes": mensajes, "datos": x["datos"], "informe": x["informe"],
+                                                            "documentos": x["documentos"]})
+    assert r.status_code == 200, r.text
+    d, inf = r.json()["data"]["datos"], r.json()["data"]["informe"]
+    assert [(b["nombre"], b["valor_unitario"]) for b in d["beneficios"]] == [("Poligrafías", 150000)]
+    assert d["otros"] == [] and inf["faltantes"] == [] and "150.000" in inf["respuesta"]
+    # Lo que recibió el modelo: documentos, propuesta actual (en por ciento) y la conversación empezando por el comercial
+    pedido = proveedor.pedidos[-1]
+    sistema = pedido["messages"][0]["content"]
+    assert "Portería 24 horas con arma" in sistema and "NIT 900111222" in sistema and '"pct_nota_credito": 3.0' in sistema
+    assert [m["role"] for m in pedido["messages"][1:]] == ["user"] and "150.000" in pedido["messages"][1]["content"]
+    # El último mensaje debe ser del comercial
+    assert admin.post(f"{API}/costeos/{c['id']}/ia/chat", json={"mensajes": mensajes[:1], "datos": x["datos"]}).status_code == 422

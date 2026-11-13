@@ -306,6 +306,7 @@ Responde SOLO con un objeto JSON (sin texto antes ni después) con esta forma:
   "beneficios": [{"nombre": "texto corto", "detalle": "texto", "cantidad": número, "periodo": "anio|contrato",
                   "valor_unitario": número}],
   "resumen": "2 a 5 frases: qué pide el cliente y cómo quedó el costeo",
+  "lectura_adjuntos": "los datos útiles que leíste de los documentos adjuntos escaneados o fotos (no de los de texto), o null",
   "conflictos": ["…"],
   "supuestos": ["…"],
   "faltantes": ["…"]
@@ -338,6 +339,51 @@ def _json(texto: str) -> dict:
     return datos
 
 
+INSTRUCCIONES_CHAT = """CONVERSACIÓN CON EL COMERCIAL: ya hiciste una propuesta (PROPUESTA ACTUAL, abajo) y ahora el comercial te
+responde lo que preguntaste o te pide cambios.
+- Lo que diga el comercial manda sobre los documentos y sobre la propuesta.
+- Devuelve SIEMPRE la propuesta COMPLETA actualizada, con la misma forma JSON. Las listas van completas: lo que no esté en
+  una lista se elimina del costeo. Agrega el campo "respuesta": un texto breve en español para el comercial que diga qué
+  cambiaste y qué sigue faltando o en duda (si ya no falta nada, dilo). Si solo pregunta algo, contesta en "respuesta" y
+  deja la propuesta igual.
+- Quita de "faltantes" y de "conflictos" lo que el comercial ya resolvió."""
+
+
+def para_modelo(datos: dict, informe: dict) -> dict:
+    """La propuesta en la forma que entiende el modelo (porcentajes en por ciento) para seguir la conversación."""
+    pct = lambda v: None if v in (None, "") else round(float(v) * 100, 6)  # noqa: E731
+    return {
+        "nombre_sugerido": informe.get("nombre_sugerido"), "cliente": informe.get("cliente"), "municipio": informe.get("municipio"),
+        "fecha_inicio": informe.get("fecha_inicio"), "duracion_meses": datos.get("duracion_meses"),
+        "pct_nota_credito": pct(datos.get("pct_nota_credito")), "pct_cupo_inversion": pct(datos.get("pct_cupo_inversion")),
+        "pct_comision_vendedor": pct(datos.get("pct_comision_vendedor")), "pct_comision_director": pct(datos.get("pct_comision_director")),
+        "horas_bolsa_total": datos.get("horas_bolsa_total"), "donaciones": datos.get("donaciones"),
+        "ica_por_mil": informe.get("ica_por_mil") if informe.get("ica_por_mil") is not None else datos.get("ica_por_mil"),
+        "servicios": [{k: s.get(k) for k in ("servicio_id", "cantidad", "puesto", "dotacion", "arma", "personal")} for s in datos.get("servicios") or []],
+        "personal": [{k: p.get(k) for k in ("nombre", "horas_extras", "auxilios_no_salariales", "rodamiento")} for p in datos.get("personal") or []],
+        "otros": [{k: o.get(k) for k in ("nombre", "tipo_item", "valor_unitario", "cantidad", "vida_util_meses", "entregas_anio")}
+                  for o in datos.get("otros") or []],
+        "dotacion_puesto": [{"nombre": x.get("nombre"), "cantidad": x.get("cantidad")} for x in datos.get("dotacion_puesto") or []],
+        "beneficios": [{k: b.get(k) for k in ("nombre", "detalle", "cantidad", "periodo", "valor_unitario")} for b in datos.get("beneficios") or []],
+        "resumen": informe.get("resumen"), "conflictos": informe.get("conflictos") or [], "supuestos": informe.get("supuestos") or [],
+        "faltantes": informe.get("faltantes") or [],
+    }
+
+
+def conversar(documentos: list[dict], propuesta: dict, mensajes: list[dict], servicios_cat: list[dict], catalogo: list[dict],
+              datos: dict) -> tuple[dict, ia.Respuesta]:
+    """Una vuelta del chat: el modelo recibe los documentos (su texto), la propuesta actual y lo que dijo el comercial."""
+    docs = "\n\n".join(f"=== {d['nombre']} ===\n{d['texto']}" for d in documentos) or "(no hay texto de los documentos)"
+    instrucciones = (INSTRUCCIONES + "\n\n" + INSTRUCCIONES_CHAT + "\n\n" + _contexto(servicios_cat, catalogo, datos)
+                     + "\n\nDOCUMENTOS (texto leído de los archivos):\n" + docs
+                     + "\n\nPROPUESTA ACTUAL:\n" + json.dumps(propuesta, ensure_ascii=False))
+    # La conversación empieza por el comercial (algunos proveedores no aceptan que empiece el asistente)
+    while mensajes and mensajes[0]["role"] != "user":
+        mensajes = mensajes[1:]
+    r = ia.completar(instrucciones, mensajes, modelo=ia.ajustes().modelo_costeo, max_tokens=MAX_TOKENS_RESPUESTA)
+    return _json(r.texto), r
+
+
 def consultar(archivos: list[dict], indicaciones: str, servicios_cat: list[dict], catalogo: list[dict], datos: dict) -> tuple[dict, ia.Respuesta]:
     partes: list[dict] = [{"type": "text", "text": "Indicaciones del usuario: " + (indicaciones.strip() or "(ninguna)")}]
     for i, a in enumerate(archivos, start=1):
@@ -364,8 +410,10 @@ def _lista_textos(v) -> list[str]:
     return [_texto(x, 400) for x in v if _texto(x, 400)][:30]
 
 
-def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dict]) -> tuple[dict, dict]:
-    """Mezcla la propuesta del modelo con el costeo actual. Devuelve (datos, informe)."""
+def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dict], completo: bool = False) -> tuple[dict, dict]:
+    """Mezcla la propuesta del modelo con el costeo actual. Devuelve (datos, informe).
+    completo (conversación): las listas de la propuesta mandan aunque vengan vacías (el comercial pidió quitar algo)."""
+    manda = lambda lista, clave: bool(lista) or (completo and isinstance(p.get(clave), list))  # noqa: E731
     d = copy.deepcopy(actual or {})
     faltantes = _lista_textos(p.get("faltantes"))
     conflictos = _lista_textos(p.get("conflictos"))
@@ -433,7 +481,7 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
                           "dotacion": s.get("dotacion") if s.get("dotacion") in DOTACIONES else "gala",
                           "arma": s.get("arma") if s.get("arma") in ARMAS else "sin",
                           "personal": tipo_personal(s.get("personal") or "")})
-    if servicios:
+    if manda(servicios, "servicios"):
         d["servicios"] = servicios
         d["automatico"] = True  # costeo por puestos: hombres y dotación de la tarifa automáticos
         llenado.append(f"{sum(x['cantidad'] for x in servicios):g} puesto(s)")
@@ -465,7 +513,7 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
         elif cat:
             fila["vida_util_meses"], fila["entregas_anio"] = cat.get("vida_util_meses"), cat.get("entregas_anio")
         otros.append(fila)
-    if otros:
+    if manda(otros, "otros"):
         d["otros"] = otros
         llenado.append(f"{len(otros)} otro(s) costo(s)")
 
@@ -481,7 +529,7 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
             continue
         adicional.append({"nombre": cat["nombre"], "valor_unitario": cat["valor_unitario"], "cantidad": _n(x.get("cantidad"), 1) or 1,
                           "vida_util_meses": cat.get("vida_util_meses"), "entregas_anio": cat.get("entregas_anio")})
-    if adicional:
+    if manda(adicional, "dotacion_puesto"):
         d["dotacion_puesto"] = adicional
         llenado.append(f"{len(adicional)} elemento(s) de dotación adicional")
 
@@ -497,7 +545,7 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
         beneficios.append({"nombre": _texto(b["nombre"], 120), "detalle": _texto(b.get("detalle"), 300),
                            "cantidad": max(0.0, _n(b.get("cantidad"), 1) or 1),
                            "periodo": "contrato" if b.get("periodo") == "contrato" else "anio", "valor_unitario": max(0.0, valor)})
-    if beneficios:
+    if manda(beneficios, "beneficios"):
         d["beneficios"] = beneficios
         llenado.append(f"{len(beneficios)} beneficio(s)")
 
@@ -512,6 +560,8 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
         "llenado": llenado,
         "supuestos": supuestos,
         "conflictos": conflictos,
+        "respuesta": _texto(p.get("respuesta"), 3000),
+        "lectura_adjuntos": _texto(p.get("lectura_adjuntos"), 8000) or None,
         "faltantes": faltantes[:40],
     }
     return d, informe

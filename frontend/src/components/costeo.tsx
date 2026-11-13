@@ -24,10 +24,10 @@ export async function subirSoportes(movimientoId: number, archivos: File[]): Pro
 
 /** Ventana modal y registro de movimientos de MFP (pagos, aplicaciones y solicitudes de horas). */
 
-export function Modal({ titulo, onCerrar, children }: { titulo: string; onCerrar: () => void; children: React.ReactNode }) {
+export function Modal({ titulo, onCerrar, children, ancho = "max-w-lg" }: { titulo: string; onCerrar: () => void; children: React.ReactNode; ancho?: string }) {
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4" onClick={onCerrar}>
-      <div className="tarjeta max-h-[90vh] w-full max-w-lg overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+      <div className={`tarjeta max-h-[90vh] w-full ${ancho} overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold text-slate-800">{titulo}</h2>
           <button onClick={onCerrar}><X className="h-5 w-5 text-slate-400" /></button>

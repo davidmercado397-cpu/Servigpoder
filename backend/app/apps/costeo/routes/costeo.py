@@ -2,10 +2,11 @@
 Un costeo aprobado guarda los parámetros con que se aprobó y puede crear la MFP del contrato."""
 
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require
@@ -444,11 +445,68 @@ async def llenar_con_ia(costeo_id: int, request: Request, db: DbSession, archivo
         leidos.append(a)
 
     datos, informe, r = await run_in_threadpool(_proponer, db, c, leidos, indicaciones)
+    # El texto leído de los documentos vuelve al navegador (no se guarda aquí): con él la IA sigue la conversación
+    documentos = [{"nombre": a["nombre"], "texto": a["texto"]} for a in leidos if "texto" in a]
+    if informe.get("lectura_adjuntos"):
+        documentos.append({"nombre": "Lo que la IA leyó de los adjuntos escaneados", "texto": informe["lectura_adjuntos"]})
     del leidos
     informe["advertencias"] = advertencias
     informe["modelo"] = r.modelo
     # Auditoría: nombres de los archivos, modelo y consumo; nunca su contenido
     auditar(db, request, "cst_costeo_ia", actual.id, costeo=c.nombre, archivos=[(a.filename or "")[:120] for a in archivos],
             modelo=r.modelo, tokens_entrada=r.tokens_entrada, tokens_salida=r.tokens_salida)
+    db.commit()
+    return ok({"datos": datos, "informe": informe, "documentos": documentos})
+
+
+class MensajeIA(BaseModel):
+    rol: Literal["usuario", "asistente"]
+    texto: str = Field(min_length=1, max_length=4000)
+
+
+class DocumentoIA(BaseModel):
+    nombre: str = Field(max_length=200)
+    texto: str = Field(max_length=ia_costeo.MAX_CARACTERES_ARCHIVO + 1000)
+
+
+class ChatIA(BaseModel):
+    """Conversación sobre la propuesta: la propuesta actual (datos e informe), el texto de los documentos y los mensajes."""
+    mensajes: list[MensajeIA] = Field(min_length=1, max_length=40)
+    datos: dict
+    informe: dict = Field(default_factory=dict)
+    documentos: list[DocumentoIA] = Field(default_factory=list, max_length=ia_costeo.MAX_ARCHIVOS + 1)
+
+    @model_validator(mode="after")
+    def _ultimo_es_usuario(self) -> "ChatIA":
+        if self.mensajes[-1].rol != "usuario":
+            raise ValueError("El último mensaje debe ser del usuario")
+        if sum(len(m.texto) for m in self.mensajes) > 40_000:
+            raise ValueError("La conversación es demasiado larga: vuelva a analizar los archivos")
+        return self
+
+
+@router.post("/costeos/{costeo_id}/ia/chat", response_model=ApiResponse[dict], dependencies=[Depends(limitar("costeo_ia", 10, 60))])
+def chat_con_ia(costeo_id: int, data: ChatIA, request: Request, db: DbSession, actual: Usuario = Depends(require(COSTEAR))):
+    """El comercial le contesta a la IA (faltantes, conflictos, cambios) y la IA devuelve la propuesta actualizada. No guarda nada."""
+    c = _costeo(db, costeo_id)
+    if c.estado == APROBADO:
+        raise ApiError(409, "El costeo está aprobado: cree una nueva versión para llenarla con IA")
+    ia.cargar(db)
+    servicios_cat, catalogo = _servicios_cat(db), _catalogo(db)
+    mensajes = [{"role": "user" if m.rol == "usuario" else "assistant", "content": m.texto} for m in data.mensajes]
+    try:
+        propuesta, r = ia_costeo.conversar([d.model_dump() for d in data.documentos], ia_costeo.para_modelo(data.datos, data.informe),
+                                           mensajes, servicios_cat, catalogo, c.datos or {})
+    except ia.IANoConfigurada as e:
+        raise ApiError(503, "La IA no está configurada: el administrador debe poner la clave en Administración → Inteligencia artificial.",
+                       "ASISTENTE_NO_CONFIGURADO") from e
+    except ia.IAError as e:
+        raise ApiError(e.status, e.mensaje, e.codigo) from e
+    datos, informe = ia_costeo.aplicar(c.datos or {}, propuesta, servicios_cat, catalogo, completo=True)
+    informe["advertencias"] = data.informe.get("advertencias") or []
+    informe["modelo"] = r.modelo
+    # Auditoría: el mensaje recortado, el modelo y el consumo
+    auditar(db, request, "cst_costeo_ia_chat", actual.id, costeo=c.nombre, mensaje=data.mensajes[-1].texto[:200], modelo=r.modelo,
+            tokens_entrada=r.tokens_entrada, tokens_salida=r.tokens_salida)
     db.commit()
     return ok({"datos": datos, "informe": informe})

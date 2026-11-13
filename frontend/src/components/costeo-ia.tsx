@@ -8,8 +8,8 @@ import { api, mensajeError } from "@/lib/api";
 
 export type InformeIA = {
   resumen: string; nombre_sugerido: string | null; cliente: { nombre: string | null; nit: string | null }; municipio: string | null;
-  ica_por_mil: number | null; fecha_inicio: string | null; llenado: string[]; supuestos: string[]; faltantes: string[]; conflictos: string[];
-  beneficios_sin_costo: string[]; advertencias: string[]; modelo: string;
+  ica_por_mil: number | null; fecha_inicio?: string | null; llenado?: string[]; supuestos?: string[]; faltantes?: string[]; conflictos?: string[];
+  advertencias?: string[]; modelo: string;
 };
 
 const MAX = 6;
@@ -100,7 +100,9 @@ export function LlenarConIA<D>({ costeoId, onCerrar, onAplicar }: {
 }
 
 export function ResumenIA({ informe, onCerrar }: { informe: InformeIA; onCerrar?: () => void }) {
-  const i = informe;
+  // Las listas pueden no venir (versión distinta del servidor o respuesta incompleta): nunca deben tumbar la pantalla
+  const i = { ...informe, cliente: informe.cliente ?? { nombre: null, nit: null }, llenado: informe.llenado ?? [], supuestos: informe.supuestos ?? [],
+    faltantes: informe.faltantes ?? [], conflictos: informe.conflictos ?? [], advertencias: informe.advertencias ?? [] };
   return (
     <div className="space-y-2 rounded-lg border border-marca-100 bg-marca-50/40 p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
@@ -126,10 +128,6 @@ export function ResumenIA({ informe, onCerrar }: { informe: InformeIA; onCerrar?
       {i.supuestos.length > 0 && (
         <div><p className="font-medium text-slate-700">Supuestos</p>
           <ul className="ml-5 list-disc text-slate-600">{i.supuestos.map((x, k) => <li key={k}>{x}</li>)}</ul></div>
-      )}
-      {i.beneficios_sin_costo.length > 0 && (
-        <div><p className="font-medium text-slate-700">Beneficios ofrecidos sin costo directo (no entran al costeo)</p>
-          <ul className="ml-5 list-disc text-slate-600">{i.beneficios_sin_costo.map((x, k) => <li key={k}>{x}</li>)}</ul></div>
       )}
       {i.advertencias.length > 0 && <p className="text-xs text-slate-500">{i.advertencias.join(" · ")}</p>}
       <p className="text-xs text-slate-400">Modelo: {i.modelo}</p>

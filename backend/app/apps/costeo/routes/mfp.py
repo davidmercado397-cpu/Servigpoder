@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, require
 from app.apps.costeo.models import (
-    UNIDADES, CstAreaCorreo, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstNotificacion, CstSoporte, CstTipoDocumento, CstTipoItem,
+    CANTIDAD, POR_ANIO, UNIDADES, CstAreaCorreo, CstCliente, CstMfp, CstMfpItem, CstMovimiento, CstNotificacion, CstSoporte, CstTipoDocumento, CstTipoItem,
 )
 from app.apps.costeo.services import importador, notificaciones
 from app.apps.costeo.services.mfp import HORAS, resumen, tope_movimiento
@@ -111,7 +111,7 @@ class TipoIn(BaseModel):
     id: int | None = None
     codigo: str = Field(min_length=2, max_length=30, pattern=r"^[A-Z0-9_]+$")
     nombre: str = Field(min_length=2, max_length=120)
-    unidad: str = Field(pattern=r"^(pesos|pesos_mes|horas)$")
+    unidad: str = Field(pattern=r"^(pesos|pesos_mes|horas|unidades)$")
     reembolsable: bool = True
     cuenta_en_mfp: bool = True
     activo: bool = True
@@ -153,7 +153,9 @@ class ItemIn(BaseModel):
     tipo_id: int
     pactado: float = Field(ge=0, le=1e13)
     descripcion: str = Field(default="", max_length=300)
-    nombre: str = Field(default="", max_length=120)  # «Otros»: cuál es
+    nombre: str = Field(default="", max_length=120)  # «Otros» y beneficios: cuál es
+    periodo: str = Field(default="anio", pattern=r"^(anio|contrato)$")  # beneficios
+    valor_unitario: float = Field(default=0, ge=0, le=1e12)  # beneficios
 
 
 class MfpIn(BaseModel):
@@ -212,18 +214,26 @@ def crear(data: MfpIn, request: Request, db: DbSession, actual: Usuario = Depend
     db.flush()
     for it in data.items:
         t = _validar_tipo(db, it.tipo_id)
-        db.add(CstMfpItem(mfp_id=m.id, tipo_id=it.tipo_id, pactado=it.pactado, descripcion=it.descripcion.strip(), nombre=_nombre(t, it.nombre)))
+        db.add(CstMfpItem(mfp_id=m.id, tipo_id=it.tipo_id, pactado=it.pactado, descripcion=it.descripcion.strip(), nombre=_nombre(t, it.nombre),
+                          **_beneficio(t, it.periodo, it.valor_unitario)))
     auditar(db, request, "cst_mfp_creada", actual.id, numero=m.numero, cliente_id=m.cliente_id)
     db.commit()
     return ok(_detalle(_mfp(db, m.id), date.today()))
 
 
+def _beneficio(t: CstTipoItem, periodo: str, valor_unitario: float) -> dict:
+    """Los beneficios llevan periodo (por año o por todo el contrato) y valor unitario; los demás ítems no."""
+    if t.unidad != CANTIDAD:
+        return {"periodo": POR_ANIO, "valor_unitario": 0}
+    return {"periodo": periodo, "valor_unitario": valor_unitario}
+
+
 def _nombre(t: CstTipoItem, nombre: str) -> str:
-    """En los ítems «Otros» hay que escribir cuál es; en los demás no se usa."""
-    if t.codigo != "OTROS":
+    """En los ítems «Otros» y en los beneficios hay que escribir cuál es; en los demás no se usa."""
+    if t.codigo != "OTROS" and t.unidad != CANTIDAD:
         return ""
     if not nombre.strip():
-        raise ApiError(422, "Escriba cuál es el ítem «Otros»")
+        raise ApiError(422, "Escriba cuál es el beneficio" if t.unidad == CANTIDAD else "Escriba cuál es el ítem «Otros»")
     return nombre.strip()
 
 
@@ -294,7 +304,8 @@ def reactivar(mfp_id: int, request: Request, db: DbSession, actual: Usuario = De
 def agregar_item(mfp_id: int, data: ItemIn, request: Request, db: DbSession, actual: Usuario = Depends(require(GESTIONAR))):
     m = _mfp(db, mfp_id)
     t = _validar_tipo(db, data.tipo_id)
-    db.add(CstMfpItem(mfp_id=m.id, tipo_id=t.id, pactado=data.pactado, descripcion=data.descripcion.strip(), nombre=_nombre(t, data.nombre)))
+    db.add(CstMfpItem(mfp_id=m.id, tipo_id=t.id, pactado=data.pactado, descripcion=data.descripcion.strip(), nombre=_nombre(t, data.nombre),
+                      **_beneficio(t, data.periodo, data.valor_unitario)))
     auditar(db, request, "cst_item_agregado", actual.id, numero=m.numero, tipo=t.codigo, pactado=data.pactado)
     db.commit()
     db.expire_all()
@@ -311,7 +322,9 @@ def _item(db: DbSession, item_id: int) -> CstMfpItem:
 class ItemEditar(BaseModel):
     pactado: float = Field(ge=0, le=1e13)
     descripcion: str = Field(default="", max_length=300)
-    nombre: str | None = Field(default=None, max_length=120)  # «Otros»: cuál es (None = no cambia)
+    nombre: str | None = Field(default=None, max_length=120)  # «Otros» y beneficios: cuál es (None = no cambia)
+    periodo: str | None = Field(default=None, pattern=r"^(anio|contrato)$")  # beneficios (None = no cambia)
+    valor_unitario: float | None = Field(default=None, ge=0, le=1e12)
 
 
 @router.put("/items/{item_id}", response_model=ApiResponse[dict])
@@ -321,6 +334,11 @@ def editar_item(item_id: int, data: ItemEditar, request: Request, db: DbSession,
     it.pactado, it.descripcion = data.pactado, data.descripcion.strip()
     if data.nombre is not None:
         it.nombre = _nombre(it.tipo, data.nombre)
+    if it.tipo.unidad == CANTIDAD:
+        if data.periodo is not None:
+            it.periodo = data.periodo
+        if data.valor_unitario is not None:
+            it.valor_unitario = data.valor_unitario
     auditar(db, request, "cst_item_editado", actual.id, mfp_id=it.mfp_id, tipo=it.tipo.codigo, antes=antes, despues=data.pactado)
     db.commit()
     return ok(_detalle(_mfp(db, it.mfp_id), date.today()))
@@ -359,9 +377,9 @@ def registrar(item_id: int, data: MovimientoIn, request: Request, db: DbSession,
         raise ApiError(422, "La fecha es anterior al inicio del contrato")
     if it.tipo.unidad == HORAS and m.terminada:
         raise ApiError(422, "La MFP está terminada: la bolsa de horas ya no está disponible")
-    # Las solicitudes de horas no llevan documento contable; los ítems en pesos sí
+    # Las solicitudes de horas no llevan documento contable; los ítems en pesos sí; en los beneficios es opcional
     tipo_doc, numero = ("", "") if it.tipo.unidad == HORAS else (data.tipo_documento.strip().upper(), data.numero_documento.strip())
-    if it.tipo.unidad != HORAS and (not tipo_doc or not numero):
+    if it.tipo.unidad not in (HORAS, CANTIDAD) and (not tipo_doc or not numero):
         raise ApiError(422, "Indique el tipo y el número del documento contable que respalda el movimiento")
     if tipo_doc:
         t = db.get(CstTipoDocumento, tipo_doc)

@@ -19,7 +19,10 @@ from app.models import Usuario
 PESOS = "pesos"  # un valor en pesos por todo el contrato (bono, equipo, capacitación, nota crédito)
 PESOS_MES = "pesos_mes"  # un valor mensual (plan celular, mantenimiento): se causa mes a mes
 HORAS = "horas"  # bolsa de horas por cada año de contrato; lo no usado en el año se pierde
-UNIDADES = (PESOS, PESOS_MES, HORAS)
+# Beneficio: cantidad por año de contrato (o por todo el contrato), con un valor unitario (0 si no tiene costo)
+CANTIDAD = "unidades"
+POR_ANIO, POR_CONTRATO = "anio", "contrato"
+UNIDADES = (PESOS, PESOS_MES, HORAS, CANTIDAD)
 
 # Estados del costeo
 BORRADOR, ENVIADO, APROBADO, RECHAZADO = "borrador", "enviado", "aprobado", "rechazado"
@@ -88,6 +91,9 @@ class CstMfpItem(Base):
     # Ítems del tipo «Otros»: cuál es (escrito a mano)
     nombre: Mapped[str] = mapped_column(String(120), default="", server_default="")
     pactado: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    # Beneficios: la cantidad pactada es por año de contrato o por todo el contrato, y cada uno vale valor_unitario
+    periodo: Mapped[str] = mapped_column(String(10), default="anio", server_default="anio")
+    valor_unitario: Mapped[float] = mapped_column(Numeric(16, 2), default=0, server_default="0")
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     mfp: Mapped[CstMfp] = relationship(back_populates="items")

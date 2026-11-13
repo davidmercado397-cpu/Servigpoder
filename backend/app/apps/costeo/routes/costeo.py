@@ -374,6 +374,14 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
     for o in r.get("otros") or []:
         total = o["mensual"] * r["meses"]
         item(o.get("tipo_item") or "OTROS", total, o.get("nombre", ""))
+    # Beneficios: cada uno queda en la MFP con su cantidad (por año o por todo el contrato) y su valor, y se controla por consumo
+    for b in c.datos.get("beneficios") or []:
+        cantidad = float(b.get("cantidad") or 0)
+        if cantidad > 0 and (b.get("nombre") or "").strip() and "BENEFICIO" in tipos:
+            db.add(CstMfpItem(mfp_id=m.id, tipo_id=tipos["BENEFICIO"], pactado=round(cantidad, 2), nombre=b["nombre"].strip()[:120],
+                              descripcion=(b.get("detalle") or "").strip()[:300],
+                              periodo="contrato" if b.get("periodo") == "contrato" else "anio",
+                              valor_unitario=round(float(b.get("valor_unitario") or 0), 2)))
     # La bolsa de la MFP es por año de contrato: el total del costeo repartido en los años (el último puede ser parcial).
     # Los costeos de antes traen las horas por año.
     if c.datos.get("horas_bolsa_total") not in (None, ""):

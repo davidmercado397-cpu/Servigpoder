@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.apps.costeo.models import (
-    HORAS, PESOS, PESOS_MES, CstCatalogoCosto, CstComisionRango, CstParametro, CstServicio, CstTipoDocumento, CstTipoItem,
+    HORAS, PESOS, PESOS_MES, CANTIDAD, CstCatalogoCosto, CstComisionRango, CstParametro, CstServicio, CstTipoDocumento, CstTipoItem,
 )
 from app.apps.costeo.services.calculo import CARGA_PRESTACIONAL, COMISIONES, PARAMETROS, Rango
 
@@ -20,6 +20,7 @@ TIPOS_ITEM = {
     "OTROS": ("Otros", PESOS, True, True),
     "SERVICIO_MENSUAL": ("Servicio mensual (plan celular, mantenimiento…)", PESOS_MES, False, True),
     "BOLSA_HORAS": ("Bolsa de horas de vigilancia", HORAS, False, True),
+    "BENEFICIO": ("Beneficios", CANTIDAD, False, True),
     "PUBLICIDAD": ("Bolsa de publicidad", PESOS, False, False),
     "REPRESENTACION": ("Reserva de gastos de representación", PESOS, False, False),
 }

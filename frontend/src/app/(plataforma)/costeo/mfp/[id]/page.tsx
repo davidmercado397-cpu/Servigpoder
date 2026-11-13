@@ -7,7 +7,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ACEPTA_SOPORTE, MAX_SOPORTES, Modal, ModalMovimiento, subirSoportes } from "@/components/costeo";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
-import { ESTADO_MFP, SEVERIDAD, UNIDAD, aniosContrato, fecha, hoyISO, notaHorasTotal, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
+import { ESTADO_MFP, SEVERIDAD, UNIDAD, aniosContrato, esBeneficio, fecha, hoyISO, notaHorasTotal, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
 
 export default function DetalleMfp() {
@@ -20,7 +20,7 @@ export default function DetalleMfp() {
   const [abierto, setAbierto] = useState<number | null>(null);
   const [movItem, setMovItem] = useState<ItemMfp | null>(null);
   const [editarItem, setEditarItem] = useState<ItemMfp | null>(null);
-  const [nuevoItem, setNuevoItem] = useState(false);
+  const [nuevoItem, setNuevoItem] = useState<"" | "item" | "beneficio">("");
   const [terminar, setTerminar] = useState(false);
   const [error, setError] = useState("");
 
@@ -42,6 +42,98 @@ export default function DetalleMfp() {
 
   if (!m) return error ? <Alerta>{error}</Alerta> : <p className="text-sm text-slate-500">Cargando…</p>;
   const reembolsoRef = fechaReembolso || (m.terminada ? m.fecha_terminacion : null);
+  const pesosItems = m.items.filter((i) => !esBeneficio(i));
+  const beneficios = m.items.filter(esBeneficio);
+  // Una fila de ítem pactado o de beneficio (con sus movimientos al abrirla)
+  const fila = (it: ItemMfp) => {
+    const avance = it.pactado_total ? Math.min(1.5, it.ejecutado / it.pactado_total) : 0;
+    const porAnio = it.unidad === "horas" || (esBeneficio(it) && it.periodo === "anio");
+    const horasAnio = porAnio ? it.anios.find((a) => a.actual) : null;
+    const u = it.unidad === "horas" ? " h" : "";
+    return (
+      <Fragment key={it.id}>
+        <tr className="hover:bg-slate-50">
+          <td><button onClick={() => setAbierto(abierto === it.id ? null : it.id)}>{abierto === it.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button></td>
+          <td>
+            <p className="font-medium">{esBeneficio(it) ? it.nombre || it.tipo : it.tipo}{!it.cuenta_en_mfp && <span className="ml-1 text-xs text-slate-400">(bolsa interna)</span>}</p>
+            <p className="text-xs text-slate-500">{it.descripcion}{esBeneficio(it) ? "" : ` · ${UNIDAD[it.unidad]}`}{it.unidad === "pesos_mes" ? ` de ${pesos(it.pactado)}` : ""}</p>
+          </td>
+          <td className="text-right tabular-nums">{valorItem(it.pactado_total, it.unidad)}
+            {porAnio && <p className="text-xs text-slate-500">total del contrato{it.anios.length ? ` (${it.anios.length} ${it.anios.length === 1 ? "año" : "años"})` : ""}<br />{it.pactado}{u} por año</p>}
+            {esBeneficio(it) && !porAnio && <p className="text-xs text-slate-500">en todo el contrato</p>}</td>
+          <td className="text-right tabular-nums">{valorItem(it.ejecutado, it.unidad)}{it.causado !== null && <p className="text-xs text-slate-500">causado {pesos(it.causado)}</p>}</td>
+          <td>
+            <div className="h-2 rounded-full bg-slate-100"><div className={`h-2 rounded-full ${it.excede ? "bg-red-500" : "bg-marca-600"}`} style={{ width: `${Math.min(100, avance * 100)}%` }} /></div>
+            <p className="mt-0.5 text-xs text-slate-500">{pct(it.pactado_total ? it.ejecutado / it.pactado_total : null, 0)}</p>
+          </td>
+          <td className={`text-right tabular-nums ${it.pendiente < 0 ? "font-semibold text-red-700" : ""}`}>
+            {valorItem(it.pendiente, it.unidad)}{horasAnio && <p className="text-xs text-slate-500">{esBeneficio(it) ? "por entregar en" : "disponibles del"} año {horasAnio.anio}<br />{fecha(horasAnio.desde)}–{fecha(horasAnio.hasta)}</p>}
+          </td>
+          <td className="text-right tabular-nums">{esBeneficio(it)
+            ? (it.valor_unitario ? <>{pesos(it.valor_pactado ?? 0)}<p className="text-xs text-slate-500">{pesos(it.valor_unitario)} c/u · entregado {pesos(it.valor_ejecutado ?? 0)}</p></> : <span className="text-xs text-slate-400">sin costo</span>)
+            : it.reembolsable && it.unidad !== "horas" ? pesos(it.reembolso) : "—"}</td>
+          <td className="whitespace-nowrap text-right">
+            {registrar && !(m.terminada && it.unidad === "horas") && (
+              <button className="btn-primario px-2 py-1 text-xs" onClick={() => setMovItem(it)}>{it.unidad === "horas" ? "Solicitud" : esBeneficio(it) ? "Entrega" : "Registrar"}</button>
+            )}
+            {gestionar && <button className="ml-2" title="Editar lo pactado" onClick={() => setEditarItem(it)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}
+          </td>
+        </tr>
+        {abierto === it.id && (
+          <tr><td /><td colSpan={7} className="bg-slate-50">
+            {porAnio && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {it.anios.map((a) => (
+                  <span key={a.anio} className={`rounded-md border px-2 py-1 text-xs ${a.actual ? "border-marca-600 bg-white" : "border-slate-200 text-slate-500"}`}>
+                    Año {a.anio} ({fecha(a.desde)}–{fecha(a.hasta)}): {a.usado} de {a.pactado}{u}{a.vencido && a.saldo > 0 ? ` · ${a.saldo}${u} ${esBeneficio(it) ? "sin entregar" : "perdidas"}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(it.movimientos ?? []).length === 0 ? <p className="text-sm text-slate-500">Sin movimientos.</p> : (
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs text-slate-500"><th className="py-1">Fecha</th><th>Valor</th><th>Descripción</th><th>Documento</th><th>Soportes</th><th>Autorización</th><th /></tr></thead>
+                <tbody>
+                  {it.movimientos!.map((x) => (
+                    <tr key={x.id} className="border-t border-slate-200">
+                      <td className="py-1">{fecha(x.fecha)}</td>
+                      <td className="tabular-nums">{valorItem(x.valor, it.unidad)}</td>
+                      <td>{x.descripcion}{x.soporte && <p className="text-xs text-slate-500">{x.soporte}</p>}</td>
+                      <td className="whitespace-nowrap">{x.tipo_documento || x.numero_documento ? `${x.tipo_documento} ${x.numero_documento}`.trim() : <span className="text-slate-400">—</span>}</td>
+                      <td>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {x.soportes.map((s) => (
+                            <span key={s.id} className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs">
+                              <a className="inline-flex items-center gap-1 text-marca-700 hover:underline" href={`/api/costeo/soportes/${s.id}`} target="_blank" rel="noopener noreferrer" title={s.nombre}>
+                                <Paperclip className="h-3 w-3" /><span className="max-w-[9rem] truncate">{s.nombre}</span>
+                              </a>
+                              {gestionar && (
+                                <button aria-label="Quitar soporte" className="text-slate-400 hover:text-red-600"
+                                  onClick={async () => { if (!confirm(`¿Quitar el soporte «${s.nombre}»?`)) return; try { await api(`/costeo/soportes/${s.id}`, { method: "DELETE" }); cargar(); } catch (e) { setError(mensajeError(e)); } }}>
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {registrar && x.soportes.length < MAX_SOPORTES && <Adjuntar movimientoId={x.id} onListo={cargar} onError={setError} />}
+                        </div>
+                      </td>
+                      <td>{x.excede && <span className="inline-flex items-center gap-1 text-xs text-red-700"><ShieldAlert className="h-3.5 w-3.5" />{x.autorizacion}</span>}</td>
+                      <td className="text-right">{gestionar && (
+                        <button title="Eliminar movimiento" onClick={() => confirm("¿Eliminar este movimiento?") && accion(() => api(`/costeo/movimientos/${x.id}`, { method: "DELETE" }))}>
+                          <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-600" />
+                        </button>
+                      )}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </td></tr>
+        )}
+      </Fragment>
+    );
+  };
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start gap-3">
@@ -87,98 +179,35 @@ export default function DetalleMfp() {
           <label className="ml-auto flex items-center gap-2 text-sm text-slate-600">
             Simular reembolso a la fecha <input type="date" className="input w-40" value={fechaReembolso} onChange={(e) => setFechaReembolso(e.target.value)} />
           </label>
-          {gestionar && <button className="btn-secundario" onClick={() => setNuevoItem(true)}><Plus className="h-4 w-4" /> Ítem</button>}
+          {gestionar && <button className="btn-secundario" onClick={() => setNuevoItem("item")}><Plus className="h-4 w-4" /> Ítem</button>}
         </div>
         <div className="overflow-x-auto">
           <table className="tabla">
             <thead><tr><th /><th>Ítem</th><th className="text-right">Pactado</th><th className="text-right">Ejecutado</th><th className="w-40">Avance</th>
               <th className="text-right">Pendiente</th><th className="text-right">Reembolso</th><th /></tr></thead>
             <tbody>
-              {m.items.map((it) => {
-                const avance = it.pactado_total ? Math.min(1.5, it.ejecutado / it.pactado_total) : 0;
-                const horasAnio = it.unidad === "horas" ? it.anios.find((a) => a.actual) : null;
-                return (
-                  <Fragment key={it.id}>
-                    <tr className="hover:bg-slate-50">
-                      <td><button onClick={() => setAbierto(abierto === it.id ? null : it.id)}>{abierto === it.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button></td>
-                      <td>
-                        <p className="font-medium">{it.tipo}{!it.cuenta_en_mfp && <span className="ml-1 text-xs text-slate-400">(bolsa interna)</span>}</p>
-                        <p className="text-xs text-slate-500">{it.descripcion} · {UNIDAD[it.unidad]}{it.unidad === "pesos_mes" ? ` de ${pesos(it.pactado)}` : ""}</p>
-                      </td>
-                      <td className="text-right tabular-nums">{valorItem(it.pactado_total, it.unidad)}
-                        {it.unidad === "horas" && <p className="text-xs text-slate-500">total del contrato{it.anios.length ? ` (${it.anios.length} ${it.anios.length === 1 ? "año" : "años"})` : ""}<br />{it.pactado} h por año</p>}</td>
-                      <td className="text-right tabular-nums">{valorItem(it.ejecutado, it.unidad)}{it.causado !== null && <p className="text-xs text-slate-500">causado {pesos(it.causado)}</p>}</td>
-                      <td>
-                        <div className="h-2 rounded-full bg-slate-100"><div className={`h-2 rounded-full ${it.excede ? "bg-red-500" : "bg-marca-600"}`} style={{ width: `${Math.min(100, avance * 100)}%` }} /></div>
-                        <p className="mt-0.5 text-xs text-slate-500">{pct(it.pactado_total ? it.ejecutado / it.pactado_total : null, 0)}</p>
-                      </td>
-                      <td className={`text-right tabular-nums ${it.pendiente < 0 ? "font-semibold text-red-700" : ""}`}>
-                        {valorItem(it.pendiente, it.unidad)}{horasAnio && <p className="text-xs text-slate-500">disponibles del año {horasAnio.anio}<br />{fecha(horasAnio.desde)}–{fecha(horasAnio.hasta)}</p>}
-                      </td>
-                      <td className="text-right tabular-nums">{it.reembolsable && it.unidad !== "horas" ? pesos(it.reembolso) : "—"}</td>
-                      <td className="whitespace-nowrap text-right">
-                        {registrar && !(m.terminada && it.unidad === "horas") && (
-                          <button className="btn-primario px-2 py-1 text-xs" onClick={() => setMovItem(it)}>{it.unidad === "horas" ? "Solicitud" : "Registrar"}</button>
-                        )}
-                        {gestionar && <button className="ml-2" title="Editar lo pactado" onClick={() => setEditarItem(it)}><Pencil className="h-4 w-4 text-slate-400 hover:text-marca-700" /></button>}
-                      </td>
-                    </tr>
-                    {abierto === it.id && (
-                      <tr><td /><td colSpan={7} className="bg-slate-50">
-                        {it.unidad === "horas" && (
-                          <div className="mb-3 flex flex-wrap gap-2">
-                            {it.anios.map((a) => (
-                              <span key={a.anio} className={`rounded-md border px-2 py-1 text-xs ${a.actual ? "border-marca-600 bg-white" : "border-slate-200 text-slate-500"}`}>
-                                Año {a.anio} ({fecha(a.desde)}–{fecha(a.hasta)}): {a.usado} de {a.pactado} h{a.vencido && a.saldo > 0 ? ` · ${a.saldo} h perdidas` : ""}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {(it.movimientos ?? []).length === 0 ? <p className="text-sm text-slate-500">Sin movimientos.</p> : (
-                          <table className="w-full text-sm">
-                            <thead><tr className="text-left text-xs text-slate-500"><th className="py-1">Fecha</th><th>Valor</th><th>Descripción</th><th>Documento</th><th>Soportes</th><th>Autorización</th><th /></tr></thead>
-                            <tbody>
-                              {it.movimientos!.map((x) => (
-                                <tr key={x.id} className="border-t border-slate-200">
-                                  <td className="py-1">{fecha(x.fecha)}</td>
-                                  <td className="tabular-nums">{valorItem(x.valor, it.unidad)}</td>
-                                  <td>{x.descripcion}{x.soporte && <p className="text-xs text-slate-500">{x.soporte}</p>}</td>
-                                  <td className="whitespace-nowrap">{x.tipo_documento || x.numero_documento ? `${x.tipo_documento} ${x.numero_documento}`.trim() : <span className="text-slate-400">—</span>}</td>
-                                  <td>
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      {x.soportes.map((s) => (
-                                        <span key={s.id} className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs">
-                                          <a className="inline-flex items-center gap-1 text-marca-700 hover:underline" href={`/api/costeo/soportes/${s.id}`} target="_blank" rel="noopener noreferrer" title={s.nombre}>
-                                            <Paperclip className="h-3 w-3" /><span className="max-w-[9rem] truncate">{s.nombre}</span>
-                                          </a>
-                                          {gestionar && (
-                                            <button aria-label="Quitar soporte" className="text-slate-400 hover:text-red-600"
-                                              onClick={async () => { if (!confirm(`¿Quitar el soporte «${s.nombre}»?`)) return; try { await api(`/costeo/soportes/${s.id}`, { method: "DELETE" }); cargar(); } catch (e) { setError(mensajeError(e)); } }}>
-                                              <X className="h-3 w-3" />
-                                            </button>
-                                          )}
-                                        </span>
-                                      ))}
-                                      {registrar && x.soportes.length < MAX_SOPORTES && <Adjuntar movimientoId={x.id} onListo={cargar} onError={setError} />}
-                                    </div>
-                                  </td>
-                                  <td>{x.excede && <span className="inline-flex items-center gap-1 text-xs text-red-700"><ShieldAlert className="h-3.5 w-3.5" />{x.autorizacion}</span>}</td>
-                                  <td className="text-right">{gestionar && (
-                                    <button title="Eliminar movimiento" onClick={() => confirm("¿Eliminar este movimiento?") && accion(() => api(`/costeo/movimientos/${x.id}`, { method: "DELETE" }))}>
-                                      <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-600" />
-                                    </button>
-                                  )}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </td></tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {m.items.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-slate-400">Sin ítems pactados.</td></tr>}
+              {pesosItems.map(fila)}
+              {pesosItems.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-slate-400">Sin ítems pactados.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="tarjeta overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="font-semibold text-slate-700">Beneficios</h2>
+            <p className="text-xs text-slate-500">Lo prometido al cliente, uno por uno: cuántos se entregan en cada año del contrato.</p>
+          </div>
+          {gestionar && <button className="btn-secundario ml-auto" onClick={() => setNuevoItem("beneficio")}><Plus className="h-4 w-4" /> Beneficio</button>}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="tabla">
+            <thead><tr><th /><th>Beneficio</th><th className="text-right">Pactado</th><th className="text-right">Entregado</th><th className="w-40">Avance</th>
+              <th className="text-right">Pendiente</th><th className="text-right">Valor</th><th /></tr></thead>
+            <tbody>
+              {beneficios.map(fila)}
+              {beneficios.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-slate-400">Sin beneficios.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -188,13 +217,13 @@ export default function DetalleMfp() {
 
       {movItem && <ModalMovimiento item={movItem} onCerrar={() => setMovItem(null)} onGuardado={(x) => { setM(x); setMovItem(null); }} />}
       {editarItem && (
-        <Modal titulo={`Editar ${editarItem.tipo}`} onCerrar={() => setEditarItem(null)}>
+        <Modal titulo={`Editar ${esBeneficio(editarItem) ? `beneficio ${editarItem.nombre}` : editarItem.tipo}`} onCerrar={() => setEditarItem(null)}>
           <EditarItem item={editarItem} meses={m.duracion_meses} onGuardado={(x) => { setM(x); setEditarItem(null); }} />
         </Modal>
       )}
       {nuevoItem && (
-        <Modal titulo="Agregar ítem pactado" onCerrar={() => setNuevoItem(false)}>
-          <NuevoItem mfpId={m.id} meses={m.duracion_meses} onGuardado={(x) => { setM(x); setNuevoItem(false); }} />
+        <Modal titulo={nuevoItem === "beneficio" ? "Agregar beneficio" : "Agregar ítem pactado"} onCerrar={() => setNuevoItem("")}>
+          <NuevoItem mfpId={m.id} meses={m.duracion_meses} beneficio={nuevoItem === "beneficio"} onGuardado={(x) => { setM(x); setNuevoItem(""); }} />
         </Modal>
       )}
       {terminar && (
@@ -292,11 +321,14 @@ function EditarItem({ item, meses, onGuardado }: { item: ItemMfp; meses: number 
   const [descripcion, setDescripcion] = useState(item.descripcion);
   const [nombre, setNombre] = useState(item.nombre ?? "");
   const [error, setError] = useState("");
-  const otros = item.tipo_codigo === "OTROS";
+  const otros = item.tipo_codigo === "OTROS" || esBeneficio(item);
+  const [periodo, setPeriodo] = useState(item.periodo || "anio");
+  const [valor, setValor] = useState(String(item.valor_unitario ?? 0));
   return (
     <div className="space-y-3">
-      {otros && <div><label className="label">¿Cuál?</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>}
-      <div><label className="label">{esHoras ? "Horas de todo el contrato" : `Pactado (${UNIDAD[item.unidad]})`}</label>
+      {otros && <div><label className="label">{esBeneficio(item) ? "Beneficio" : "¿Cuál?"}</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>}
+      {esBeneficio(item) && <CamposBeneficio periodo={periodo} valor={valor} onPeriodo={setPeriodo} onValor={setValor} />}
+      <div><label className="label">{esHoras ? "Horas de todo el contrato" : esBeneficio(item) ? (periodo === "anio" ? "Cantidad por año de contrato" : "Cantidad en todo el contrato") : `Pactado (${UNIDAD[item.unidad]})`}</label>
         <input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} />
         {esHoras && Number(pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
@@ -308,30 +340,53 @@ function EditarItem({ item, meses, onGuardado }: { item: ItemMfp; meses: number 
           }}>Eliminar ítem</button>
         ) : <span />}
         <button className="btn-primario" onClick={async () => {
-          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: esHoras ? Number(pactado) / aniosContrato(meses) : Number(pactado), descripcion, ...(otros ? { nombre } : {}) } })); } catch (e) { setError(mensajeError(e)); }
+          try { onGuardado(await api<Mfp>(`/costeo/items/${item.id}`, { method: "PUT", json: { pactado: esHoras ? Number(pactado) / aniosContrato(meses) : Number(pactado), descripcion, ...(otros ? { nombre } : {}),
+            ...(esBeneficio(item) ? { periodo, valor_unitario: Number(valor) || 0 } : {}) } })); } catch (e) { setError(mensajeError(e)); }
         }}>Guardar</button>
       </div>
     </div>
   );
 }
 
-function NuevoItem({ mfpId, meses, onGuardado }: { mfpId: number; meses: number | null; onGuardado: (m: Mfp) => void }) {
+/** Beneficio: si la cantidad es por año de contrato o por todo el contrato, y lo que vale cada uno (0 = sin costo) */
+function CamposBeneficio({ periodo, valor, onPeriodo, onValor }: { periodo: string; valor: string; onPeriodo: (v: "anio" | "contrato") => void; onValor: (v: string) => void }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div><label className="label">La cantidad es</label>
+        <select className="input" value={periodo} onChange={(e) => onPeriodo(e.target.value as "anio" | "contrato")}>
+          <option value="anio">Por cada año de contrato</option><option value="contrato">Por todo el contrato</option></select></div>
+      <div><label className="label">Valor de cada uno</label><input type="number" className="input" value={valor} onChange={(e) => onValor(e.target.value)} />
+        <p className="mt-1 text-xs text-slate-500">0 = sin costo (solo compromiso)</p></div>
+    </div>
+  );
+}
+
+function NuevoItem({ mfpId, meses, beneficio, onGuardado }: { mfpId: number; meses: number | null; beneficio?: boolean; onGuardado: (m: Mfp) => void }) {
   const [tipos, setTipos] = useState<TipoItem[]>([]);
   const [f, setF] = useState({ tipo_id: "", pactado: "", descripcion: "", nombre: "" });
+  const [periodo, setPeriodo] = useState<"anio" | "contrato">("anio");
+  const [valor, setValor] = useState("0");
   const [error, setError] = useState("");
   useEffect(() => {
-    api<TipoItem[]>("/costeo/tipos-item").then((t) => setTipos(t.filter((x) => x.activo))).catch(() => {});
-  }, []);
+    api<TipoItem[]>("/costeo/tipos-item").then((t) => {
+      const activos = t.filter((x) => x.activo);
+      setTipos(activos);
+      // Beneficio: el tipo queda fijo; ítem pactado: todos menos los beneficios
+      const b = activos.find((x) => x.unidad === "unidades");
+      if (beneficio && b) setF((x) => ({ ...x, tipo_id: String(b.id) }));
+    }).catch(() => {});
+  }, [beneficio]);
   const unidad = tipos.find((t) => String(t.id) === f.tipo_id)?.unidad;
-  const otros = tipos.find((t) => String(t.id) === f.tipo_id)?.codigo === "OTROS";
+  const otros = tipos.find((t) => String(t.id) === f.tipo_id)?.codigo === "OTROS" || unidad === "unidades";
   return (
     <div className="space-y-3">
-      <div><label className="label">Ítem</label>
+      {!beneficio && <div><label className="label">Ítem</label>
         <select className="input" value={f.tipo_id} onChange={(e) => setF({ ...f, tipo_id: e.target.value })}>
-          <option value="">Seleccione…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre} ({UNIDAD[t.unidad]})</option>)}
-        </select></div>
-      {otros && <div><label className="label">¿Cuál?</label><input className="input" placeholder="Escriba cuál es" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>}
-      <div><label className="label">{unidad === "horas" ? "Horas de todo el contrato" : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
+          <option value="">Seleccione…</option>{tipos.filter((t) => t.unidad !== "unidades").map((t) => <option key={t.id} value={t.id}>{t.nombre} ({UNIDAD[t.unidad]})</option>)}
+        </select></div>}
+      {otros && <div><label className="label">{beneficio ? "Beneficio" : "¿Cuál?"}</label><input className="input" placeholder={beneficio ? "Ej. Poligrafías" : "Escriba cuál es"} value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>}
+      {unidad === "unidades" && <CamposBeneficio periodo={periodo} valor={valor} onPeriodo={setPeriodo} onValor={setValor} />}
+      <div><label className="label">{unidad === "horas" ? "Horas de todo el contrato" : unidad === "unidades" ? (periodo === "anio" ? "Cantidad por año de contrato" : "Cantidad en todo el contrato") : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
         <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} />
         {unidad === "horas" && Number(f.pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(f.pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
@@ -340,7 +395,7 @@ function NuevoItem({ mfpId, meses, onGuardado }: { mfpId: number; meses: number 
         <button className="btn-primario" disabled={!f.tipo_id || !f.pactado || (otros && !f.nombre.trim())} onClick={async () => {
           try {
             onGuardado(await api<Mfp>(`/costeo/mfp/${mfpId}/items`, { method: "POST", json: { tipo_id: Number(f.tipo_id), pactado: unidad === "horas" ? Number(f.pactado) / aniosContrato(meses) : Number(f.pactado), descripcion: f.descripcion,
-              nombre: otros ? f.nombre : "" } }));
+              nombre: otros ? f.nombre : "", ...(unidad === "unidades" ? { periodo, valor_unitario: Number(valor) || 0 } : {}) } }));
           } catch (e) { setError(mensajeError(e)); }
         }}>Agregar</button>
       </div>

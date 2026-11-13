@@ -101,7 +101,9 @@ PROPUESTA = {
               {"nombre": "Capacitación brigada", "tipo_item": "NO_EXISTE", "valor_unitario": 500000, "cantidad": 1, "entregas_anio": 1}],
     "dotacion_puesto": [{"nombre": "linternas", "cantidad": 2}, {"nombre": "Dron", "cantidad": 1}],
     "resumen": "El conjunto pide 2 porterías 24 horas con arma.", "supuestos": ["Dotación de gala"], "faltantes": ["Valor de las donaciones"],
-    "conflictos": ["Nota crédito: costeo 3 %, apoyo comercial 3,5 % (se tomó 3 %)"], "beneficios_sin_costo": ["Estudio de seguridad"],
+    "conflictos": ["Nota crédito: costeo 3 %, apoyo comercial 3,5 % (se tomó 3 %)"],
+    "beneficios": [{"nombre": "Poligrafías", "detalle": "3 al año", "cantidad": 3, "periodo": "anio", "valor_unitario": None},
+                   {"nombre": "Estudio de seguridad", "detalle": "Inicial", "cantidad": 1, "periodo": "contrato", "valor_unitario": 0}],
 }
 
 
@@ -128,7 +130,8 @@ def test_costeo_llenado_con_ia_desde_archivos(admin, db, proveedor):
 
     # Normalizado contra los catálogos: tarifa y hombres del catálogo; lo desconocido queda en faltantes
     assert d["pct_comision_vendedor"] == 0.005 and inf["fecha_inicio"] == "2026-12-01"
-    assert inf["conflictos"] and inf["beneficios_sin_costo"] == ["Estudio de seguridad"]
+    assert inf["conflictos"] and [b["nombre"] for b in d["beneficios"]] == ["Poligrafías", "Estudio de seguridad"]
+    assert d["beneficios"][0]["valor_unitario"] == 0 and d["beneficios"][1]["periodo"] == "contrato"
     assert d["duracion_meses"] == 24 and d["pct_nota_credito"] == 0.03 and d["horas_bolsa_total"] == 96 and d["automatico"]
     assert len(d["servicios"]) == 1
     s = d["servicios"][0]
@@ -171,3 +174,41 @@ def test_costeo_ia_valida_los_archivos(admin, proveedor):
     proveedor.contenido = "No pude leer el documento"
     r = admin.post(url, files=[txt])
     assert r.status_code == 502 and "legible" in r.json()["error"]["message"]
+
+
+def test_beneficios_del_costeo_a_la_mfp(admin):
+    """Cada beneficio queda en la sección Beneficios de la MFP, uno por uno, y se controla por consumo en cada año."""
+    servicio = next(s for s in admin.get(f"{API}/servicios").json()["data"] if s["hombres"] == 3)
+    cid = admin.post(f"{API}/clientes", json={"nit": "321", "nombre": "Vilor prueba"}).json()["data"]["id"]
+    c = admin.post(f"{API}/costeos", json={"cliente_id": cid, "nombre": "Vilor prueba"}).json()["data"]
+    datos = {**c["datos"], "duracion_meses": 24,
+             "servicios": [{"servicio_id": servicio["id"], "descripcion": servicio["descripcion"], "puesto": "Portería", "cantidad": 1,
+                            "tarifa": servicio["tarifa"], "hombres": 3, "dotacion": "gala", "arma": "sin"}],
+             "beneficios": [{"nombre": "Poligrafías", "detalle": "3 pruebas al año", "cantidad": 3, "periodo": "anio", "valor_unitario": 200_000},
+                            {"nombre": "Estudio de seguridad", "detalle": "Al instalar el servicio", "cantidad": 1, "periodo": "contrato",
+                             "valor_unitario": 0}]}
+    g = admin.put(f"{API}/costeos/{c['id']}", json={"cliente_id": cid, "nombre": "Vilor prueba", "datos": datos}).json()["data"]
+    r = g["resultado"]
+    # 3 × 200.000 al año = 50.000 al mes; suma al costo y al % de MFP; el que vale 0 no
+    assert r["costos"]["beneficios"] == pytest.approx(50_000) and r["mfp"]["pct_beneficios"] == pytest.approx(50_000 / servicio["tarifa"])
+    assert r["mfp"]["beneficios_total"] == pytest.approx(1_200_000)
+
+    admin.post(f"{API}/costeos/{c['id']}/estado", json={"estado": "aprobado"})
+    mfp_id = admin.post(f"{API}/costeos/{c['id']}/crear-mfp", json={"numero": "B-1", "fecha_inicio": "2026-01-01"}).json()["data"]["mfp_id"]
+    m = admin.get(f"{API}/mfp/{mfp_id}").json()["data"]
+    pol, estudio = [i for i in m["items"] if i["tipo_codigo"] == "BENEFICIO"]
+    assert (pol["nombre"], pol["pactado"], pol["periodo"], pol["valor_unitario"], pol["pactado_total"]) == ("Poligrafías", 3, "anio", 200_000, 6)
+    assert pol["valor_pactado"] == 1_200_000 and len(pol["anios"]) == 2
+    assert (estudio["periodo"], estudio["pactado_total"], estudio["valor_pactado"]) == ("contrato", 1, 0)
+
+    # Entregas: sin documento contable; la cuarta poligrafía del año supera lo pactado y pide autorización
+    url = f"{API}/items/{pol['id']}/movimientos"
+    base = {"fecha": "2026-03-01", "descripcion": "Poligrafía de ingreso"}
+    assert admin.post(url, json={**base, "valor": 3}).status_code == 201
+    r = admin.post(url, json={**base, "valor": 1})
+    assert r.status_code == 409 and "quedan 0 de 3" in r.json()["error"]["message"]
+    assert admin.post(url, json={**base, "fecha": "2027-02-01", "valor": 1}).status_code == 201  # año 2 del contrato
+    m = admin.get(f"{API}/mfp/{mfp_id}").json()["data"]
+    pol = next(i for i in m["items"] if i["nombre"] == "Poligrafías")
+    assert [a["usado"] for a in pol["anios"]] == [3, 1] and pol["valor_ejecutado"] == 800_000
+    assert m["ejecutado"] >= 800_000  # el valor de los beneficios entra en lo ejecutado de la MFP

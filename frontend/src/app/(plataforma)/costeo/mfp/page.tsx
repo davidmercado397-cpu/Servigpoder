@@ -199,7 +199,7 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
             <div key={i} className="mb-2">
               <div className={`grid gap-2 ${otros ? "sm:grid-cols-[1fr_1.2fr_0.8fr_1.3fr_auto]" : "sm:grid-cols-[1.2fr_0.8fr_1.5fr_auto]"}`}>
                 <select className="input" value={it.tipo_id} onChange={(e) => set({ tipo_id: e.target.value })}>
-                  <option value="">Ítem…</option>{tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                  <option value="">Ítem…</option>{tipos.filter((t) => t.unidad !== "unidades").map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
                 </select>
                 {otros && <input className={`input ${it.pactado && !it.nombre.trim() ? "border-red-400" : ""}`} placeholder="¿Cuál? (escríbalo)" autoFocus
                   value={it.nombre} onChange={(e) => set({ nombre: e.target.value })} />}

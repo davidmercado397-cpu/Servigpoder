@@ -40,6 +40,8 @@ export function Modal({ titulo, onCerrar, children }: { titulo: string; onCerrar
 
 export function ModalMovimiento({ item, onCerrar, onGuardado }: { item: ItemMfp; onCerrar: () => void; onGuardado: (m: Mfp) => void }) {
   const horas = item.unidad === "horas";
+  const beneficio = item.unidad === "unidades";
+  const porAnio = horas || (beneficio && item.periodo === "anio");
   const [f, setF] = useState({ fecha: hoyISO(), valor: "", descripcion: "", tipo_documento: "", numero_documento: "", soporte: "", autorizacion: "" });
   const [tipos, setTipos] = useState<TipoDocumento[]>([]);
   const [archivos, setArchivos] = useState<File[]>([]);
@@ -75,19 +77,20 @@ export function ModalMovimiento({ item, onCerrar, onGuardado }: { item: ItemMfp;
       setGuardando(false);
     }
   }
-  const faltaDocumento = !horas && (!f.tipo_documento || !f.numero_documento.trim());
-  const disponible = horas ? item.anios.find((a) => a.actual)?.saldo ?? 0 : item.pendiente;
+  // Los beneficios no exigen documento contable (es opcional); los ítems en pesos sí
+  const faltaDocumento = !horas && !beneficio && (!f.tipo_documento || !f.numero_documento.trim());
+  const disponible = porAnio ? item.anios.find((a) => a.actual)?.saldo ?? 0 : item.pendiente;
   return (
-    <Modal titulo={`${horas ? "Solicitud de horas" : "Registrar ejecución"} · ${item.tipo}`} onCerrar={onCerrar}>
+    <Modal titulo={`${horas ? "Solicitud de horas" : beneficio ? "Registrar entrega" : "Registrar ejecución"} · ${item.tipo}`} onCerrar={onCerrar}>
       <div className="space-y-3">
-        <p className="text-sm text-slate-600">Disponible: <b>{valorItem(disponible, item.unidad)}</b>{horas ? " en el año en curso del contrato" : ""}</p>
+        <p className="text-sm text-slate-600">Disponible: <b>{valorItem(disponible, item.unidad)}</b>{porAnio ? " en el año en curso del contrato" : beneficio ? " en el contrato" : ""}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div><label className="label">Fecha {horas ? "del servicio" : ""}</label><input type="date" className="input" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
-          <div><label className="label">{horas ? "Horas" : "Valor"}</label><input type="number" className="input" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></div>
+          <div><label className="label">{horas ? "Horas" : beneficio ? "Cantidad entregada" : "Valor"}</label><input type="number" className="input" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></div>
           <div className="sm:col-span-2"><label className="label">Descripción</label>
-            <input className="input" placeholder={horas ? "Ej. acompañamiento 2 h por cumpleaños" : "Ej. pago bono de libre inversión"} value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
+            <input className="input" placeholder={horas ? "Ej. acompañamiento 2 h por cumpleaños" : beneficio ? "Ej. poligrafía de ingreso a portería" : "Ej. pago bono de libre inversión"} value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
           {!horas && (<>
-          <div><label className="label">Tipo de documento contable</label>
+          <div><label className="label">Tipo de documento contable{beneficio ? " (opcional)" : ""}</label>
             <select className="input" value={f.tipo_documento} onChange={(e) => setF({ ...f, tipo_documento: e.target.value })}>
               <option value="">Seleccione…</option>{tipos.map((t) => <option key={t.codigo} value={t.codigo}>{t.codigo} · {t.nombre}</option>)}
             </select></div>

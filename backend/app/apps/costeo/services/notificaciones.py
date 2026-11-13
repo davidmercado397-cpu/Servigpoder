@@ -97,7 +97,13 @@ def _servicios_filas(datos: dict) -> list[list]:
 # --- Contenido por área ------------------------------------------------------------------------------
 
 def _compras(m: CstMfp, c: CstCosteo | None) -> str:
-    items = [[i["tipo"], i["descripcion"] or "—", _pesos(i["pactado"]) + (" al mes" if i["unidad"] == "pesos_mes" else "")]
+    def pactado(i: dict) -> str:
+        if i["unidad"] == "unidades":  # beneficio: cantidad y valor de cada uno
+            cada = "por año" if i["periodo"] == "anio" else "en el contrato"
+            return f"{_num(i['pactado'])} {cada}" + (f" · {_pesos(i['valor_unitario'])} c/u" if i["valor_unitario"] else "")
+        return _pesos(i["pactado"]) + (" al mes" if i["unidad"] == "pesos_mes" else "")
+
+    items = [[i["tipo"], i["descripcion"] or "—", pactado(i)]
              for i in resumen(m, date.today())["items"] if i["tipo_codigo"] not in NO_SE_COTIZAN]
     cuerpo = "<h3>Ítems de la MFP para cotizar</h3>" + _tabla(["Ítem", "Descripción", "Pactado"], items, {2})
     if c is not None:

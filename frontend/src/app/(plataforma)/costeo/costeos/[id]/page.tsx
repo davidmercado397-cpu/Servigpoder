@@ -16,6 +16,8 @@ type Servicio = { servicio_id?: number; descripcion: string; puesto: string; can
 type Personal = { nombre: string; hombres: number; salario?: number | null; horas_extras: number; auxilio_transporte: boolean; auxilios_no_salariales: number; rodamiento: number };
 type Elemento = { nombre: string; valor_unitario: number; cantidad: number; vida_util_meses?: number | null; entregas_anio?: number | null; tipo_item?: string;
   aplica?: string; por_hombre?: boolean };
+/** Beneficio ofrecido al cliente: cantidad por año de contrato o por todo el contrato; valor 0 = sin costo */
+type Beneficio = { nombre: string; detalle?: string; cantidad: number; periodo: "anio" | "contrato"; valor_unitario: number };
 type Datos = {
   duracion_meses: number; pct_nota_credito: number; pct_cupo_inversion: number; horas_bolsa_anual?: number; donaciones: number;
   /** Horas de obsequio de todo el contrato (las del año salen de aquí) */
@@ -24,17 +26,18 @@ type Datos = {
   /** Costeo por puestos: hombres del personal y dotación de la tarifa automáticos */
   automatico?: boolean;
   servicios: Servicio[]; personal: Personal[]; otros: Elemento[]; dotacion_tarifa: Elemento[]; dotacion_puesto: Elemento[];
+  beneficios?: Beneficio[];
 };
 type Resultado = {
   meses: number; tarifa_decreto: number; descuento_nota_credito: number; tarifa_neta: number; hombres_servicios: number; hombres_personal: number;
-  costo_por_hombre: number; mfp: { pct_nota_credito: number; pct_cupo_inversion: number; pct_otros: number; pct_total: number; cupo_inversion_vp: number };
+  costo_por_hombre: number; mfp: { pct_nota_credito: number; pct_cupo_inversion: number; pct_otros: number; pct_beneficios?: number; pct_total: number; cupo_inversion_vp: number };
   bolsas: { publicidad: number; representacion: number; horas_anuales: number; horas_total?: number; valor_hora: number };
   comision: { pct: number; carga_prestacional: number; vendedor_total: number; director_total: number; pct_vendedor?: number; carga_vendedor?: number; vendedor_elegida?: boolean;
     pct_director?: number; carga_director?: number; director_elegida?: boolean };
   facturacion: { aiu: number; iva: number; reteica: number; total_a_pagar: number; ica_por_mil?: number; ica_por_mil_parametro?: number };
   personal: { nombre: string; hombres: number; costo_hombre: number; costo_total: number; neto_hombre: number }[];
   costos: Record<string, number>; total_costos: number; antes_renta: number; margen_mensual: number; margen_por_hombre: number; margen_total: number;
-  pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; dotacion_tarifa: (Elemento & { mensual: number })[]; dotacion_puesto: { mensual: number }[];
+  pct_margen: number; pct_rentabilidad_mensual?: number; pct_rentabilidad_total?: number; alertas: string[]; otros: { mensual: number }[]; beneficios?: { mensual: number }[]; dotacion_tarifa: (Elemento & { mensual: number })[]; dotacion_puesto: { mensual: number }[];
 };
 type Costeo = { id: number; cliente: Cliente; nombre: string; version: number; estado: string; datos: Datos; resultado: Resultado; mfp_id: number | null; parametros_aprobados: boolean };
 type CatServicio = { id: number; descripcion: string; tarifa: number; hombres: number; activo: boolean };
@@ -44,7 +47,7 @@ type CatElemento = { id: number; grupo: string; nombre: string; valor_unitario: 
 const GRUPOS_COSTO: { titulo: string; costos: [string, string][] }[] = [
   { titulo: "Costo laboral", costos: [["laboral", "Costo laboral"]] },
   { titulo: "Gasto operativo", costos: [["dotacion_tarifa", "Dotación de la tarifa"], ["dotacion_puesto", "Dotación adicional del puesto"]] },
-  { titulo: "Entregado en la MFP", costos: [["otros_directos", "Otros costos directos"], ["cupo_inversion", "Cupo de inversión"], ["horas_adicionales", "Bolsa de horas adicionales"]] },
+  { titulo: "Entregado en la MFP", costos: [["otros_directos", "Otros costos directos"], ["beneficios", "Beneficios"], ["cupo_inversion", "Cupo de inversión"], ["horas_adicionales", "Bolsa de horas adicionales"]] },
   { titulo: "Gastos", costos: [["publicidad", "Publicidad"], ["comisiones", "Comisiones vendedor y director"], ["donaciones", "Donaciones"],
     ["gasto_administrativo", "Gasto administrativo"], ["representacion", "Reserva de representación"]] },
   { titulo: "Impuestos", costos: [["ica", "Industria y comercio"], ["renta", "Impuesto de renta"]] },
@@ -55,7 +58,7 @@ const DOTACIONES: [string, string][] = [["gala", "Gala"], ["overol", "Overol"]];
 const ARMAS: [string, string][] = [["sin", "Sin arma"], ["fuego", "Fuego"], ["fogeo", "Fogeo"], ["traumatica", "Traumática"], ["noletal", "No letal"]];
 const APLICA: Record<string, string> = { todos: "Todos los puestos", gala: "Gala", overol: "Overol", arma: "Puestos con arma", fuego: "Arma de fuego",
   fogeo: "Arma de fogeo", traumatica: "Arma traumática", noletal: "Arma no letal" };
-const PESTANAS: [string, string][] = [["condiciones", "Condiciones"], ["puestos", "Puestos y dotación"], ["personal", "Personal"], ["otros", "Otros costos (MFP)"]];
+const PESTANAS: [string, string][] = [["condiciones", "Condiciones"], ["puestos", "Puestos y dotación"], ["personal", "Personal"], ["otros", "Otros costos y beneficios (MFP)"]];
 const VACIO: Datos = { duracion_meses: 12, pct_nota_credito: 0, pct_cupo_inversion: 0, horas_bolsa_total: 0, donaciones: 0, servicios: [], personal: [], otros: [], dotacion_tarifa: [], dotacion_puesto: [] };
 const n = (v: string) => (v === "" ? 0 : Number(v));
 
@@ -293,6 +296,8 @@ export default function EditorCosteo() {
           {pestana === "otros" && <Elementos titulo="Otros costos directos (MFP)" ayuda="Se reparten en la vida útil indicada (vacía = los meses del contrato). Al crear la MFP, cada uno queda como un ítem del tipo elegido."
             filas={d.otros} catalogo={catalogo.filter((x) => x.grupo === "otros")} hombres={hombres} editable={editable} precios conTipo
             on={(f) => cambiar({ otros: f })} mensuales={r.otros?.map((x) => x.mensual) ?? []} />}
+          {pestana === "otros" && <Beneficios filas={d.beneficios ?? []} editable={editable} on={(f) => cambiar({ beneficios: f })}
+            mensuales={r.beneficios?.map((x) => x.mensual) ?? []} />}
         </div>
 
         <PanelResultado r={r} />
@@ -341,7 +346,7 @@ function PanelResultado({ r }: { r: Resultado }) {
         {fila("Costos totales", pesos(r.total_costos), true)}
         <div className="my-2 border-t border-slate-100" />
         {fila("MFP total", pct(r.mfp.pct_total), true)}
-        <p className="text-xs text-slate-500">Nota crédito {pct(r.mfp.pct_nota_credito)} · cupo {pct(r.mfp.pct_cupo_inversion)} · otros {pct(r.mfp.pct_otros)}</p>
+        <p className="text-xs text-slate-500">Nota crédito {pct(r.mfp.pct_nota_credito)} · cupo {pct(r.mfp.pct_cupo_inversion)} · otros {pct(r.mfp.pct_otros)}{r.mfp.pct_beneficios ? ` · beneficios ${pct(r.mfp.pct_beneficios)}` : ""}</p>
         <p className="text-xs text-slate-500">Cupo de inversión (valor presente): {pesos(r.mfp.cupo_inversion_vp)}</p>
         <p className="text-xs text-slate-500">Comisión vendedor {pct(r.comision.pct_vendedor ?? r.comision.pct, 2)} ({r.comision.vendedor_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_vendedor ?? r.comision.carga_prestacional} · {pesos(r.comision.vendedor_total)}</p>
         <p className="text-xs text-slate-500">Comisión director {pct(r.comision.pct_director ?? r.comision.pct, 2)} ({r.comision.director_elegida ? "digitada" : "según % MFP"}) · carga {r.comision.carga_director ?? r.comision.carga_prestacional} · {pesos(r.comision.director_total)}</p>
@@ -463,6 +468,37 @@ function Comision({ etiqueta, v, automatica, on, off, nota }: { etiqueta: string
       <input className="input" type="number" min={0} step="any" disabled={off} placeholder={`Automática ${pct(automatica, 2)}`}
         value={v == null ? "" : +(v * 100).toFixed(4)} onChange={(e) => on(e.target.value === "" ? null : Number(e.target.value) / 100)} />
       {nota && <p className="mt-1 text-xs text-slate-500">{nota}</p>}</div>
+  );
+}
+
+/** Beneficios ofrecidos al cliente, uno por uno. En la MFP quedan en su sección y se controlan por consumo en cada año. */
+function Beneficios({ filas, editable, on, mensuales }: { filas: Beneficio[]; editable: boolean; on: (f: Beneficio[]) => void; mensuales: number[] }) {
+  const set = (i: number, x: Partial<Beneficio>) => on(filas.map((f, j) => (j === i ? { ...f, ...x } : f)));
+  return (
+    <Seccion titulo="Beneficios (MFP)" accion={editable && (
+      <button className="btn-secundario" onClick={() => on([...filas, { nombre: "", detalle: "", cantidad: 1, periodo: "anio", valor_unitario: 0 }])}>
+        <Plus className="h-4 w-4" /> Beneficio</button>)}>
+      <p className="mb-2 text-xs text-slate-500">Lo que se le promete al cliente (poligrafías, capacitaciones, estudio de seguridad, reuniones…), uno por uno.
+        Los que tienen valor suman al costo y al % de MFP; los de $0 quedan como compromiso. En la MFP se controla cuántos se entregan en cada año.</p>
+      {filas.length === 0 ? <p className="text-sm text-slate-500">Sin beneficios.</p> : (
+        <Tabla columnas={["Beneficio", "Detalle", "Cantidad", "Cada", "Valor unitario", "Mensual", ""]}>
+          {filas.map((b, i) => (
+            <tr key={i}>
+              <td><input className={`input w-44 ${!b.nombre.trim() ? "border-red-400" : ""}`} disabled={!editable} value={b.nombre} placeholder="Ej. Poligrafías"
+                onChange={(e) => set(i, { nombre: e.target.value })} /></td>
+              <td><input className="input w-56" disabled={!editable} value={b.detalle ?? ""} placeholder="Lo que dice la oferta" onChange={(e) => set(i, { detalle: e.target.value })} /></td>
+              <td><input className="input w-20" type="number" disabled={!editable} value={b.cantidad} onChange={(e) => set(i, { cantidad: n(e.target.value) })} /></td>
+              <td><select className="input w-36" disabled={!editable} value={b.periodo} onChange={(e) => set(i, { periodo: e.target.value as Beneficio["periodo"] })}>
+                <option value="anio">año de contrato</option><option value="contrato">todo el contrato</option></select></td>
+              <td><input className="input w-32" type="number" disabled={!editable} value={b.valor_unitario} onChange={(e) => set(i, { valor_unitario: n(e.target.value) })} />
+                {!b.valor_unitario && <p className="text-xs text-slate-400">sin costo</p>}</td>
+              <td className="whitespace-nowrap tabular-nums">{pesos(mensuales[i] ?? 0)}</td>
+              <td>{editable && <Quitar on={() => on(filas.filter((_, j) => j !== i))} />}</td>
+            </tr>
+          ))}
+        </Tabla>
+      )}
+    </Seccion>
   );
 }
 

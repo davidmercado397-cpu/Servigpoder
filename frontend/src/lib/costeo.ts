@@ -2,7 +2,7 @@
 export { pesos } from "@/lib/formato";
 
 export type Cliente = { id: number; nit: string; nombre: string };
-export type TipoItem = { id: number; codigo: string; nombre: string; unidad: "pesos" | "pesos_mes" | "horas"; reembolsable: boolean; cuenta_en_mfp: boolean; activo: boolean };
+export type TipoItem = { id: number; codigo: string; nombre: string; unidad: "pesos" | "pesos_mes" | "horas" | "unidades"; reembolsable: boolean; cuenta_en_mfp: boolean; activo: boolean };
 export type AlertaMfp = { tipo: string; severidad: "alta" | "media" | "baja"; mensaje: string };
 export type Soporte = { id: number; nombre: string; mime: string; bytes: number };
 export type Movimiento = { id: number; fecha: string; valor: number; descripcion: string; tipo_documento: string; numero_documento: string;
@@ -23,8 +23,10 @@ export function notaHorasTotal(total: number, meses: number | null | undefined):
 
 export type ItemMfp = {
   id: number; tipo: string; tipo_codigo: string; unidad: TipoItem["unidad"]; descripcion: string; reembolsable: boolean; cuenta_en_mfp: boolean;
-  /** «Otros»: cuál es */
+  /** «Otros» y beneficios: cuál es */
   nombre?: string;
+  /** Beneficios: la cantidad es por año de contrato o por todo el contrato, y lo que vale cada uno */
+  periodo?: "anio" | "contrato" | ""; valor_unitario?: number; valor_pactado?: number; valor_ejecutado?: number;
   pactado: number; pactado_total: number; ejecutado: number; pendiente: number; causado: number | null; reembolso: number; excede: boolean;
   anios: AnioBolsa[]; movimientos?: Movimiento[];
 };
@@ -40,7 +42,9 @@ export const ESTADO_MFP: Record<string, string> = {
   vigente: "bg-green-100 text-green-800", vencida: "bg-slate-200 text-slate-700", terminada: "bg-red-100 text-red-700",
 };
 export const SEVERIDAD: Record<string, string> = { alta: "text-red-700", media: "text-amber-700", baja: "text-slate-500" };
-export const UNIDAD: Record<string, string> = { pesos: "Pesos", pesos_mes: "Pesos por mes", horas: "Horas por año" };
+export const UNIDAD: Record<string, string> = { pesos: "Pesos", pesos_mes: "Pesos por mes", horas: "Horas por año", unidades: "Cantidad" };
+/** Beneficios: se controlan por cantidad (por año de contrato o en todo el contrato) */
+export const esBeneficio = (i: { unidad: string }) => i.unidad === "unidades";
 export const ESTADO_COSTEO: Record<string, string> = {
   borrador: "bg-amber-100 text-amber-800", enviado: "bg-sky-100 text-sky-800", aprobado: "bg-green-100 text-green-800", rechazado: "bg-red-100 text-red-700",
 };
@@ -58,6 +62,7 @@ export function fecha(iso: string | null | undefined): string {
 
 export function valorItem(v: number, unidad: string): string {
   if (unidad === "horas") return `${v.toLocaleString("es-CO")} h`;
+  if (unidad === "unidades") return v.toLocaleString("es-CO");
   return "$" + Math.round(v).toLocaleString("es-CO");
 }
 

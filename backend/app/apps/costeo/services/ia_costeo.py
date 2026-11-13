@@ -268,17 +268,20 @@ APOYO COMERCIAL y BENEFICIOS van a la MFP (lo que se le promete al cliente y se 
 - Del APOYO COMERCIAL: el beneficio económico ofrecido (nota crédito / descuento % → pct_nota_credito; bono de reinversión
   o cupo de inversión % → pct_cupo_inversion; equipos o bonos en pesos → "otros"). Si choca con el Excel de costeo, manda
   el Excel y se anota en "conflictos".
-- De BENEFICIOS: lo que tiene costo va a "otros" (pestaña Otros costos (MFP)), y las horas de refuerzo a la bolsa de horas
-  (horas_bolsa_total). Al crear la MFP del contrato, cada uno queda como un ítem a controlar.
+- De BENEFICIOS: cada beneficio va UNO POR UNO a "beneficios" (sección Beneficios de la MFP), y las horas de refuerzo a la
+  bolsa de horas (horas_bolsa_total). Al crear la MFP del contrato, cada beneficio queda en su sección y se controla
+  por consumo (cuántos se han entregado en cada año del contrato).
 
-Beneficios ofrecidos al cliente:
-- Los que le cuestan a Servigpoder (poligrafías, capacitaciones con costo, equipos, celulares, Visitrack, Acces Too,
-  pólizas, vuelos de dron…) van a "otros" con su cantidad por año de contrato (o "entregas_anio"). Si un documento o el
-  CATÁLOGO DE OTROS COSTOS trae el valor, úsalo; si no, valor_unitario 0 y agrega a "faltantes":
-  "Confirmar que <beneficio> vale $0 (no se encontró su valor)".
-- Las horas de refuerzo / horas adicionales anuales son horas de obsequio (horas_bolsa_total por todo el contrato), no "otros".
-- Los que no tienen costo directo (estudio de seguridad, informes y reuniones, plataforma de riesgos, bienestar del
-  personal, relación con la policía…) NO van a "otros": lístalos en "beneficios_sin_costo".
+Beneficios ofrecidos al cliente ("beneficios"): uno por uno, con nombre corto, detalle (lo que dice el documento),
+cantidad y periodo: "anio" = por cada año de contrato (3 poligrafías al año → cantidad 3; una reunión mensual → 12;
+supervisión diaria → 365), "contrato" = una sola vez o por todo el contrato (estudio de seguridad inicial → 1).
+- Valor unitario: los que le cuestan a Servigpoder (poligrafías, capacitaciones con costo, Visitrack, pólizas, vuelos
+  de dron…) llevan su valor si un documento o el CATÁLOGO DE OTROS COSTOS lo trae; si no se encontró, valor_unitario 0 y
+  agrega a "faltantes": "Confirmar que <beneficio> vale $0 (no se encontró su valor)".
+- Los que no tienen costo directo (estudio de seguridad, informes y reuniones, plataforma de riesgos, verificación de
+  antecedentes, programa de bienestar del personal, relación con la policía…) van con valor_unitario 0, sin faltante.
+- Las horas de refuerzo / horas adicionales anuales NO son beneficios: son horas de obsequio (horas_bolsa_total).
+- En "otros" quedan solo los equipos y bonos en pesos (Acces Too, módem, celulares, cámaras, bono tarifa…).
 
 Responde SOLO con un objeto JSON (sin texto antes ni después) con esta forma:
 {
@@ -300,11 +303,12 @@ Responde SOLO con un objeto JSON (sin texto antes ni después) con esta forma:
   "otros": [{"nombre": "texto", "tipo_item": "código", "valor_unitario": número, "cantidad": número,
              "vida_util_meses": número o null, "entregas_anio": número o null}],
   "dotacion_puesto": [{"nombre": "nombre exacto del catálogo", "cantidad": número}],
+  "beneficios": [{"nombre": "texto corto", "detalle": "texto", "cantidad": número, "periodo": "anio|contrato",
+                  "valor_unitario": número}],
   "resumen": "2 a 5 frases: qué pide el cliente y cómo quedó el costeo",
   "conflictos": ["…"],
   "supuestos": ["…"],
-  "faltantes": ["…"],
-  "beneficios_sin_costo": ["…"]
+  "faltantes": ["…"]
 }
 Si una lista no aplica, déjala vacía []."""
 
@@ -481,6 +485,22 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
         d["dotacion_puesto"] = adicional
         llenado.append(f"{len(adicional)} elemento(s) de dotación adicional")
 
+    # Beneficios: uno por uno, con cantidad por año o por todo el contrato
+    cat_otros_valor = {_normal(c["nombre"]): c["valor_unitario"] for c in catalogo if c["grupo"] == "otros"}
+    beneficios = []
+    for b in p.get("beneficios") or []:
+        if not isinstance(b, dict) or not _texto(b.get("nombre"), 120):
+            continue
+        valor = _n(b.get("valor_unitario"))
+        if valor is None:
+            valor = cat_otros_valor.get(_normal(b["nombre"]), 0)
+        beneficios.append({"nombre": _texto(b["nombre"], 120), "detalle": _texto(b.get("detalle"), 300),
+                           "cantidad": max(0.0, _n(b.get("cantidad"), 1) or 1),
+                           "periodo": "contrato" if b.get("periodo") == "contrato" else "anio", "valor_unitario": max(0.0, valor)})
+    if beneficios:
+        d["beneficios"] = beneficios
+        llenado.append(f"{len(beneficios)} beneficio(s)")
+
     cliente = p.get("cliente") if isinstance(p.get("cliente"), dict) else {}
     informe = {
         "resumen": _texto(p.get("resumen"), 1500),
@@ -492,7 +512,6 @@ def aplicar(actual: dict, p: dict, servicios_cat: list[dict], catalogo: list[dic
         "llenado": llenado,
         "supuestos": supuestos,
         "conflictos": conflictos,
-        "beneficios_sin_costo": _lista_textos(p.get("beneficios_sin_costo")),
         "faltantes": faltantes[:40],
     }
     return d, informe

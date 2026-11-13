@@ -156,9 +156,18 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     valor_hora = costo_por_hombre / 30 / p["horas_turno_bolsa"] if p["horas_turno_bolsa"] else 0.0
     horas_m = valor_hora * horas_bolsa / 12
 
+    # Beneficios ofrecidos al cliente (poligrafías, capacitaciones…): cantidad por año de contrato o por todo el contrato,
+    # por su valor unitario. Los que no tienen costo (valor 0) no suman: quedan como compromiso en la MFP.
+    beneficios = []
+    for b in datos.get("beneficios") or []:
+        total = _n(b.get("valor_unitario")) * _n(b.get("cantidad"))
+        beneficios.append({**b, "mensual": total / 12 if (b.get("periodo") or "anio") == "anio" else total / meses})
+    beneficios_m = sum(b["mensual"] for b in beneficios)
+
     # MFP y cupo de inversión
     pct_otros = otros_m / tarifa if tarifa else 0.0
-    pct_mfp = pct_nc + pct_cupo + pct_otros
+    pct_beneficios = beneficios_m / tarifa if tarifa else 0.0
+    pct_mfp = pct_nc + pct_cupo + pct_otros + pct_beneficios
     cupo_vp = valor_presente(p["tasa_cupo_inversion"] / 100, meses, tarifa * pct_cupo)
     cupo_m = cupo_vp / meses
 
@@ -201,7 +210,7 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
 
     costos = {
         "laboral": laboral, "dotacion_tarifa": dot_tarifa_m, "dotacion_puesto": dot_puesto_m, "horas_adicionales": horas_m,
-        "otros_directos": otros_m, "publicidad": publicidad_m, "cupo_inversion": cupo_m,
+        "otros_directos": otros_m, "beneficios": beneficios_m, "publicidad": publicidad_m, "cupo_inversion": cupo_m,
         "comisiones": com_vendedor_m + com_director_m, "donaciones": donaciones_m, "gasto_administrativo": admin_m,
         "representacion": representacion_m, "ica": ica_m,
     }
@@ -223,8 +232,9 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
     return {
         "meses": meses, "tarifa_decreto": tarifa, "descuento_nota_credito": descuento, "tarifa_neta": neta,
         "hombres_servicios": hombres_servicios, "hombres_personal": hombres_personal, "costo_por_hombre": costo_por_hombre,
-        "mfp": {"pct_nota_credito": pct_nc, "pct_cupo_inversion": pct_cupo, "pct_otros": pct_otros, "pct_total": pct_mfp,
-                "nota_credito_total": descuento * meses, "cupo_inversion_vp": cupo_vp, "otros_total": otros_m * meses},
+        "mfp": {"pct_nota_credito": pct_nc, "pct_cupo_inversion": pct_cupo, "pct_otros": pct_otros, "pct_beneficios": pct_beneficios,
+                "pct_total": pct_mfp, "nota_credito_total": descuento * meses, "cupo_inversion_vp": cupo_vp, "otros_total": otros_m * meses,
+                "beneficios_total": beneficios_m * meses},
         "bolsas": {"publicidad": publicidad_bolsa, "representacion": representacion_bolsa, "horas_anuales": horas_bolsa, "horas_total": horas_total,
                    "valor_hora": valor_hora, "pct_publicidad": pct_publicidad},
         "comision": {"pct": r.pct, "carga_prestacional": r.carga, "vendedor_total": com_vendedor, "director_total": com_director,
@@ -232,7 +242,7 @@ def calcular(datos: dict, p: dict, rangos: list[Rango]) -> dict:
                      "pct_director": rd.pct, "carga_director": rd.carga, "director_elegida": rd is not r},
         "facturacion": {"aiu": aiu, "iva": iva, "reteica": reteica, "total_a_pagar": total_a_pagar, "ica_por_mil": ica,
                         "ica_por_mil_parametro": p["ica_por_mil"]},
-        "personal": personal, "dotacion_tarifa": dot_tarifa, "dotacion_puesto": dot_puesto, "otros": otros,
+        "personal": personal, "dotacion_tarifa": dot_tarifa, "dotacion_puesto": dot_puesto, "otros": otros, "beneficios": beneficios,
         # La dotación (de la tarifa y del puesto) es gasto operativo: no suma en el % de MFP ni pasa a la MFP
         "costos": costos, "gasto_operativo": dot_tarifa_m + dot_puesto_m, "total_costos": total_costos, "antes_renta": antes_renta,
         "margen_mensual": margen, "margen_por_hombre": margen / hombres_personal if hombres_personal else 0.0,

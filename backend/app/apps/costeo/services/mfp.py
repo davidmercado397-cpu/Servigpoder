@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from app.apps.costeo.models import HORAS, PESOS_MES, CstMfp, CstMfpItem
+from app.apps.costeo.models import CstMfp, CstMfpItem, HORAS, PESOS_MES, POR_ANIO, CANTIDAD
 
 DIAS_POR_VENCER = 60
 TOLERANCIA = 1.0  # pesos u horas
@@ -88,7 +88,11 @@ class EstadoItem:
     reembolso: float = 0.0
     excede: bool = False
     anios: list[dict] = field(default_factory=list)  # horas: [{anio, desde, hasta, pactado, usado, saldo, vencido}]
-    nombre: str = ""  # «Otros»: cuál es
+    nombre: str = ""  # «Otros» y beneficios: cuál es
+    periodo: str = ""  # beneficios: anio | contrato
+    valor_unitario: float = 0.0  # beneficios: lo que vale cada uno
+    valor_pactado: float = 0.0  # en pesos (beneficios: cantidad × valor unitario)
+    valor_ejecutado: float = 0.0
 
     def a_dict(self) -> dict:
         return self.__dict__.copy()
@@ -109,7 +113,10 @@ def estado_item(m: CstMfp, it: CstMfpItem, hoy: date, fecha_reembolso: date | No
             transcurridos = 0 if hoy < m.fecha_inicio else min(duracion, int(meses_entre(m.fecha_inicio, hoy)) + 1)
             e.causado = pactado * transcurridos
         e.excede = ejecutado > e.pactado_total + TOLERANCIA
-    elif tipo.unidad == HORAS:
+    elif tipo.unidad == CANTIDAD and (it.periodo or POR_ANIO) != POR_ANIO:
+        e.periodo = it.periodo
+        e.excede = ejecutado > pactado + TOLERANCIA
+    elif tipo.unidad in (HORAS, CANTIDAD):
         n = anios_contrato(m)
         e.pactado_total = pactado * n
         actual = anio_contrato(m, hoy)
@@ -121,11 +128,18 @@ def estado_item(m: CstMfp, it: CstMfpItem, hoy: date, fecha_reembolso: date | No
                             "actual": i == actual})
         e.pendiente = next((a["saldo"] for a in e.anios if a["actual"]), 0.0)
         e.excede = any(a["usado"] > a["pactado"] + TOLERANCIA for a in e.anios)
+        if tipo.unidad == CANTIDAD:
+            e.periodo = POR_ANIO
     else:
         e.excede = ejecutado > pactado + TOLERANCIA
 
+    if tipo.unidad == CANTIDAD:
+        e.valor_unitario = float(it.valor_unitario or 0)
+        e.valor_pactado, e.valor_ejecutado = e.pactado_total * e.valor_unitario, ejecutado * e.valor_unitario
+    elif tipo.unidad != HORAS:
+        e.valor_pactado, e.valor_ejecutado = e.pactado_total, ejecutado
     fin = fin_contrato(m)
-    if tipo.reembolsable and tipo.unidad != HORAS and fin and duracion:
+    if tipo.reembolsable and tipo.unidad not in (HORAS, CANTIDAD) and fin and duracion:
         ref = fecha_reembolso or (m.fecha_terminacion if m.terminada and m.fecha_terminacion else hoy)
         e.reembolso = round(ejecutado * meses_faltantes(m, ref) / duracion, 2)
     return e
@@ -143,6 +157,18 @@ def tope_movimiento(m: CstMfp, it: CstMfpItem, valor: float, fecha: date, exclui
             return (f"La bolsa del año {n} del contrato tiene {pactado - usado:g} h disponibles de {pactado:g} h; "
                     f"la solicitud es de {valor:g} h")
         return None
+    if tipo.unidad == CANTIDAD:
+        cual = it.nombre or tipo.nombre
+        if (it.periodo or POR_ANIO) == POR_ANIO:
+            n = anio_contrato(m, fecha)
+            usado = sum(float(x.valor) for x in otros if anio_contrato(m, x.fecha) == n)
+            if usado + valor > pactado + 1e-6:
+                return f"«{cual}»: en el año {n} del contrato quedan {pactado - usado:g} de {pactado:g}; se registran {valor:g}"
+            return None
+        usado = sum(float(x.valor) for x in otros)
+        if usado + valor > pactado + 1e-6:
+            return f"«{cual}»: en el contrato quedan {pactado - usado:g} de {pactado:g}; se registran {valor:g}"
+        return None
     total = pactado * (m.duracion_meses or 0) if tipo.unidad == PESOS_MES else pactado
     usado = sum(float(x.valor) for x in otros)
     if usado + valor > total + TOLERANCIA:
@@ -158,9 +184,10 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
     items = [estado_item(m, it, hoy, fecha_reembolso) for it in m.items]
     fin = fin_contrato(m)
     facturacion = float(m.valor_mensual or 0) * (m.duracion_meses or 0)
+    # Lo que vale plata: los ítems en pesos y los beneficios con valor (cantidad × valor unitario)
     en_pesos = [i for i in items if i.unidad != HORAS and i.cuenta_en_mfp]
-    pactado = sum(i.pactado_total for i in en_pesos)
-    ejecutado = sum(i.ejecutado for i in en_pesos)
+    pactado = sum(i.valor_pactado for i in en_pesos)
+    ejecutado = sum(i.valor_ejecutado for i in en_pesos)
     pct_mfp = pactado / facturacion if facturacion else None
     pct_comercial = float(m.pct_comercial) if m.pct_comercial is not None else None
     if m.terminada:
@@ -170,7 +197,7 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
     else:
         estado = "vigente"
     meses_pendientes = meses_faltantes(m, m.fecha_terminacion if m.terminada and m.fecha_terminacion else hoy) if fin else None
-    pendiente = sum(max(0.0, i.pendiente) for i in en_pesos)
+    pendiente = sum(max(0.0, i.valor_pactado - i.valor_ejecutado) if i.unidad == CANTIDAD else max(0.0, i.pendiente) for i in en_pesos)
 
     alertas: list[dict] = []
     for i in items:
@@ -185,6 +212,11 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
     for i in items:
         if i.unidad == HORAS and estado == "vigente" and i.pactado and i.pendiente <= 0:
             alertas.append({"tipo": "bolsa_agotada", "severidad": "baja", "mensaje": f"{i.tipo}: la bolsa del año en curso está agotada"})
+        if i.unidad == CANTIDAD and i.periodo == POR_ANIO and estado == "vigente" and fin and (fin - hoy).days <= DIAS_POR_VENCER:
+            pendientes = next((a["saldo"] for a in i.anios if a["actual"]), 0)
+            if pendientes > 0:
+                alertas.append({"tipo": "beneficio_pendiente", "severidad": "media",
+                                "mensaje": f"{i.tipo}: faltan {pendientes:g} por entregar y el contrato vence pronto"})
     if not m.fecha_inicio or not m.duracion_meses or not m.valor_mensual:
         alertas.append({"tipo": "datos_incompletos", "severidad": "baja",
                         "mensaje": "Faltan datos del contrato (fecha de inicio, duración o valor mensual)"})

@@ -390,8 +390,7 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
         item("BOLSA_HORAS", horas_total / max(1, -(-r["meses"] // 12)), f"Horas de obsequio: {horas_total:g} h en todo el contrato")
     else:
         item("BOLSA_HORAS", r["bolsas"]["horas_anuales"], "Horas adicionales de vigilancia por año de contrato")
-    item("PUBLICIDAD", r["bolsas"]["publicidad"], "Bolsa de publicidad del contrato")
-    item("REPRESENTACION", r["bolsas"]["representacion"], "Reserva de gastos de representación del contrato")
+    # La publicidad y la reserva de representación son gastos del costeo: no se le entregan al cliente, no van a la MFP
     auditar(db, request, "cst_mfp_desde_costeo", actual.id, costeo=c.nombre, version=c.version, numero=m.numero)
     db.commit()
     # Costeo aprobado + fecha de inicio: arranca el puesto y se avisa a las áreas (un fallo del correo no deshace la MFP)

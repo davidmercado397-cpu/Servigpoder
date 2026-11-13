@@ -2,6 +2,7 @@
 
 import { Paperclip, ShieldAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { InputPesos } from "@/components/input-pesos";
 import { Alerta } from "@/components/ui";
 import { ApiError, api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { hoyISO, valorItem, type ItemMfp, type Mfp, type TipoDocumento } from "@/lib/costeo";
@@ -86,7 +87,8 @@ export function ModalMovimiento({ item, onCerrar, onGuardado }: { item: ItemMfp;
         <p className="text-sm text-slate-600">Disponible: <b>{valorItem(disponible, item.unidad)}</b>{porAnio ? " en el año en curso del contrato" : beneficio ? " en el contrato" : ""}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div><label className="label">Fecha {horas ? "del servicio" : ""}</label><input type="date" className="input" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
-          <div><label className="label">{horas ? "Horas" : beneficio ? "Cantidad entregada" : "Valor"}</label><input type="number" className="input" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></div>
+          <div><label className="label">{horas ? "Horas" : beneficio ? "Cantidad entregada" : "Valor"}</label>{horas || beneficio ? <input type="number" className="input" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} />
+            : <InputPesos valor={f.valor} vacio onValor={(v) => setF({ ...f, valor: v === null ? "" : String(v) })} />}</div>
           <div className="sm:col-span-2"><label className="label">Descripción</label>
             <input className="input" placeholder={horas ? "Ej. acompañamiento 2 h por cumpleaños" : beneficio ? "Ej. poligrafía de ingreso a portería" : "Ej. pago bono de libre inversión"} value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
           {!horas && (<>

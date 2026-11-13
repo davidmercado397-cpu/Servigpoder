@@ -3,9 +3,13 @@
 import { Pencil, Plus, Save, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Alerta, Pestanas, Titulo } from "@/components/ui";
+import { InputPesos } from "@/components/input-pesos";
 import { api, mensajeError } from "@/lib/api";
 import { UNIDAD, pesos, type TipoDocumento, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
+
+// Parámetros que son dinero: se ven con signo pesos y puntos de miles
+const PARAMETROS_PESOS = new Set(["salario_minimo", "auxilio_transporte", "ley_2101", "publicidad_gasto", "publicidad_facturacion"]);
 
 type Pestana = "parametros" | "comisiones" | "servicios" | "dotacion_tarifa" | "dotacion_puesto" | "otros" | "tipos" | "documentos" | "correos";
 type Parametro = { clave: string; valor: number; nombre: string; grupo: string; ayuda: string };
@@ -132,7 +136,9 @@ function Parametros({ puede }: { puede: boolean }) {
             {lista.filter((x) => x.grupo === g).map((x) => (
               <div key={x.clave}>
                 <label className="label">{x.nombre}</label>
-                <input className="input" type="number" step="any" disabled={!puede} value={valores[x.clave] ?? ""} onChange={(e) => setValores({ ...valores, [x.clave]: e.target.value })} />
+                {PARAMETROS_PESOS.has(x.clave)
+                  ? <InputPesos disabled={!puede} vacio valor={valores[x.clave] ?? ""} onValor={(v) => setValores({ ...valores, [x.clave]: v === null ? "" : String(v) })} />
+                  : <input className="input" type="number" step="any" disabled={!puede} value={valores[x.clave] ?? ""} onChange={(e) => setValores({ ...valores, [x.clave]: e.target.value })} />}
                 {x.ayuda && <p className="mt-0.5 text-xs text-slate-500">{x.ayuda}</p>}
               </div>
             ))}
@@ -206,7 +212,7 @@ function Servicios({ puede }: { puede: boolean }) {
         {edicion && (
           <div className="grid gap-3 sm:grid-cols-[3fr_1fr_1fr_auto_auto] sm:items-end">
             <div><label className="label">Descripción</label><input className="input" value={edicion.descripcion} onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })} /></div>
-            <div><label className="label">Tarifa</label><input className="input" type="number" value={edicion.tarifa} onChange={(e) => setEdicion({ ...edicion, tarifa: Number(e.target.value) })} /></div>
+            <div><label className="label">Tarifa</label><InputPesos valor={edicion.tarifa} onValor={(v) => setEdicion({ ...edicion, tarifa: v ?? 0 })} /></div>
             <div><label className="label">Hombres</label><input className="input" type="number" step="any" value={edicion.hombres} onChange={(e) => setEdicion({ ...edicion, hombres: Number(e.target.value) })} /></div>
             <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={edicion.activo} onChange={(e) => setEdicion({ ...edicion, activo: e.target.checked })} /> Activo</label>
             <div className="flex gap-2"><button className="btn-secundario" onClick={() => setEdicion(null)}>Cancelar</button>
@@ -253,7 +259,7 @@ function Catalogo({ grupo, puede }: { grupo: string; puede: boolean }) {
         {edicion && (
           <div className="grid gap-3 sm:grid-cols-4 sm:items-end">
             <div className="sm:col-span-2"><label className="label">Nombre</label><input className="input" value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} /></div>
-            <div><label className="label">Valor unitario</label><input className="input" type="number" value={edicion.valor_unitario} onChange={(e) => setEdicion({ ...edicion, valor_unitario: Number(e.target.value) })} /></div>
+            <div><label className="label">Valor unitario</label><InputPesos valor={edicion.valor_unitario} onValor={(v) => setEdicion({ ...edicion, valor_unitario: v ?? 0 })} /></div>
             <div><label className="label">Fuente</label><input className="input" value={edicion.fuente} onChange={(e) => setEdicion({ ...edicion, fuente: e.target.value })} /></div>
             <div><label className="label">Vida útil (meses)</label><input className="input" type="number" value={edicion.vida_util_meses ?? ""} onChange={(e) => setEdicion({ ...edicion, vida_util_meses: num(e.target.value) })} /></div>
             <div><label className="label">Entregas al año</label><input className="input" type="number" step="any" value={edicion.entregas_anio ?? ""} onChange={(e) => setEdicion({ ...edicion, entregas_anio: num(e.target.value) })} /></div>

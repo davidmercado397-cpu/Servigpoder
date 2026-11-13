@@ -189,6 +189,12 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
     pactado = sum(i.valor_pactado for i in en_pesos)
     ejecutado = sum(i.valor_ejecutado for i in en_pesos)
     pct_mfp = pactado / facturacion if facturacion else None
+    # Los beneficios se muestran aparte de lo demás de la MFP
+    benef = [i for i in en_pesos if i.unidad == CANTIDAD]
+    beneficios = {"cantidad": len([i for i in items if i.unidad == CANTIDAD]), "pactado": sum(i.valor_pactado for i in benef),
+                  "ejecutado": sum(i.valor_ejecutado for i in benef)}
+    beneficios["pendiente"] = max(0.0, beneficios["pactado"] - beneficios["ejecutado"])
+    beneficios["pct"] = beneficios["pactado"] / facturacion if facturacion else None
     pct_comercial = float(m.pct_comercial) if m.pct_comercial is not None else None
     if m.terminada:
         estado = "terminada"
@@ -228,7 +234,7 @@ def resumen(m: CstMfp, hoy: date, fecha_reembolso: date | None = None) -> dict:
         "duracion_meses": m.duracion_meses, "valor_mensual": float(m.valor_mensual or 0), "facturacion_total": facturacion,
         "pct_comercial": pct_comercial, "pct_mfp": pct_mfp,
         "diferencia_pct": (pct_mfp - pct_comercial) if pct_mfp is not None and pct_comercial is not None else None,
-        "pactado": pactado, "ejecutado": ejecutado, "pendiente": pendiente,
+        "pactado": pactado, "ejecutado": ejecutado, "pendiente": pendiente, "beneficios": beneficios,
         "pct_ejecucion": ejecutado / pactado if pactado else None,
         "reembolso": round(sum(i.reembolso for i in items), 2), "meses_pendientes": meses_pendientes,
         "estado": estado, "terminada": m.terminada,

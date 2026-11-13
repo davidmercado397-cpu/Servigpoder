@@ -33,7 +33,9 @@ export type ItemMfp = {
 export type Mfp = {
   id: number; numero: string; contrato: string; cliente: Cliente; fecha_inicio: string | null; fecha_fin: string | null; duracion_meses: number | null;
   valor_mensual: number; facturacion_total: number; pct_comercial: number | null; pct_mfp: number | null; diferencia_pct: number | null;
-  pactado: number; ejecutado: number; pendiente: number; pct_ejecucion: number | null; reembolso: number; meses_pendientes: number | null;
+  pactado: number; ejecutado: number; pendiente: number; pct_ejecucion: number | null;
+  /** Beneficios (incluidos en pactado/ejecutado/pendiente), para mostrarlos aparte */
+  beneficios?: { cantidad: number; pactado: number; ejecutado: number; pendiente: number; pct: number | null }; reembolso: number; meses_pendientes: number | null;
   estado: "vigente" | "vencida" | "terminada"; terminada: boolean; fecha_terminacion: string | null; notas: string; costeo_id: number | null;
   alertas: AlertaMfp[]; items: ItemMfp[];
 };

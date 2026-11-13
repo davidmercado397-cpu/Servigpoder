@@ -296,7 +296,8 @@ def test_costeo_aprobado_crea_la_mfp(admin):
     assert r.status_code == 201, r.text
     m = admin.get(f"{API}/mfp/{r.json()['data']['mfp_id']}").json()["data"]
     codigos = {i["tipo_codigo"] for i in m["items"]}
-    assert {"NOTA_CREDITO", "REINVERSION", "ACCES_TOO", "OTROS", "BOLSA_HORAS", "PUBLICIDAD", "REPRESENTACION"} <= codigos
+    assert {"NOTA_CREDITO", "REINVERSION", "ACCES_TOO", "OTROS", "BOLSA_HORAS"} <= codigos
+    assert not {"PUBLICIDAD", "REPRESENTACION"} & codigos  # gastos del costeo: no van a la MFP
     assert _item(m, "BOLSA_HORAS")["pactado"] == 60 and m["valor_mensual"] == pytest.approx(87770812)
     assert m["pct_comercial"] == pytest.approx(0.16608, abs=1e-5)
     # Nueva versión: vuelve a borrador con los parámetros vigentes

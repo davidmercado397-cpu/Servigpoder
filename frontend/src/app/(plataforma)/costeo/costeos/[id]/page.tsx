@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/costeo";
 import { LlenarConIA, ResumenIA, type InformeIA } from "@/components/costeo-ia";
 import { Alerta } from "@/components/ui";
+import { InputPesos } from "@/components/input-pesos";
 import { api, mensajeError } from "@/lib/api";
 import { ESTADO_COSTEO, hoyISO, pct, pesos, type Cliente } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
@@ -190,7 +191,8 @@ export default function EditorCosteo() {
                 v={+(d.horas_bolsa_total ?? (d.horas_bolsa_anual ?? 0) * (d.duracion_meses || 12) / 12).toFixed(2)}
                 on={(v) => cambiar({ horas_bolsa_total: v, horas_bolsa_anual: undefined })}
                 nota={r.bolsas.horas_anuales ? horasPorAnio(r.bolsas.horas_total ?? r.bolsas.horas_anuales * r.meses / 12, r.meses) : undefined} />
-              <Num etiqueta="Donaciones (total)" v={d.donaciones} on={(v) => cambiar({ donaciones: v })} off={!editable} />
+              <div><label className="label">Donaciones (total)</label>
+                <InputPesos disabled={!editable} valor={d.donaciones} onValor={(v) => cambiar({ donaciones: v ?? 0 })} /></div>
               <Comision etiqueta="Comisión del vendedor (%)" v={d.pct_comision_vendedor} automatica={r.comision.pct} off={!editable}
                 on={(v) => cambiar({ pct_comision_vendedor: v })} nota={notaComision(r.comision.vendedor_total, r.meses)} />
               <Comision etiqueta="Comisión del director (%)" v={d.pct_comision_director} automatica={r.comision.pct} off={!editable}
@@ -231,7 +233,7 @@ export default function EditorCosteo() {
                       {d.personal.length > 1 && <td><select className="input w-28" disabled={!editable} value={s.personal ?? d.personal[0].nombre} onChange={(e) => set({ personal: e.target.value })}>
                         {d.personal.map((p, j) => <option key={j} value={p.nombre}>{p.nombre}</option>)}</select></td>}
                     </>}
-                    <td><input className="input w-32" type="number" disabled={!editable || !contable} value={s.tarifa} onChange={(e) => set({ tarifa: n(e.target.value) })} /></td>
+                    <td><InputPesos className="input w-36" disabled={!editable || !contable} valor={s.tarifa} onValor={(v) => set({ tarifa: v ?? 0 })} /></td>
                     <td><input className="input w-20" type="number" min={0} step="any" disabled={!editable || !contable} value={s.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} /></td>
                     <td>{editable && <Quitar on={() => cambiar({ servicios: d.servicios.filter((_, j) => j !== i) })} />}</td>
                   </tr>
@@ -280,11 +282,11 @@ export default function EditorCosteo() {
                     }} /></td>
                     <td>{auto ? <span className="tabular-nums">{(r.personal[i]?.hombres ?? 0).toLocaleString("es-CO")}</span>
                       : <input className="input w-20" type="number" min={0} step="0.5" disabled={!editable || !contable} value={p.hombres} onChange={(e) => set({ hombres: n(e.target.value) })} />}</td>
-                    <td><input className="input w-28" type="number" disabled={!editable || !contable} placeholder="Mínimo" value={p.salario ?? ""} onChange={(e) => set({ salario: e.target.value === "" ? null : n(e.target.value) })} /></td>
-                    <td><input className="input w-28" type="number" disabled={!editable} value={p.horas_extras} onChange={(e) => set({ horas_extras: n(e.target.value) })} /></td>
+                    <td><InputPesos className="input w-32" disabled={!editable || !contable} placeholder="Mínimo" vacio valor={p.salario} onValor={(v) => set({ salario: v })} /></td>
+                    <td><InputPesos className="input w-32" disabled={!editable} valor={p.horas_extras} onValor={(v) => set({ horas_extras: v ?? 0 })} /></td>
                     <td className="text-center"><input type="checkbox" disabled={!editable || !contable} checked={p.auxilio_transporte} onChange={(e) => set({ auxilio_transporte: e.target.checked })} /></td>
-                    <td><input className="input w-24" type="number" disabled={!editable} value={p.auxilios_no_salariales} onChange={(e) => set({ auxilios_no_salariales: n(e.target.value) })} /></td>
-                    <td><input className="input w-24" type="number" disabled={!editable} value={p.rodamiento} onChange={(e) => set({ rodamiento: n(e.target.value) })} /></td>
+                    <td><InputPesos className="input w-28" disabled={!editable} valor={p.auxilios_no_salariales} onValor={(v) => set({ auxilios_no_salariales: v ?? 0 })} /></td>
+                    <td><InputPesos className="input w-28" disabled={!editable} valor={p.rodamiento} onValor={(v) => set({ rodamiento: v ?? 0 })} /></td>
                     <td className="text-right tabular-nums">{pesos(r.personal[i]?.costo_hombre)}</td>
                     <td>{editable && <Quitar on={() => cambiar({ personal: d.personal.filter((_, j) => j !== i) })} />}</td>
                   </tr>
@@ -384,7 +386,7 @@ function Elementos({ titulo, ayuda, filas, catalogo, hombres, editable, precios,
           return (
             <tr key={i}>
               <td><input className="input w-48" disabled={!libre} value={x.nombre} onChange={(e) => set({ nombre: e.target.value })} /></td>
-              <td><input className="input w-28" type="number" disabled={!libre} value={x.valor_unitario} onChange={(e) => set({ valor_unitario: n(e.target.value) })} /></td>
+              <td><InputPesos className="input w-32" disabled={!libre} valor={x.valor_unitario} onValor={(v) => set({ valor_unitario: v ?? 0 })} /></td>
               <td><input className="input w-16" type="number" step="any" disabled={!editable} value={x.cantidad} onChange={(e) => set({ cantidad: n(e.target.value) })} /></td>
               <td><input className="input w-20" type="number" disabled={!libre} placeholder="Contrato" value={x.vida_util_meses ?? ""} onChange={(e) => set({ vida_util_meses: e.target.value === "" ? null : n(e.target.value) })} /></td>
               <td><input className="input w-20" type="number" disabled={!libre} value={x.entregas_anio ?? ""} onChange={(e) => set({ entregas_anio: e.target.value === "" ? null : n(e.target.value) })} /></td>
@@ -490,7 +492,7 @@ function Beneficios({ filas, editable, on, mensuales }: { filas: Beneficio[]; ed
               <td><input className="input w-20" type="number" disabled={!editable} value={b.cantidad} onChange={(e) => set(i, { cantidad: n(e.target.value) })} /></td>
               <td><select className="input w-36" disabled={!editable} value={b.periodo} onChange={(e) => set(i, { periodo: e.target.value as Beneficio["periodo"] })}>
                 <option value="anio">año de contrato</option><option value="contrato">todo el contrato</option></select></td>
-              <td><input className="input w-32" type="number" disabled={!editable} value={b.valor_unitario} onChange={(e) => set(i, { valor_unitario: n(e.target.value) })} />
+              <td><InputPesos className="input w-32" disabled={!editable} valor={b.valor_unitario} onValor={(v) => set(i, { valor_unitario: v ?? 0 })} />
                 {!b.valor_unitario && <p className="text-xs text-slate-400">sin costo</p>}</td>
               <td className="whitespace-nowrap tabular-nums">{pesos(mensuales[i] ?? 0)}</td>
               <td>{editable && <Quitar on={() => on(filas.filter((_, j) => j !== i))} />}</td>

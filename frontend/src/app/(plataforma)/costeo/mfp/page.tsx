@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { Alerta, SubirArchivo, Titulo } from "@/components/ui";
+import { InputPesos } from "@/components/input-pesos";
 import { api, apiEnvelope, mensajeError, subirArchivo } from "@/lib/api";
 import { ESTADO_MFP, aniosContrato, notaHorasTotal, fecha, pct, pesos, type Cliente, type Mfp, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
@@ -203,8 +204,9 @@ function NuevaMfp({ clientes, onCerrar }: { clientes: Cliente[]; onCerrar: () =>
                 </select>
                 {otros && <input className={`input ${it.pactado && !it.nombre.trim() ? "border-red-400" : ""}`} placeholder="¿Cuál? (escríbalo)" autoFocus
                   value={it.nombre} onChange={(e) => set({ nombre: e.target.value })} />}
-                <input className="input" type="number" placeholder={unidad(it.tipo_id) === "horas" ? "Horas de todo el contrato" : unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"}
-                  value={it.pactado} onChange={(e) => set({ pactado: e.target.value })} />
+                {unidad(it.tipo_id) === "horas" ? <input className="input" type="number" placeholder="Horas de todo el contrato" value={it.pactado} onChange={(e) => set({ pactado: e.target.value })} />
+                  : <InputPesos placeholder={unidad(it.tipo_id) === "pesos_mes" ? "Valor mensual" : "Valor total"} valor={it.pactado}
+                    onValor={(v) => set({ pactado: v === null ? "" : String(v) })} vacio />}
                 <input className="input" placeholder="Descripción" value={it.descripcion} onChange={(e) => set({ descripcion: e.target.value })} />
                 <button className="btn-secundario" onClick={() => setItems(items.filter((_, j) => j !== i))}>Quitar</button>
               </div>

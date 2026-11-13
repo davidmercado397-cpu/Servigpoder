@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ACEPTA_SOPORTE, MAX_SOPORTES, Modal, ModalMovimiento, subirSoportes } from "@/components/costeo";
 import { Alerta } from "@/components/ui";
+import { InputPesos } from "@/components/input-pesos";
 import { api, mensajeError } from "@/lib/api";
 import { ESTADO_MFP, SEVERIDAD, UNIDAD, aniosContrato, esBeneficio, fecha, hoyISO, notaHorasTotal, pct, pesos, valorItem, type ItemMfp, type Mfp, type TipoItem } from "@/lib/costeo";
 import { usePermiso } from "@/lib/sesion";
@@ -43,6 +44,7 @@ export default function DetalleMfp() {
   if (!m) return error ? <Alerta>{error}</Alerta> : <p className="text-sm text-slate-500">Cargando…</p>;
   const reembolsoRef = fechaReembolso || (m.terminada ? m.fecha_terminacion : null);
   const pesosItems = m.items.filter((i) => !esBeneficio(i));
+  const ben = m.beneficios ?? { cantidad: 0, pactado: 0, ejecutado: 0, pendiente: 0, pct: null };
   const beneficios = m.items.filter(esBeneficio);
   // Una fila de ítem pactado o de beneficio (con sus movimientos al abrirla)
   const fila = (it: ItemMfp) => {
@@ -157,11 +159,17 @@ export default function DetalleMfp() {
       </div>
       {error && <Alerta>{error}</Alerta>}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Dato titulo="Facturación del contrato" valor={pesos(m.facturacion_total)} nota={`${pesos(m.valor_mensual)} al mes`} />
-        <Dato titulo="MFP pactada" valor={pesos(m.pactado)} nota={`${pct(m.pct_mfp)} · comercial ${pct(m.pct_comercial)}`} rojo={m.diferencia_pct !== null && m.diferencia_pct > 0.0005} />
-        <Dato titulo="Ejecutado" valor={pesos(m.ejecutado)} nota={`${pct(m.pct_ejecucion)} de lo pactado`} />
-        <Dato titulo="Pendiente por ejecutar" valor={pesos(m.pendiente)} nota={m.meses_pendientes !== null ? `${m.meses_pendientes.toFixed(1)} meses de contrato por delante` : ""} />
+        {/* La MFP sin los beneficios, y los beneficios aparte */}
+        <Dato titulo="MFP pactada" valor={pesos(m.pactado - ben.pactado)}
+          nota={`${pct(m.facturacion_total ? (m.pactado - ben.pactado) / m.facturacion_total : null)}${ben.pactado ? ` · con beneficios ${pct(m.pct_mfp)}` : ""} · comercial ${pct(m.pct_comercial)}`}
+          rojo={m.diferencia_pct !== null && m.diferencia_pct > 0.0005} />
+        <Dato titulo="Beneficios" valor={pesos(ben.pactado)}
+          nota={`${ben.cantidad} ${ben.cantidad === 1 ? "beneficio" : "beneficios"}${ben.pactado ? ` · ${pct(ben.pct)} · entregado ${pesos(ben.ejecutado)}` : ""}`} />
+        <Dato titulo="MFP ejecutada" valor={pesos(m.ejecutado - ben.ejecutado)}
+          nota={`${pct(m.pactado - ben.pactado ? (m.ejecutado - ben.ejecutado) / (m.pactado - ben.pactado) : null)} de lo pactado`} />
+        <Dato titulo="Pendiente por ejecutar" valor={pesos(m.pendiente - ben.pendiente)} nota={m.meses_pendientes !== null ? `${m.meses_pendientes.toFixed(1)} meses de contrato por delante` : ""} />
         <Dato titulo="Reembolso si termina" valor={pesos(m.reembolso)} nota={reembolsoRef ? `a ${fecha(reembolsoRef)}` : "a hoy"} />
       </div>
 
@@ -329,7 +337,8 @@ function EditarItem({ item, meses, onGuardado }: { item: ItemMfp; meses: number 
       {otros && <div><label className="label">{esBeneficio(item) ? "Beneficio" : "¿Cuál?"}</label><input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></div>}
       {esBeneficio(item) && <CamposBeneficio periodo={periodo} valor={valor} onPeriodo={setPeriodo} onValor={setValor} />}
       <div><label className="label">{esHoras ? "Horas de todo el contrato" : esBeneficio(item) ? (periodo === "anio" ? "Cantidad por año de contrato" : "Cantidad en todo el contrato") : `Pactado (${UNIDAD[item.unidad]})`}</label>
-        <input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} />
+        {esHoras || esBeneficio(item) ? <input type="number" className="input" value={pactado} onChange={(e) => setPactado(e.target.value)} />
+          : <InputPesos valor={pactado} onValor={(v) => setPactado(v === null ? "" : String(v))} />}
         {esHoras && Number(pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
       {error && <Alerta>{error}</Alerta>}
@@ -355,7 +364,7 @@ function CamposBeneficio({ periodo, valor, onPeriodo, onValor }: { periodo: stri
       <div><label className="label">La cantidad es</label>
         <select className="input" value={periodo} onChange={(e) => onPeriodo(e.target.value as "anio" | "contrato")}>
           <option value="anio">Por cada año de contrato</option><option value="contrato">Por todo el contrato</option></select></div>
-      <div><label className="label">Valor de cada uno</label><input type="number" className="input" value={valor} onChange={(e) => onValor(e.target.value)} />
+      <div><label className="label">Valor de cada uno</label><InputPesos valor={valor} onValor={(v) => onValor(v === null ? "" : String(v))} />
         <p className="mt-1 text-xs text-slate-500">0 = sin costo (solo compromiso)</p></div>
     </div>
   );
@@ -387,7 +396,8 @@ function NuevoItem({ mfpId, meses, beneficio, onGuardado }: { mfpId: number; mes
       {otros && <div><label className="label">{beneficio ? "Beneficio" : "¿Cuál?"}</label><input className="input" placeholder={beneficio ? "Ej. Poligrafías" : "Escriba cuál es"} value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>}
       {unidad === "unidades" && <CamposBeneficio periodo={periodo} valor={valor} onPeriodo={setPeriodo} onValor={setValor} />}
       <div><label className="label">{unidad === "horas" ? "Horas de todo el contrato" : unidad === "unidades" ? (periodo === "anio" ? "Cantidad por año de contrato" : "Cantidad en todo el contrato") : unidad === "pesos_mes" ? "Valor mensual" : "Valor total pactado"}</label>
-        <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} />
+        {unidad === "pesos" || unidad === "pesos_mes" ? <InputPesos valor={f.pactado} onValor={(v) => setF({ ...f, pactado: v === null ? "" : String(v) })} />
+          : <input type="number" className="input" value={f.pactado} onChange={(e) => setF({ ...f, pactado: e.target.value })} />}
         {unidad === "horas" && Number(f.pactado) > 0 && <p className="mt-1 text-xs text-slate-500">{notaHorasTotal(Number(f.pactado), meses)}</p>}</div>
       <div><label className="label">Descripción</label><input className="input" value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} /></div>
       {error && <Alerta>{error}</Alerta>}

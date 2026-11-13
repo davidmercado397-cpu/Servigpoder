@@ -212,6 +212,8 @@ def test_beneficios_del_costeo_a_la_mfp(admin):
     pol = next(i for i in m["items"] if i["nombre"] == "Poligrafías")
     assert [a["usado"] for a in pol["anios"]] == [3, 1] and pol["valor_ejecutado"] == 800_000
     assert m["ejecutado"] >= 800_000  # el valor de los beneficios entra en lo ejecutado de la MFP
+    # y se muestra aparte: 2 beneficios, $1.200.000 pactados, $800.000 entregados
+    assert (m["beneficios"]["cantidad"], m["beneficios"]["pactado"], m["beneficios"]["ejecutado"]) == (2, 1_200_000, 800_000)
 
 
 def test_chat_con_la_ia_actualiza_la_propuesta(admin, proveedor):

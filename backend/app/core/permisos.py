@@ -13,6 +13,7 @@ PERMISOS_NUCLEO: dict[str, tuple[str, str]] = {
     "auditoria.ver": ("Administración", "Consultar la bitácora de auditoría"),
     "empresas.gestionar": ("Administración", "Crear empresas y habilitar sus desarrollos"),
     "marca.gestionar": ("Administración", "Editar la marca: nombre, colores, logo, favicon y fondo de la pantalla de ingreso"),
+    "ia.gestionar": ("Administración", "Configurar el agente de IA: clave de la API (OpenRouter) y modelos"),
 }
 
 

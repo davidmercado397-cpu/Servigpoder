@@ -228,7 +228,7 @@ class CstCatalogoCosto(Base):
     vida_util_meses: Mapped[int | None] = mapped_column(Integer, nullable=True)  # costo mensual = valor × cantidad ÷ vida útil
     entregas_anio: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)  # costo mensual = valor × cantidad × entregas ÷ 12
     por_hombre: Mapped[bool] = mapped_column(Boolean, default=False)  # la cantidad por defecto es el número de hombres
-    # Dotación de la tarifa automática: a qué puestos aplica (todos, gala, overol, arma, fuego, fogeo, traumatica; vacío = a mano)
+    # Dotación de la tarifa automática: a qué puestos aplica (todos, gala, overol, arma, fuego, fogeo, traumatica, noletal; vacío = a mano)
     # y cuántos lleva cada hombre (o cada puesto)
     aplica: Mapped[str] = mapped_column(String(20), default="", server_default="")
     cantidad: Mapped[float] = mapped_column(Numeric(8, 2), default=1, server_default="1")

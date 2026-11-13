@@ -10,6 +10,7 @@ const SECCIONES = [
   { href: "/admin/roles", texto: "Roles y permisos", permiso: "roles.ver" },
   { href: "/admin/empresas", texto: "Empresas", permiso: "usuarios.ver" },
   { href: "/admin/marca", texto: "Marca", permiso: "marca.gestionar" },
+  { href: "/admin/ia", texto: "Inteligencia artificial", permiso: "ia.gestionar" },
   { href: "/admin/auditoria", texto: "Auditoría", permiso: "auditoria.ver" },
 ];
 

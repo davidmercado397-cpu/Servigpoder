@@ -79,7 +79,7 @@ APLICA_INICIAL = {
     "CAPA IMPERMEABLE": "todos", "RADIO KENWOOD": "todos", "PORTA RADIOS": "todos", "CARGADOR DE RADIO": "todos",
     "TONFA CON PORTA TONFA": "todos", "MINUTAS": "todos", "EXÁMENES MÉDICOS (OSTEOMUSCULAR, AUDIOMETRÍA Y VISIOMETRÍA)": "todos",
     "PRUEBAS DE SPA": "todos", "CHAPUZA EXTERNA": "arma", "ARMA DE FUEGO": "fuego", "ARMA DE FOGEO": "fogeo",
-    "ARMA TRAUMÁTICA": "traumatica",
+    "ARMA TRAUMÁTICA": "traumatica", "ARMA NO LETAL": "noletal",
 }
 POR_HOMBRE_PUESTO = {"CHAQUETAS", "PITOS", "BOTAS PANTANERAS"}
 

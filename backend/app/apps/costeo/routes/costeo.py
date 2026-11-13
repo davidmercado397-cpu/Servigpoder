@@ -3,7 +3,8 @@ Un costeo aprobado guarda los parámetros con que se aprobó y puede crear la MF
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -12,9 +13,12 @@ from app.apps.costeo.models import (
     APROBADO, BORRADOR, ENVIADO, RECHAZADO, CstCatalogoCosto, CstCliente, CstComisionRango, CstCosteo, CstMfp, CstMfpItem,
     CstParametro, CstServicio, CstTipoItem,
 )
-from app.apps.costeo.services import calculo, configuracion, notificaciones, puestos
+from app.apps.costeo.services import calculo, configuracion, ia_costeo, notificaciones, puestos
 from app.apps.costeo.services.calculo import Rango
+from app.core import ia
 from app.core.auditoria import auditar
+from app.core.config import get_settings
+from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 
@@ -124,7 +128,7 @@ class CatalogoIn(BaseModel):
     vida_util_meses: int | None = Field(default=None, ge=1, le=600)
     entregas_anio: float | None = Field(default=None, ge=0, le=365)
     por_hombre: bool = False
-    aplica: str = Field(default="", pattern=r"^(|todos|gala|overol|arma|fuego|fogeo|traumatica)$")
+    aplica: str = Field(default="", pattern=r"^(|todos|gala|overol|arma|fuego|fogeo|traumatica|noletal)$")
     cantidad: float = Field(default=1, ge=0, le=1000)
     activo: bool = True
     fuente: str = Field(default="", max_length=120)
@@ -386,3 +390,57 @@ def crear_mfp(costeo_id: int, data: CrearMfpIn, request: Request, db: DbSession,
     avisos = notificaciones.notificar(db, db.get(CstMfp, m.id), actual.id, getattr(request.state, "empresa", None))
     db.commit()
     return ok({"mfp_id": m.id, "avisos": {n.area: n.estado for n in avisos}})
+
+
+# --- Llenar el costeo con IA a partir de archivos -------------------------------------------------------
+
+def _proponer(db: DbSession, c: CstCosteo, archivos: list[dict], indicaciones: str) -> tuple[dict, dict, ia.Respuesta]:
+    ia.cargar(db)
+    servicios_cat, catalogo = _servicios_cat(db), _catalogo(db)
+    try:
+        propuesta, r = ia_costeo.consultar(archivos, indicaciones, servicios_cat, catalogo, c.datos or {})
+    except ia.IANoConfigurada as e:
+        raise ApiError(503, "La IA no está configurada: el administrador debe poner la clave en Administración → Inteligencia artificial.",
+                       "ASISTENTE_NO_CONFIGURADO") from e
+    except ia.IAError as e:
+        raise ApiError(e.status, e.mensaje, e.codigo) from e
+    datos, informe = ia_costeo.aplicar(c.datos or {}, propuesta, servicios_cat, catalogo)
+    return datos, informe, r
+
+
+@router.post("/costeos/{costeo_id}/ia", response_model=ApiResponse[dict], dependencies=[Depends(limitar("costeo_ia", 5, 60))])
+async def llenar_con_ia(costeo_id: int, request: Request, db: DbSession, archivos: list[UploadFile] = File(...),
+                        indicaciones: str = Form("", max_length=2000), actual: Usuario = Depends(require(COSTEAR))):
+    """Propuesta del costeo leída de 1 a 6 archivos. No guarda nada: ni el costeo ni los archivos (se leen en memoria)."""
+    c = _costeo(db, costeo_id)
+    if c.estado == APROBADO:
+        raise ApiError(409, "El costeo está aprobado: cree una nueva versión para llenarla con IA")
+    if not 1 <= len(archivos) <= ia_costeo.MAX_ARCHIVOS:
+        raise ApiError(422, f"Suba entre 1 y {ia_costeo.MAX_ARCHIVOS} archivos")
+    limite = get_settings().max_upload_mb * 1024 * 1024
+    leidos, advertencias = [], []
+    for archivo in archivos:
+        nombre = (archivo.filename or "archivo")[:200]
+        try:
+            contenido = await archivo.read(limite + 1)
+        finally:
+            await archivo.close()  # el temporal de la subida se borra aquí: no se guarda ningún archivo
+        if len(contenido) > limite:
+            raise ApiError(413, f"«{nombre}» supera el tamaño máximo de {get_settings().max_upload_mb} MB")
+        try:
+            a = await run_in_threadpool(ia_costeo.leer, nombre, contenido)
+        except ia_costeo.ArchivoInvalido as e:
+            raise ApiError(422, str(e)) from e
+        del contenido
+        advertencias += [f"{nombre}: {x}" for x in a.pop("advertencias", [])]
+        leidos.append(a)
+
+    datos, informe, r = await run_in_threadpool(_proponer, db, c, leidos, indicaciones)
+    del leidos
+    informe["advertencias"] = advertencias
+    informe["modelo"] = r.modelo
+    # Auditoría: nombres de los archivos, modelo y consumo; nunca su contenido
+    auditar(db, request, "cst_costeo_ia", actual.id, costeo=c.nombre, archivos=[(a.filename or "")[:120] for a in archivos],
+            modelo=r.modelo, tokens_entrada=r.tokens_entrada, tokens_salida=r.tokens_salida)
+    db.commit()
+    return ok({"datos": datos, "informe": informe})

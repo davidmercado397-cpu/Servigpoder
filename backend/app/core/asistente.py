@@ -79,7 +79,8 @@ def router_asistente(
     @router.get("/estado", response_model=ApiResponse[EstadoOut])
     def estado(db: DbSession, actual: Usuario = Depends(require(permiso))):
         s = get_settings()
-        return ok(EstadoOut(configurado=ia.configurada(), modelo=s.ia_modelo, datos_personales=s.asistente_datos_personales,
+        ia.cargar(db)
+        return ok(EstadoOut(configurado=ia.configurada(), modelo=ia.ajustes().modelo, datos_personales=s.asistente_datos_personales,
                             usadas_hoy=usadas_hoy(db, actual.id), limite_diario=s.asistente_max_diario))
 
     @router.post("", response_model=ApiResponse[RespuestaOut], dependencies=[Depends(limitar("asistente", 10, 60))])
@@ -94,10 +95,12 @@ def router_asistente(
         contexto = contexto_pantalla(db, data.pantalla)
         if contexto:
             mensajes[-1]["content"] = f"[{contexto}]\n\n{pregunta}"
+        ia.cargar(db)
         try:
             r = responder(db, actual, mensajes)
         except ia.IANoConfigurada as e:
-            raise ApiError(503, "El asistente no está configurado: falta la clave IA_API_KEY en el servidor.", "ASISTENTE_NO_CONFIGURADO") from e
+            raise ApiError(503, "El asistente no está configurado: falta la clave de la API en Administración → Inteligencia artificial.",
+                           "ASISTENTE_NO_CONFIGURADO") from e
         except ia.IAError as e:
             raise ApiError(e.status, e.mensaje, e.codigo) from e
 

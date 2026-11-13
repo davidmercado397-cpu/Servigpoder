@@ -1,10 +1,11 @@
 "use client";
 
-import { ArrowLeft, Copy, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/costeo";
+import { LlenarConIA, ResumenIA, type InformeIA } from "@/components/costeo-ia";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
 import { ESTADO_COSTEO, hoyISO, pct, pesos, type Cliente } from "@/lib/costeo";
@@ -51,9 +52,9 @@ const GRUPOS_COSTO: { titulo: string; costos: [string, string][] }[] = [
 const TIPOS_MFP: [string, string][] = [["OTROS", "Otros"], ["ACCES_TOO", "Acces Too"], ["EQUIPOS", "Equipos"], ["NOTA_CREDITO", "Nota crédito / bono tarifa"],
   ["CAPACITACION", "Capacitación"], ["REINVERSION", "Reinversión"]];
 const DOTACIONES: [string, string][] = [["gala", "Gala"], ["overol", "Overol"]];
-const ARMAS: [string, string][] = [["sin", "Sin arma"], ["fuego", "Fuego"], ["fogeo", "Fogeo"], ["traumatica", "Traumática"]];
+const ARMAS: [string, string][] = [["sin", "Sin arma"], ["fuego", "Fuego"], ["fogeo", "Fogeo"], ["traumatica", "Traumática"], ["noletal", "No letal"]];
 const APLICA: Record<string, string> = { todos: "Todos los puestos", gala: "Gala", overol: "Overol", arma: "Puestos con arma", fuego: "Arma de fuego",
-  fogeo: "Arma de fogeo", traumatica: "Arma traumática" };
+  fogeo: "Arma de fogeo", traumatica: "Arma traumática", noletal: "Arma no letal" };
 const PESTANAS: [string, string][] = [["condiciones", "Condiciones"], ["puestos", "Puestos y dotación"], ["personal", "Personal"], ["otros", "Otros costos (MFP)"]];
 const VACIO: Datos = { duracion_meses: 12, pct_nota_credito: 0, pct_cupo_inversion: 0, horas_bolsa_total: 0, donaciones: 0, servicios: [], personal: [], otros: [], dotacion_tarifa: [], dotacion_puesto: [] };
 const n = (v: string) => (v === "" ? 0 : Number(v));
@@ -76,6 +77,8 @@ export default function EditorCosteo() {
   const [catalogo, setCatalogo] = useState<CatElemento[]>([]);
   const [cambios, setCambios] = useState(false);
   const [crearMfp, setCrearMfp] = useState(false);
+  const [conIA, setConIA] = useState(false);
+  const [informeIA, setInformeIA] = useState<InformeIA | null>(null);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const primera = useRef(true);
 
@@ -142,6 +145,7 @@ export default function EditorCosteo() {
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ESTADO_COSTEO[c.estado]}`}>{c.estado}</span>
         <div className="ml-auto flex flex-wrap gap-2">
           {editable && <button className="btn-primario" disabled={!cambios} onClick={guardar}><Save className="h-4 w-4" /> Guardar</button>}
+          {editable && costear && <button className="btn-secundario" onClick={() => setConIA(true)}><Sparkles className="h-4 w-4" /> Llenar con IA</button>}
           {editable && c.estado === "borrador" && <button className="btn-secundario" onClick={() => estado("enviado")}>Marcar enviado</button>}
           {c.estado !== "aprobado" && (gestionar || configurar) && <button className="btn-secundario" onClick={() => estado("aprobado")}>Aprobar</button>}
           {editable && c.estado === "enviado" && <button className="btn-secundario" onClick={() => estado("rechazado")}>Rechazado</button>}
@@ -151,6 +155,11 @@ export default function EditorCosteo() {
         </div>
       </div>
       {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
+      {informeIA && <ResumenIA informe={informeIA} onCerrar={() => setInformeIA(null)} />}
+      {conIA && <LlenarConIA<Datos> costeoId={c.id} onCerrar={() => setConIA(false)} onAplicar={(datos, informe) => {
+        setD({ ...VACIO, ...datos }); setCambios(true); setConIA(false); setInformeIA(informe); setPestana("puestos");
+        setMsg({ tipo: "ok", texto: "Propuesta de la IA aplicada: revise cada pestaña y dé Guardar." });
+      }} />}
       {c.estado === "aprobado" && <Alerta tipo="info">Costeo aprobado: no se edita y conserva los parámetros con que se aprobó. Para cambiarlo, cree una nueva versión.</Alerta>}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">

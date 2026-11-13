@@ -100,18 +100,19 @@ def decodificar(token: str, tipo: str) -> dict | None:
 
 # --- MFA (TOTP) ---------------------------------------------------------------
 
-def _fernet() -> Fernet:
-    clave = hashlib.sha256(f"{get_settings().secret_key}:mfa".encode()).digest()
+def _fernet(uso: str = "mfa") -> Fernet:
+    # Una clave distinta por uso (secretos MFA, clave de la API de IA…), derivada de SECRET_KEY
+    clave = hashlib.sha256(f"{get_settings().secret_key}:{uso}".encode()).digest()
     return Fernet(base64.urlsafe_b64encode(clave))
 
 
-def cifrar_secreto(secreto: str) -> str:
-    return _fernet().encrypt(secreto.encode()).decode()
+def cifrar_secreto(secreto: str, uso: str = "mfa") -> str:
+    return _fernet(uso).encrypt(secreto.encode()).decode()
 
 
-def descifrar_secreto(cifrado: str) -> str | None:
+def descifrar_secreto(cifrado: str, uso: str = "mfa") -> str | None:
     try:
-        return _fernet().decrypt(cifrado.encode()).decode()
+        return _fernet(uso).decrypt(cifrado.encode()).decode()
     except InvalidToken:
         return None
 

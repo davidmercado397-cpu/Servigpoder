@@ -104,7 +104,7 @@ export function Asistente({ base, bienvenida, sugerencias }: ConfigAsistente) {
           <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 text-sm">
             {estado && !estado.configurado && (
               <div className="rounded-lg bg-amber-50 p-3 text-amber-900">
-                El asistente aún no está activado: el administrador debe configurar la clave <b>IA_API_KEY</b> (OpenRouter) en el servidor.
+                El asistente aún no está activado: el administrador debe poner la clave de OpenRouter en <b>Administración → Inteligencia artificial</b>.
               </div>
             )}
             {mensajes.length === 0 && (

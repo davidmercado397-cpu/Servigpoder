@@ -1,6 +1,6 @@
 """Costeo por puestos: los hombres salen del servicio y la dotación de las tablas de compras según lo que lleva cada puesto.
 
-El comercial escoge en cada puesto la dotación (gala u overol) y el arma (sin arma, fuego, fogeo o traumática). Con eso,
+El comercial escoge en cada puesto la dotación (gala u overol) y el arma (sin arma, fuego, fogeo, traumática o no letal). Con eso,
 cada elemento del catálogo de la dotación de la tarifa entra si aplica al puesto, con su cantidad por hombre o por
 puesto. Lo que el comercial no cambia (tarifas, hombres, salario, auxilio de transporte, Ley 2101, ICA y precios de
 la dotación) se toma del catálogo o de lo que ya dejó el área contable en el costeo.
@@ -9,11 +9,13 @@ la dotación) se toma del catálogo o de lo que ya dejó el área contable en el
 from collections import defaultdict
 
 DOTACIONES = {"gala": "Gala", "overol": "Overol"}
-ARMAS = {"sin": "Sin arma", "fuego": "Arma de fuego", "fogeo": "Arma de fogeo", "traumatica": "Arma traumática"}
+ARMAS = {"sin": "Sin arma", "fuego": "Arma de fuego", "fogeo": "Arma de fogeo", "traumatica": "Arma traumática",
+         "noletal": "Arma no letal"}
 # A qué puestos aplica cada elemento de la dotación de la tarifa ("" = no entra solo: se agrega a mano)
 APLICA = {
     "": "Solo si se agrega a mano", "todos": "Todos los puestos", "gala": "Dotación de gala", "overol": "Dotación de overol",
     "arma": "Puestos con arma (cualquiera)", "fuego": "Arma de fuego", "fogeo": "Arma de fogeo", "traumatica": "Arma traumática",
+    "noletal": "Arma no letal",
 }
 
 

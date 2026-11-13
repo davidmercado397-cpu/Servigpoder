@@ -15,7 +15,7 @@ type Elemento = { id?: number; grupo: string; nombre: string; valor_unitario: nu
   aplica?: string; cantidad?: number; activo: boolean; fuente: string; actualizado_en?: string };
 // Dotación de la tarifa en el costeo por puestos: a qué puestos aplica cada elemento
 const APLICA: [string, string][] = [["", "Solo a mano"], ["todos", "Todos los puestos"], ["gala", "Dotación de gala"], ["overol", "Dotación de overol"],
-  ["arma", "Puestos con arma (cualquiera)"], ["fuego", "Arma de fuego"], ["fogeo", "Arma de fogeo"], ["traumatica", "Arma traumática"]];
+  ["arma", "Puestos con arma (cualquiera)"], ["fuego", "Arma de fuego"], ["fogeo", "Arma de fogeo"], ["traumatica", "Arma traumática"], ["noletal", "Arma no letal"]];
 
 const PESTANAS: [Pestana, string][] = [
   ["parametros", "Parámetros"], ["comisiones", "Comisiones"], ["servicios", "Servicios y tarifas"], ["dotacion_tarifa", "Dotación de la tarifa"],

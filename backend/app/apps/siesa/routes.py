@@ -95,6 +95,7 @@ def editar_documento(documento_id: int, data: DocumentoEditar, request: Request,
 @router.get("/estado", response_model=ApiResponse[dict])
 def estado(db: DbSession, actual: Usuario = Depends(require(CONSULTAR))):
     s = get_settings()
+    ia.cargar(db)
     return ok({"configurado": ia.configurada(),
                "documentos": db.scalar(select(func.count()).select_from(SiesaDocumento)) or 0,
                "paginas": db.scalar(select(func.coalesce(func.sum(SiesaDocumento.paginas), 0))) or 0,
@@ -177,10 +178,12 @@ def chat(data: PreguntaIn, request: Request, db: DbSession, actual: Usuario = De
     if usadas >= s.asistente_max_diario:
         raise ApiError(429, f"Alcanzó el límite de {s.asistente_max_diario} preguntas diarias.")
     mensajes = [{"role": "user" if m.rol == "usuario" else "assistant", "content": m.texto} for m in data.mensajes]
+    ia.cargar(db)
     try:
         r = services.responder(db, mensajes, data.modulo or None)
     except ia.IANoConfigurada as e:
-        raise ApiError(503, "El chat no está configurado: falta la clave IA_API_KEY en el servidor.", "ASISTENTE_NO_CONFIGURADO") from e
+        raise ApiError(503, "El chat no está configurado: falta la clave de la API en Administración → Inteligencia artificial.",
+                       "ASISTENTE_NO_CONFIGURADO") from e
     except ia.IAError as e:
         raise ApiError(e.status, e.mensaje, e.codigo) from e
     uso = r.respuesta_ia

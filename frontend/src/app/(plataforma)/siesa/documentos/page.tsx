@@ -215,6 +215,7 @@ export default function BaseConocimiento() {
           )}
           {docs && <span className="text-sm text-slate-500">{docs.length} instructivos · {paginas.toLocaleString("es-CO")} páginas</span>}
         </div>
+        <div className="overflow-x-auto">
         <table className="tabla text-sm">
           <thead>
             <tr><th>Instructivo</th><th>Módulo</th><th>Fecha</th><th className="text-right">Secciones</th><th className="text-right">Páginas</th><th>Cargado</th>{gestionar && <th />}</tr>
@@ -232,16 +233,19 @@ export default function BaseConocimiento() {
                   <input className={`input ${enlaceValido(edicion.enlace) ? "" : "border-red-400"}`} maxLength={1000} aria-label="Enlace"
                     placeholder="https://…sharepoint.com/… o https://1drv.ms/…" value={edicion.enlace} onChange={(e) => setEdicion({ ...edicion, enlace: e.target.value })} />
                   <p className="text-xs text-slate-500">{AYUDA_ENLACE}</p>
+                  {!enlaceValido(edicion.enlace) && <p className="text-xs text-red-700">El enlace debe ser de OneDrive o SharePoint (https://…).</p>}
+                  {/* Los botones van debajo de los campos: así siempre se ven, aunque la tabla sea más ancha que la pantalla */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <button className="btn-primario inline-flex items-center gap-1" disabled={!enlaceValido(edicion.enlace)} onClick={guardarEdicion}><Check className="h-4 w-4" /> Guardar</button>
+                    <button className="btn-secundario inline-flex items-center gap-1" onClick={() => setEdicion(null)}><X className="h-4 w-4" /> Cancelar</button>
+                  </div>
                 </td>
                 <td className="align-top"><input className="input w-40" list="modulos-siesa" maxLength={80} aria-label="Módulo" value={edicion.modulo} onChange={(e) => setEdicion({ ...edicion, modulo: e.target.value })} /></td>
                 <td className="align-top"><input className="input w-40" type="date" aria-label="Fecha" value={edicion.fecha} onChange={(e) => setEdicion({ ...edicion, fecha: e.target.value })} /></td>
                 <td colSpan={3} className="align-top text-xs text-slate-500">
                   El módulo y el título forman el encabezado de cada fragmento; el objetivo le dice a la IA para qué sirve el instructivo.
                 </td>
-                <td className="whitespace-nowrap text-right">
-                  <button className="btn-primario inline-flex items-center gap-1" disabled={!enlaceValido(edicion.enlace)} onClick={guardarEdicion}><Check className="h-4 w-4" /> Guardar</button>
-                  <button className="ml-1 rounded-md p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setEdicion(null)} aria-label="Cancelar"><X className="h-4 w-4" /></button>
-                </td>
+                <td />
               </tr>
             ) : (
               <tr key={d.id}>
@@ -282,6 +286,7 @@ export default function BaseConocimiento() {
             ))}
           </tbody>
         </table>
+        </div>
         {docs?.length === 0 && <p className="p-6 text-center text-sm text-slate-500">Aún no hay instructivos cargados.</p>}
       </div>
     </div>

@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Paginador, usePaginacion } from "@/components/paginacion";
 import { Alerta, SubirArchivo, Titulo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 import { pesos, type EmpleadoSpeed } from "@/lib/speed";
+
+const TAMANOS_EMPLEADOS = [20, 50, 100] as const;
 
 type Importacion = { filas: number; nuevos: number; actualizados: number; sin_cambios: number; reactivados: number;
   inactivados: { cedula: string; nombre: string }[]; cambios: { cedula: string; nombre: string; campo: string; antes: unknown; ahora: unknown }[]; advertencias: string[] };
@@ -24,6 +27,11 @@ export default function EmpleadosSpeed() {
 
   const visibles = useMemo(() => (lista ?? []).filter((e) => (!regla || String(e.aplica_programacion) === regla)
     && (!buscar || `${e.cedula} ${e.nombre} ${e.cargo} ${e.puesto} ${e.tipo_turno}`.toLowerCase().includes(buscar.toLowerCase()))), [lista, buscar, regla]);
+  // Paginación en pantalla (20, 50 o 100 por página); vuelve a la primera al cambiar los filtros
+  const pag = usePaginacion([buscar, regla, inactivos], TAMANOS_EMPLEADOS);
+  const paginas = Math.max(1, Math.ceil(visibles.length / pag.tamano));
+  const pagina = Math.min(pag.pagina, paginas);
+  const enPagina = visibles.slice((pagina - 1) * pag.tamano, pagina * pag.tamano);
 
   return (
     <div className="space-y-4">
@@ -59,7 +67,7 @@ export default function EmpleadosSpeed() {
           <tbody>
             {lista === null && <tr><td colSpan={8} className="py-6 text-center text-slate-400">Cargando…</td></tr>}
             {lista?.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-slate-400">Aún no se ha importado el Listado.</td></tr>}
-            {visibles.map((e) => (
+            {enPagina.map((e) => (
               <tr key={e.id} className={e.activo ? "" : "opacity-50"}>
                 <td><p className="font-medium">{e.nombre}</p><p className="text-xs text-slate-500">{e.cedula} · {e.cargo} · ingreso {e.fecha_ingreso ?? "—"}{e.activo ? "" : " · inactivo"}</p></td>
                 <td><p>{e.tipo_turno}</p><p className="text-xs text-slate-500">{e.puesto} · {e.cliente}</p></td>
@@ -78,6 +86,8 @@ export default function EmpleadosSpeed() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={lista ? { total: visibles.length, pagina, tamano: pag.tamano, paginas } : null} tamanos={TAMANOS_EMPLEADOS}
+          onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );

@@ -18,18 +18,20 @@ export function metaDe(r: Envelope<unknown>): MetaPagina {
  * Estado de paginación de una tabla. Vuelve a la página 1 cuando cambian los filtros
  * (`reiniciarCon`). El tamaño de página elegido se recuerda en este navegador.
  */
-export function usePaginacion(reiniciarCon: unknown[] = []) {
+export function usePaginacion(reiniciarCon: unknown[] = [], tamanos: readonly number[] = TAMANOS) {
+  // Cada juego de tamaños recuerda el suyo (las tablas con 20/50/100 no comparten el de 50/100/150)
+  const claveTamano = tamanos === TAMANOS ? CLAVE : `${CLAVE}-${tamanos.join("-")}`;
   const [pagina, setPagina] = useState(1);
-  const [tamano, setTamanoEstado] = useState<number>(50);
+  const [tamano, setTamanoEstado] = useState<number>(tamanos === TAMANOS ? 50 : tamanos[0]);
   const clave = JSON.stringify(reiniciarCon);
   const primera = useRef(true);
 
   useEffect(() => {
     try {
-      const guardado = Number(localStorage.getItem(CLAVE));
-      if ((TAMANOS as readonly number[]).includes(guardado)) setTamanoEstado(guardado);
+      const guardado = Number(localStorage.getItem(claveTamano));
+      if (tamanos.includes(guardado)) setTamanoEstado(guardado);
     } catch {}
-  }, []);
+  }, [claveTamano]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (primera.current) {
@@ -43,18 +45,19 @@ export function usePaginacion(reiniciarCon: unknown[] = []) {
     setTamanoEstado(t);
     setPagina(1);
     try {
-      localStorage.setItem(CLAVE, String(t));
+      localStorage.setItem(claveTamano, String(t));
     } catch {}
   }
 
   return { pagina, tamano, setPagina, setTamano, query: `pagina=${pagina}&tamano=${tamano}` };
 }
 
-export function Paginador({ meta, onPagina, onTamano, className = "" }: {
+export function Paginador({ meta, onPagina, onTamano, className = "", tamanos = TAMANOS }: {
   meta: MetaPagina | null;
   onPagina: (p: number) => void;
   onTamano: (t: number) => void;
   className?: string;
+  tamanos?: readonly number[];
 }) {
   if (!meta) return null;
   const { total, pagina, tamano, paginas } = meta;
@@ -72,7 +75,7 @@ export function Paginador({ meta, onPagina, onTamano, className = "" }: {
         <label className="flex items-center gap-2">
           Filas por página
           <select className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm" value={tamano} onChange={(e) => onTamano(Number(e.target.value))}>
-            {TAMANOS.map((t) => <option key={t} value={t}>{t}</option>)}
+            {tamanos.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
         <div className="flex items-center gap-1">

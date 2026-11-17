@@ -218,7 +218,7 @@ def exportar(analisis_id: int, request: Request, db: DbSession, actual: Usuario 
     for d in db.scalars(select(AnalisisDia).where(AnalisisDia.analisis_puesto_id.in_(por_id), AnalisisDia.estado.in_(["hueco", "exceso", "mixto"]))
                         .order_by(AnalisisDia.analisis_puesto_id, AnalisisDia.fecha)):
         ap = por_id[d.analisis_puesto_id]
-        detalle = "; ".join(f"{t['tipo']} {t['inicio']}-{t['fin']} ({t['personas']} pers.)" for t in d.detalle)
+        detalle = "; ".join(_tramo_texto(t) for t in d.detalle)
         hoja.write_row(fila, 0, [ap.puesto.codigo, ap.puesto.ubicacion.nombre, d.fecha.isoformat(), d.estado,
                                  float(d.horas_descubiertas), float(d.horas_exceso), detalle])
         fila += 1
@@ -236,6 +236,12 @@ def exportar(analisis_id: int, request: Request, db: DbSession, actual: Usuario 
 
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 ESTADOS_TEXTO = {"hueco": "Hueco", "exceso": "Exceso", "mixto": "Hueco y exceso", "ok": "Cubierto"}
+
+
+def _tramo_texto(t: dict) -> str:
+    if not t.get("inicio"):
+        return f"{t['tipo']} {float(t.get('horas') or 0):g} h del día (horario flexible)"
+    return f"{t['tipo']} {t['inicio']}-{t['fin']} ({t['personas']} pers.)"
 
 
 def _horas_tramo(inicio: str, fin: str) -> float:
@@ -298,10 +304,12 @@ def exportar_hallazgos(analisis_id: int, request: Request, db: DbSession,
         for t in d.detalle:
             if t["tipo"] not in tipos:
                 continue
-            horas = _horas_tramo(t["inicio"], t["fin"]) * t["personas"]
+            # Horario flexible: el tramo no tiene horas fijas, solo las horas del día que faltan o sobran
+            horas = float(t.get("horas") or 0) if not t.get("inicio") else _horas_tramo(t["inicio"], t["fin"]) * t["personas"]
             hoja.write_row(fila, 0, [ap.puesto.ciudad or "", ap.puesto.ubicacion.nombre, ap.puesto.codigo, ap.puesto.descripcion,
                                      d.fecha.isoformat(), DIAS_SEMANA[d.fecha.weekday()], fest.get(d.fecha, ""),
-                                     "Hueco" if t["tipo"] == "hueco" else "Exceso", t["inicio"], t["fin"], t["personas"], horas],
+                                     "Hueco" if t["tipo"] == "hueco" else "Exceso", t["inicio"] or "Flexible", t["fin"] or "Flexible",
+                                     t["personas"] if t.get("inicio") else "", horas],
                            hueco if t["tipo"] == "hueco" else exceso)
             fila += 1
     hoja.autofilter(0, 0, max(fila - 1, 1), len(enc) - 1)

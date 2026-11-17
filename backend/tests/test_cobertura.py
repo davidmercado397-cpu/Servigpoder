@@ -192,3 +192,13 @@ def test_puesto_flexible_en_el_analisis(admin):
     # (en SQLite el análisis nuevo reutiliza el id y los puestos del anterior no se borran en cascada: se toma el último)
     despues = [p for p in admin.get(f"/api/capacidad/analisis/{aid}/puestos?q=3").json()["data"] if p["puesto"]["codigo"] == "3"][-1]
     assert float(antes["horas_exceso"]) == 12 and float(despues["horas_exceso"]) == 0  # las 12 h de noche cubren el día 15
+    # Los Excel funcionan con los tramos del horario flexible (no tienen hora de inicio ni fin)
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    r = admin.get(f"/api/capacidad/analisis/{aid}/hallazgos")
+    assert r.status_code == 200, r.text
+    enc, *filas = list(load_workbook(BytesIO(r.content))["Tramos"].iter_rows(values_only=True))
+    flex = [t for t in (dict(zip(enc, f)) for f in filas) if t["Puesto"] == "3" and t["Desde"] == "Flexible"]
+    assert flex and flex[0]["Horas"] == 12 and flex[0]["Hallazgo"] == "Hueco"
+    assert admin.get(f"/api/capacidad/analisis/{aid}/exportar").status_code == 200

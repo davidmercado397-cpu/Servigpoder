@@ -31,7 +31,7 @@ def test_admin_tiene_todos_los_permisos(admin):
 
 def test_roles_base(admin):
     nombres = {r["nombre"] for r in admin.get("/api/roles").json()["data"]}
-    assert nombres == {"Administrador", "Programador", "Nómina", "Liquidador", "Consulta de programación", "Analista de nómina", "Consulta instructivos SIESA", "Planos SIESA", "Comercial costeo", "Programador MFP", "Precios costeo", "Contable costeo", "Administrador costeo", "Gestión humana"}
+    assert nombres == {"Administrador", "Programador", "Nómina", "Liquidador", "Consulta de programación", "Analista de nómina", "Consulta instructivos SIESA", "Planos SIESA", "Comercial costeo", "Programador MFP", "Precios costeo", "Contable costeo", "Administrador costeo", "Gestión humana", "Nómina Speed"}
 
 
 def test_crear_usuario_y_permisos_por_rol(admin):
@@ -146,7 +146,7 @@ def test_auditoria_registra_login(admin, db):
 def test_portal_muestra_apps_segun_permisos(admin):
     # El portal muestra los desarrollos de la empresa elegida (por defecto la primera: SERA)
     me = admin.get("/api/auth/me").json()["data"]
-    assert [(e["codigo"], e["apps"]) for e in me["empresas"]] == [("sera", ["liquidador"]), ("servigpoder", ["capacidad", "costeo", "nomina", "planos", "reporte", "siesa"])]
+    assert [(e["codigo"], e["apps"]) for e in me["empresas"]] == [("sera", ["liquidador"]), ("servigpoder", ["capacidad", "costeo", "nomina", "planos", "reporte", "siesa"]), ("speed", ["speed"])]
     assert me["empresa_actual"] == "sera"
     assert [a["codigo"] for a in admin.get("/api/plataforma/apps").json()["data"]] == ["liquidador"]
     assert admin.post("/api/plataforma/empresa", json={"codigo": "servigpoder"}).status_code == 200

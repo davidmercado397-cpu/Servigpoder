@@ -16,9 +16,10 @@ from app.apps.nomina.manifest import APP as NOMINA
 from app.apps.planos.manifest import APP as PLANOS
 from app.apps.reporte.manifest import APP as REPORTE
 from app.apps.siesa.manifest import APP as SIESA
+from app.apps.speed.manifest import APP as SPEED
 from app.core.plataforma import App
 
-APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA, PLANOS, COSTEO]
+APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA, PLANOS, COSTEO, SPEED]
 
 
 def por_codigo(codigo: str) -> App | None:

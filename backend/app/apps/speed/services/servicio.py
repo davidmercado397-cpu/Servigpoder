@@ -1,6 +1,8 @@
-"""Servicios de la nómina de Speed: parámetros, importación del Listado, liquidación de la quincena y Excel."""
+"""Servicios de la nómina de Speed: parámetros, importación del Listado y de la programación, liquidación y Excel."""
 
 import io
+import re
+import unicodedata
 from datetime import datetime, timezone
 
 import xlsxwriter
@@ -11,7 +13,7 @@ from app.apps.speed.models import (
     ABIERTO, ADICIONAL, TIPOS_DESCUENTO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad, SpdParametro,
     SpdPeriodo,
 )
-from app.apps.speed.services import calculo
+from app.apps.speed.services import calculo, programacion
 
 CAMPOS_EMPLEADO = ("nombre", "fecha_ingreso", "tipo_contrato", "grupo", "cargo", "area", "puesto", "cliente", "tipo_turno", "salario",
                    "auxilio_listado", "horas_extras", "comisiones", "ley_2466", "bonificaciones", "rodamiento", "nota", "aplica_programacion")
@@ -82,12 +84,114 @@ def _empleado_dict(e: SpdEmpleado) -> dict:
             "auxilio_listado": float(e.auxilio_listado or 0), "aplica_programacion": e.aplica_programacion, "fecha_ingreso": e.fecha_ingreso}
 
 
+DIAS_NOVEDAD = ("ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones", "incapacidad",
+                "incapacidad_previos", "turnos_tad", "turnos_tan", "sin_programacion")
+
+
 def _novedad_dict(n: SpdNovedad | None) -> dict | None:
     if n is None:
         return None
-    return {"dias_programados": None if n.dias_programados is None else float(n.dias_programados), "ausencias": float(n.ausencias or 0),
-            "licencias": float(n.licencias or 0), "suspensiones": float(n.suspensiones or 0), "incapacidad": float(n.incapacidad or 0),
-            "incapacidad_previos": float(n.incapacidad_previos or 0)}
+    d = {"dias_programados": None if n.dias_programados is None else float(n.dias_programados),
+         **{c: float(getattr(n, c) or 0) for c in DIAS_NOVEDAD}}
+    d["incapacidad_tramos"] = (n.programacion or {}).get("tramos_incapacidad")
+    return d
+
+
+# --- Archivo de programación ----------------------------------------------------------------------------------
+
+def _clave_nombre(t: str) -> str:
+    t = "".join(c for c in unicodedata.normalize("NFD", (t or "").lower()) if unicodedata.category(c) != "Mn")
+    return " ".join(sorted(re.findall(r"[a-z0-9]+", t)))
+
+
+def _anterior(db: Session, periodo: SpdPeriodo) -> SpdPeriodo | None:
+    if periodo.quincena == 2:
+        anio, mes, q = periodo.anio, periodo.mes, 1
+    else:
+        anio, mes, q = (periodo.anio - 1, 12, 2) if periodo.mes == 1 else (periodo.anio, periodo.mes - 1, 2)
+    return db.scalar(select(SpdPeriodo).where(SpdPeriodo.anio == anio, SpdPeriodo.mes == mes, SpdPeriodo.quincena == q))
+
+
+def _previos(nueva: dict, anterior: SpdNovedad | None) -> float:
+    """Días que ya llevaba la incapacidad que sigue desde la quincena anterior (para no pagar otra vez 2 días al 100 %)."""
+    if not nueva["programacion"]["incapacidad_desde_inicio"] or anterior is None:
+        return 0.0
+    prog = anterior.programacion or {}
+    al_cierre = float(prog.get("incapacidad_al_cierre") or 0)
+    if not al_cierre:
+        return 0.0
+    # Si toda la incapacidad de la anterior venía de antes, se suman también esos días
+    viene = prog.get("incapacidad_desde_inicio") and (prog.get("tramos_incapacidad") or []) == [al_cierre]
+    return al_cierre + (float(anterior.incapacidad_previos or 0) if viene else 0.0)
+
+
+def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, "programacion.Persona"], info: dict) -> dict:
+    """Llena la novedad de la quincena de cada persona con lo que dice la programación (reemplaza lo cargado antes desde
+    la programación; las novedades digitadas a mano de quien no viene en el archivo se conservan)."""
+    empleados = list(db.scalars(select(SpdEmpleado)))
+    por_cedula = {e.cedula: e for e in empleados}
+    por_nombre: dict[str, list[SpdEmpleado]] = {}
+    for e in empleados:
+        por_nombre.setdefault(_clave_nombre(e.nombre), []).append(e)
+    existentes = {n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id))}
+    anterior = _anterior(db, periodo)
+    previas = ({n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == anterior.id))}
+               if anterior else {})
+
+    cargados: set[int] = set()
+    no_encontrados: list[dict] = []
+    por_nombre_cruzados: list[dict] = []
+    conflictos: list[dict] = []
+    resumen = {"vacaciones": 0, "incapacidad": 0, "no_laborados": 0, "remunerados": 0, "turnos_tad": 0, "turnos_tan": 0, "sin_programacion": 0}
+    for clave, per in personas.items():
+        e = por_cedula.get(clave)
+        if e is None:
+            candidatos = por_nombre.get(_clave_nombre(per.nombre), [])
+            if len(candidatos) == 1:
+                e = candidatos[0]
+                por_nombre_cruzados.append({"nombre": per.nombre, "cedula": e.cedula, "en_archivo": per.cedula or "sin documento"})
+        if e is None:
+            no_encontrados.append({"cedula": per.cedula, "nombre": per.nombre, "puestos": per.puestos[:3]})
+            continue
+        if e.id in cargados:
+            conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": ["aparece con dos documentos o nombres distintos; se tomó el primero"]})
+            continue
+        d = programacion.novedad(per, periodo.anio, periodo.mes, periodo.quincena, e.fecha_ingreso)
+        n = existentes.get(e.id)
+        if n is None:
+            n = SpdNovedad(periodo_id=periodo.id, empleado_id=e.id, observacion="")
+            db.add(n)
+        for c in ("ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones", "incapacidad",
+                  "turnos_tad", "turnos_tan", "sin_programacion", "dias_programados", "programacion"):
+            setattr(n, c, d[c])
+        n.incapacidad_previos = _previos(d, previas.get(e.id))
+        n.origen = "programacion"
+        cargados.add(e.id)
+        if d["programacion"]["conflictos"]:
+            conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": d["programacion"]["conflictos"]})
+        resumen["vacaciones"] += d["vacaciones"]
+        resumen["incapacidad"] += d["incapacidad"]
+        resumen["no_laborados"] += d["ausencias"] + d["licencias"] + d["suspensiones"] + d["desprogramados"]
+        resumen["remunerados"] += d["permisos_remunerados"]
+        resumen["turnos_tad"] += d["turnos_tad"]
+        resumen["turnos_tan"] += d["turnos_tan"]
+        resumen["sin_programacion"] += d["sin_programacion"] if e.aplica_programacion else 0
+    # Lo que se había cargado desde una programación anterior y ya no viene en el archivo
+    quitadas = 0
+    for empleado_id, n in existentes.items():
+        if n.origen == "programacion" and empleado_id not in cargados:
+            db.delete(n)
+            quitadas += 1
+    sin_programacion = [{"cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo} for e in sorted(empleados, key=lambda x: x.nombre)
+                        if e.activo and e.aplica_programacion and e.id not in cargados]
+    avisos: list[str] = []
+    aviso_mes = programacion.revisar_mes(info.get("semana") or {}, periodo.anio, periodo.mes)
+    if aviso_mes:
+        avisos.append(aviso_mes)
+    db.flush()
+    return {"hojas": info.get("hojas", []), "personas": len(personas), "cargadas": len(cargados), "quitadas": quitadas,
+            "no_encontrados": no_encontrados, "por_nombre": por_nombre_cruzados, "sin_programacion": sin_programacion,
+            "conflictos": conflictos[:200], "resumen": resumen, "avisos": avisos}
 
 
 def descuentos_para(db: Session, periodo: SpdPeriodo, empleado_id: int | None = None) -> dict[int, list[calculo.Descuento]]:
@@ -144,9 +248,9 @@ def liquidar_periodo(db: Session, periodo: SpdPeriodo) -> dict:
 # --- Excel de la quincena ---------------------------------------------------------------------------------
 
 COLUMNAS_EXCEL = [
-    ("salario", "SALARIO"), ("incapacidad", "INCAPACIDAD"), ("auxilio_transporte", "AUX. TRANSPORTE"), ("horas_extras", "HORAS EXTRAS"),
-    ("comisiones", "COMISIONES"), ("ley_2466", "LEY 2466"), ("bonificaciones", "BONIFICACIONES"), ("rodamiento", "RODAMIENTO"),
-    ("pago_adicional", "PAGO ADICIONAL"), ("_devengado", "TOTAL DEVENGADO"), ("salud", "SALUD"), ("pension", "PENSIÓN"),
+    ("salario", "SALARIO"), ("vacaciones", "VACACIONES"), ("incapacidad", "INCAPACIDAD"), ("auxilio_transporte", "AUX. TRANSPORTE"),
+    ("horas_extras", "HORAS EXTRAS"), ("comisiones", "COMISIONES"), ("ley_2466", "LEY 2466"), ("bonificaciones", "BONIFICACIONES"),
+    ("rodamiento", "RODAMIENTO"), ("turnos_adicionales", "TURNOS ADICIONALES"), ("pago_adicional", "PAGO ADICIONAL"), ("_devengado", "TOTAL DEVENGADO"), ("salud", "SALUD"), ("pension", "PENSIÓN"),
     ("embargos", "EMBARGOS"), ("prestamos", "PRÉSTAMOS"), ("cuotas", "CUOTAS"), ("_deducciones", "TOTAL DEDUCCIONES"), ("_neto", "NETO A PAGAR"),
 ]
 
@@ -158,33 +262,36 @@ def excel(periodo: SpdPeriodo, liquidaciones: list[SpdLiquidacion]) -> bytes:
     plata = libro.add_format({"num_format": "$#,##0"})
     plata_n = libro.add_format({"num_format": "$#,##0", "bold": True})
     hoja = libro.add_worksheet(f"Quincena {periodo.quincena}")
-    fijos = ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "REGLA PROGRAMACIÓN", "DÍAS CONTRATO", "DÍAS TRABAJADOS", "NO LABORADOS",
-             "INCAPACIDAD", "DÍAS VARIABLES", "IBC"]
+    dias_cols = [("contrato", "DÍAS CONTRATO"), ("trabajados", "DÍAS TRABAJADOS"), ("no_laborados", "NO LABORADOS"),
+                 ("incapacidad", "INCAPACIDAD"), ("vacaciones", "DÍAS VACACIONES"), ("remunerados", "LICENCIAS REMUNERADAS"),
+                 ("variables", "DÍAS VARIABLES"), ("turnos_tad", "TAD"), ("turnos_tan", "TAN")]
+    fijos = ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "REGLA PROGRAMACIÓN"] + [t for _, t in dias_cols] + ["IBC"]
+    col_ibc = len(fijos) - 1
     hoja.write_row(0, 0, fijos + [t for _, t in COLUMNAS_EXCEL] + ["ALERTAS"], negrita)
     hoja.set_row(0, 32)
     for i, l in enumerate(liquidaciones, start=1):
         d, e = l.detalle or {}, l.empleado
         dias = d.get("dias", {})
         hoja.write_string(i, 0, e.cedula)
-        hoja.write_row(i, 1, [e.nombre, e.cargo, e.puesto, "SÍ" if d.get("aplica_programacion") else "NO", dias.get("contrato", 0),
-                              dias.get("trabajados", 0), dias.get("no_laborados", 0), dias.get("incapacidad", 0), dias.get("variables", 0)])
-        hoja.write_number(i, 10, d.get("ibc", 0), plata)
+        hoja.write_row(i, 1, [e.nombre, e.cargo, e.puesto, "SÍ" if d.get("aplica_programacion") else "NO"]
+                       + [dias.get(c) or 0 for c, _ in dias_cols])
+        hoja.write_number(i, col_ibc, d.get("ibc", 0), plata)
         conceptos = d.get("conceptos", {})
-        for j, (clave, _) in enumerate(COLUMNAS_EXCEL, start=11):
+        for j, (clave, _) in enumerate(COLUMNAS_EXCEL, start=col_ibc + 1):
             valor = {"_devengado": l.devengado, "_deducciones": l.deducciones, "_neto": l.neto}.get(clave, conceptos.get(clave, 0))
             hoja.write_number(i, j, float(valor or 0), plata_n if clave.startswith("_") else plata)
-        hoja.write_string(i, 11 + len(COLUMNAS_EXCEL), " · ".join(d.get("alertas", [])))
+        hoja.write_string(i, col_ibc + 1 + len(COLUMNAS_EXCEL), " · ".join(d.get("alertas", [])))
     fin = len(liquidaciones) + 1
     hoja.write_string(fin, 1, "TOTAL", negrita)
-    for j in range(10, 11 + len(COLUMNAS_EXCEL)):
+    for j in range(col_ibc, col_ibc + 1 + len(COLUMNAS_EXCEL)):
         col = xlsxwriter.utility.xl_col_to_name(j)
         hoja.write_formula(fin, j, f"=SUM({col}2:{col}{fin})", plata_n)
     hoja.set_column(0, 0, 13)
     hoja.set_column(1, 1, 34)
     hoja.set_column(2, 3, 20)
-    hoja.set_column(4, 9, 10)
-    hoja.set_column(10, 10 + len(COLUMNAS_EXCEL), 14)
-    hoja.set_column(11 + len(COLUMNAS_EXCEL), 11 + len(COLUMNAS_EXCEL), 60)
+    hoja.set_column(4, col_ibc - 1, 10)
+    hoja.set_column(col_ibc, col_ibc + len(COLUMNAS_EXCEL), 14)
+    hoja.set_column(col_ibc + 1 + len(COLUMNAS_EXCEL), col_ibc + 1 + len(COLUMNAS_EXCEL), 60)
     hoja.freeze_panes(1, 2)
     libro.close()
     return buf.getvalue()

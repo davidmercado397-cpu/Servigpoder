@@ -141,8 +141,13 @@ def leer_listado(contenido: bytes) -> tuple[list[dict], list[str]]:
 # --- Plantilla de novedades de la quincena ------------------------------------------------------------------
 
 COLUMNAS_NOVEDAD = [("cedula", "Cédula"), ("nombre", "Nombre"), ("dias_programados", "Días programados"), ("ausencias", "Ausencias"),
-                    ("licencias", "Licencias no remuneradas"), ("suspensiones", "Suspensiones"), ("incapacidad", "Días de incapacidad"),
-                    ("incapacidad_previos", "Días previos de la misma incapacidad"), ("observacion", "Observación")]
+                    ("licencias", "Licencias no remuneradas"), ("suspensiones", "Suspensiones"),
+                    ("desprogramados", "Renuncia / desprogramado"), ("permisos_remunerados", "Licencias remuneradas"),
+                    ("vacaciones", "Vacaciones"), ("incapacidad", "Días de incapacidad"),
+                    ("incapacidad_previos", "Días previos de la misma incapacidad"), ("turnos_tad", "Turnos TAD"),
+                    ("turnos_tan", "Turnos TAN"), ("observacion", "Observación")]
+DIAS_NOVEDAD = ("ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones", "incapacidad",
+                "incapacidad_previos", "turnos_tad", "turnos_tan")
 
 
 def leer_novedades(contenido: bytes) -> tuple[list[dict], list[str]]:
@@ -169,12 +174,18 @@ def leer_novedades(contenido: bytes) -> tuple[list[dict], list[str]]:
         cedula = _cedula(val("cedula"))
         if not cedula:
             continue
-        n = {"cedula": cedula, "observacion": _texto(val("observacion"), 300)}
-        prog = val("dias_programados")
-        n["dias_programados"] = None if prog in (None, "") else _num(prog)
-        for c in ("ausencias", "licencias", "suspensiones", "incapacidad", "incapacidad_previos"):
+        # Solo se toman las columnas que trae el archivo (una plantilla vieja no borra lo demás)
+        n: dict = {"cedula": cedula}
+        if "observacion" in columnas:
+            n["observacion"] = _texto(val("observacion"), 300)
+        if "dias_programados" in columnas:
+            prog = val("dias_programados")
+            n["dias_programados"] = None if prog in (None, "") else _num(prog)
+        for c in DIAS_NOVEDAD:
+            if c not in columnas:
+                continue
             n[c] = _num(val(c))
-            if n[c] < 0 or n[c] > 15 and c != "incapacidad_previos":
+            if n[c] < 0 or n[c] > (31 if c.startswith("turnos") else 15) and c != "incapacidad_previos":
                 advertencias.append(f"Fila {i} ({cedula}): {c} = {n[c]:g} fuera de rango; se ignoró la fila")
                 break
         else:

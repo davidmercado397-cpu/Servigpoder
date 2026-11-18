@@ -8,7 +8,7 @@ import { api, mensajeError } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 
 type Parametro = { clave: string; valor: number; nombre: string; ayuda: string };
-const EN_PESOS = new Set(["salario_minimo", "auxilio_transporte"]);
+const EN_PESOS = new Set(["salario_minimo", "auxilio_transporte", "valor_tad", "valor_tan"]);
 
 export default function ParametrosSpeed() {
   const puede = usePermiso("speed.configurar");

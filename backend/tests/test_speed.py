@@ -158,7 +158,8 @@ def test_flujo_completo_de_la_quincena(speed):
     libro = load_workbook(io.BytesIO(pl.content))
     h = libro["Novedades"]
     fila_uno = next(r for r in range(2, h.max_row + 1) if h.cell(r, 1).value == "1006306373")
-    h.cell(fila_uno, 7).value = 3  # 3 días de incapacidad
+    col_inc = next(c for c in range(1, h.max_column + 1) if h.cell(1, c).value == "Días de incapacidad")
+    h.cell(fila_uno, col_inc).value = 3  # 3 días de incapacidad
     buf = io.BytesIO()
     libro.save(buf)
     r = speed.post(f"{API}/periodos/{p2['id']}/novedades/importar",
@@ -185,3 +186,139 @@ def test_listado_sin_hoja_y_permisos(speed):
     # En Servigpoder el desarrollo no está habilitado
     speed.post("/api/plataforma/empresa", json={"codigo": "servigpoder"})
     assert speed.get(f"{API}/periodos").status_code == 403
+
+
+# --- Archivo de programación (2026-11-18) ------------------------------------------------------------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_vacaciones_licencias_remuneradas_y_turnos_adicionales():
+    p = {**P, "valor_tad": 70000, "valor_tan": 90000}
+    # 3 días de vacaciones y 1 de luto: pagan salario, pero no auxilio ni variables; 1 renuncia descuenta todo
+    r = liquidar(GUARDA, {"vacaciones": 3, "permisos_remunerados": 1, "desprogramados": 1, "turnos_tad": 2, "turnos_tan": 1}, p, 2026, 11, 1, [])
+    d, c = r.dias, r.conceptos
+    assert (d["trabajados"], d["vacaciones"], d["remunerados"], d["laborados"], d["variables"]) == (14, 3, 1, 10, 10)
+    diario = 1750905 / 30
+    assert c["salario"] == 641999 and c["vacaciones"] == 175091  # ÷ 30 × días, redondeo hacia arriba en ,5
+    assert c["auxilio_transporte"] == round(249095 / 30 * 10) and c["horas_extras"] == round(485370 / 30 * 10)
+    # Turnos adicionales: no son salariales
+    assert c["turnos_adicionales"] == 2 * 70000 + 90000
+    assert r.ibc == c["salario"] + c["vacaciones"] + c["horas_extras"]
+    # Sin valor del turno adicional: alerta
+    r = liquidar(GUARDA, {"turnos_tad": 1}, P, 2026, 11, 1, [])
+    assert r.conceptos["turnos_adicionales"] == 0 and any("TAD" in a for a in r.alertas)
+    # Dos incapacidades distintas en la quincena: cada una con sus 2 primeros días al 100 %
+    alto = {**GUARDA, "salario": 3000000}
+    r = liquidar(alto, {"incapacidad": 6, "incapacidad_tramos": [3, 3]}, P, 2026, 11, 1, [])
+    assert r.dias["incapacidad_100"] == 4
+    r = liquidar(alto, {"incapacidad": 6, "incapacidad_tramos": [3, 3], "incapacidad_previos": 5}, P, 2026, 11, 1, [])
+    assert r.dias["incapacidad_100"] == 2  # la primera viene de antes
+
+
+def programacion_xlsx(general: list[list], sandra: list[list] | None = None, primer_dia_letra: str = "D") -> bytes:
+    """Imita el archivo: título, encabezado PUESTO/APELLIDOS/DOCUMENTO…, y por bloque las filas de semana y número de día.
+    Una celda («TRASLADO…», n.º de días) se escribe combinada."""
+    letras = ["D", "L", "M", "MM", "J", "V", "S"]
+    inicio = letras.index(primer_dia_letra)
+    buf = io.BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+
+    def hoja(nombre: str, filas: list[list]):
+        h = libro.add_worksheet(nombre)
+        h.write(0, 0, "PROGRAMACION GENERAL MES DE OCTUBRE")  # el título del archivo real a veces trae otro mes
+        h.write_row(3, 0, ["PUESTO", "APELLIDOS Y NOMBRES", "DOCUMENTO", "MODALIDAD", "TELEFONO", "PUESTOS"])
+        h.write(4, 0, "PROGRAMACIÓN Y DESCANSOS PARA PERSONAL DE PRUEBA")
+        h.write_row(4, 6, [letras[(inicio + i) % 7] for i in range(31)])
+        h.write_row(5, 6, list(range(1, 32)))
+        for i, f in enumerate(filas, start=6):
+            puesto, nombre, doc, dias = f
+            h.write_row(i, 0, [puesto, nombre, doc, "24 HORAS", "300", "CONTROL DE ACCESO"])
+            for j, v in enumerate(dias):
+                if isinstance(v, tuple):
+                    h.merge_range(i, 6 + j, i, 6 + j + v[1] - 1, v[0])
+                elif v:
+                    h.write(i, 6 + j, v)
+
+    hoja("PROGRAMACION GENERAL", general)
+    if sandra:
+        hoja("SEÑORA SANDRA", sandra)
+    libro.add_worksheet("CAJA MENOR").write_row(0, 0, ["FECHA", "CONCEPTO", "DOCUMENTO", "VALOR"])
+    libro.close()
+    return buf.getvalue()
+
+
+def test_lector_de_programacion_traslados_y_codigos():
+    from app.apps.speed.services import programacion as pg
+
+    turnos = ["X", "D", "D", "N", "N"] * 3
+    archivo = programacion_xlsx(
+        [["TORRE 98", "UNO GUARDA", 1006306373, turnos],
+         # Traslado: los días 1 a 4 están en otra fila (combinada con el texto), del 5 en adelante aquí
+         ["HEROES 80", "DOS TRASLADO", 52112768, [("TRASLADO DE DISPONIBLE", 4), None, None, None,
+                                                  "D", "TAD", "N", "N", "X", "VAC", "VAC", "INC", "INC", "INC", "X"]],
+         ["DISPONIBLE", "DOS TRASLADO", 52112768, ["X", "AUS", "X", "PR", ("TRASLADO A HEROES 80", 11)]],
+         ["SIN DOC", "TRES SIN DOCUMENTO", None, ["D", "D", "TAN"]]],
+        sandra=[["IRAKA", "UNO GUARDA", 1006306373, ["X", "D", "RUN"]]])
+    personas, _, info = pg.leer(archivo)
+    assert info["hojas"] == ["PROGRAMACION GENERAL", "SEÑORA SANDRA"] and "nombre:tres sin documento" in personas
+    dos = personas["52112768"]
+    assert [dos.dias.get(d) for d in range(1, 16)] == ["X", "AUS", "X", "PR", "D", "TAD", "N", "N", "X", "VAC", "VAC", "INC", "INC", "INC", "X"]
+    n = pg.novedad(dos, 2026, 11, 1, None)
+    assert (n["ausencias"], n["permisos_remunerados"], n["vacaciones"], n["incapacidad"], n["turnos_tad"]) == (1, 1, 2, 3, 1)
+    assert n["dias_programados"] == 15 and n["programacion"]["tramos_incapacidad"] == [3]
+    # Dos filas con códigos distintos el mismo día: gana el que afecta el pago (RUN) y queda el aviso
+    uno = pg.novedad(personas["1006306373"], 2026, 11, 1, None)
+    assert uno["desprogramados"] == 1 and uno["programacion"]["conflictos"] == ["día 3: D y RUN (se tomó RUN)"]
+    # Días vacíos: sin programación (no pagan variables); los días antes del ingreso no cuentan
+    tres = pg.novedad(personas["nombre:tres sin documento"], 2026, 11, 1, date(2026, 11, 2))
+    assert tres["turnos_tan"] == 1 and tres["sin_programacion"] == 12 and tres["dias_programados"] == 2
+    # Noviembre de 2026 empieza en domingo: el archivo corresponde; con octubre avisa
+    assert pg.revisar_mes(info["semana"], 2026, 11) is None and pg.revisar_mes(info["semana"], 2026, 10)
+
+
+def test_importar_programacion_en_la_quincena(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS ADMIN", regla="NO APLICA"),
+                            fila(3, 80128728, "TRES SIN DOCUMENTO"), fila(4, 79000001, "CUATRO FALTA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    assert speed.put(f"{API}/parametros", json={"valor_tan": 90000}).status_code == 200
+    p1 = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    p2 = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 2}).json()["data"]
+    emp = {e["cedula"]: e["id"] for e in speed.get(f"{API}/empleados").json()["data"]}
+    # A mano antes de la programación: se reemplaza al importar (la observación se conserva)
+    speed.put(f"{API}/periodos/{p1['id']}/novedades/{emp['1006306373']}", json={"ausencias": 5, "observacion": "a mano"})
+
+    q1 = ["X", "D", "D", "N", "N", "X", "X", "D", "D", "N", "N", "X", "INC", "INC", "INC"]
+    archivo = programacion_xlsx([["TORRE 98", "UNO GUARDA", 1006306373, q1],
+                                 ["TORRE 98", "DOCUMENTO SIN TRES", None, ["D", "TAN"] + ["X"] * 13],
+                                 ["OTRO", "NO ESTA EN EL LISTADO", 123456, ["D"] * 15]])
+    r = speed.post(f"{API}/periodos/{p1['id']}/programacion/importar", files={"archivo": ("programacion.xlsx", archivo, XLSX)})
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["cargadas"] == 2 and d["no_encontrados"][0]["cedula"] == "123456"
+    assert d["por_nombre"][0]["cedula"] == "80128728"  # cruzada por el nombre (sin documento en la programación)
+    assert [x["cedula"] for x in d["sin_programacion"]] == ["79000001"]  # aplica a la regla y no viene
+    nov = {n["cedula"]: n for n in speed.get(f"{API}/periodos/{p1['id']}/novedades").json()["data"]}
+    assert nov["1006306373"]["ausencias"] == 0 and nov["1006306373"]["incapacidad"] == 3 and nov["1006306373"]["origen"] == "programacion"
+    assert nov["1006306373"]["observacion"] == "a mano" and nov["1006306373"]["programacion"]["dias"]["13"] == "INC"
+    liq = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p1['id']}/liquidar").json()["data"]["liquidaciones"]}
+    assert liq["1006306373"]["dias"]["incapacidad_100"] == 2 and liq["80128728"]["conceptos"]["turnos_adicionales"] == 90000
+
+    # La incapacidad sigue en la 2.ª quincena: ya no paga otra vez 2 días al 100 %
+    q2 = ["INC", "INC", "X"] + ["D"] * 12
+    archivo = programacion_xlsx([["TORRE 98", "UNO GUARDA", 1006306373, [None] * 15 + q2]])
+    r = speed.post(f"{API}/periodos/{p2['id']}/programacion/importar", files={"archivo": ("p2.xlsx", archivo, XLSX)})
+    assert r.status_code == 200, r.text
+    nov2 = {n["cedula"]: n for n in speed.get(f"{API}/periodos/{p2['id']}/novedades").json()["data"]}
+    assert nov2["1006306373"]["incapacidad"] == 2 and nov2["1006306373"]["incapacidad_previos"] == 3
+    liq2 = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p2['id']}/liquidar").json()["data"]["liquidaciones"]}
+    assert liq2["1006306373"]["dias"]["incapacidad_100"] == 0
+
+    # Volver a subir la programación de la 1.ª sin una persona le quita la novedad que venía de la programación
+    archivo = programacion_xlsx([["TORRE 98", "UNO GUARDA", 1006306373, q1]])
+    d = speed.post(f"{API}/periodos/{p1['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).json()["data"]
+    assert d["quitadas"] == 1
+    # Un Excel sin programación
+    malo = listado_xlsx([fila(1, 1, "X")])
+    r = speed.post(f"{API}/periodos/{p1['id']}/programacion/importar", files={"archivo": ("x.xlsx", malo, XLSX)})
+    assert r.status_code == 422 and "DOCUMENTO" in r.json()["error"]["message"]

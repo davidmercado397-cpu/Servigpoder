@@ -3,13 +3,17 @@
 Reglas acordadas con el usuario (2026-11-17):
 - Nómina quincenal y comercial: cada quincena tiene 15 días (1–15 y 16–30; el 31 no cuenta, febrero completa 30).
 - Salario: la mitad por quincena = salario ÷ 30 × días trabajados. Los tiempos no laborados (ausencias, licencias no
-  remuneradas, suspensiones) descuentan salario y auxilio de transporte.
+  remuneradas, suspensiones, renuncia y desprogramado) descuentan salario, auxilio de transporte y variables.
+- Vacaciones y licencias remuneradas (PR, calamidad, luto, día de la familia, ley María) pagan salario, pero no auxilio de
+  transporte ni variables (2026-11-18). Las vacaciones se muestran aparte.
 - Incapacidad: los 2 primeros días al 100 % y desde el 3.º al 66,67 %, sin bajar del salario mínimo diario.
 - Variables (horas extras, comisiones, Ley 2466, bonificaciones, rodamiento) = valor mensual ÷ 30 × días:
-  · quien aplica a la regla de programación: días con programación de la quincena menos los no laborados;
+  · quien aplica a la regla de programación: días con programación de la quincena menos los no laborados, la incapacidad,
+    las vacaciones y las licencias remuneradas;
   · quien no aplica: días trabajados.
-- Auxilio de transporte ÷ 30 × días trabajados, para quien gana hasta 2 SMLMV en lo salarial (salario + horas extras).
-- Salud 4 % y pensión 4 % sobre salario, incapacidad, horas extras y pagos adicionales salariales.
+- Turnos adicionales (TAD / TAN): cantidad × valor por turno de Parámetros; no son salariales (no entran a salud y pensión).
+- Auxilio de transporte ÷ 30 × días efectivamente laborados, para quien gana hasta 2 SMLMV en lo salarial (salario + horas extras).
+- Salud 4 % y pensión 4 % sobre salario, vacaciones, incapacidad, horas extras y pagos adicionales salariales.
 - Deducciones en orden: embargos → préstamos → cuotas por mayores valores pagados; nunca dejan el neto en negativo.
 """
 
@@ -27,6 +31,8 @@ PARAMETROS: dict[str, tuple[float, str, str]] = {
     "pct_pension": (4, "Pensión del empleado (%)", "Sobre la misma base de salud"),
     "dias_incapacidad_100": (2, "Días de incapacidad al 100 %", "Los primeros días de cada incapacidad"),
     "pct_incapacidad": (66.67, "Incapacidad desde el día siguiente (%)", "Sin bajar del salario mínimo diario"),
+    "valor_tad": (0, "Valor del turno adicional diurno (TAD)", "Se paga por cada TAD de la programación; no entra a salud y pensión"),
+    "valor_tan": (0, "Valor del turno adicional nocturno (TAN)", "Se paga por cada TAN de la programación; no entra a salud y pensión"),
 }
 
 
@@ -92,36 +98,53 @@ class Resultado:
 
 
 ORDEN_DEDUCCIONES = ("embargo", "prestamo", "cuota")
+DEVENGADOS = ("salario", "vacaciones", "incapacidad", "auxilio_transporte", "horas_extras", "comisiones", "ley_2466", "bonificaciones",
+              "rodamiento", "turnos_adicionales", "pago_adicional")
 
 
 def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena: int, descuentos: list[Descuento]) -> Resultado:
     """emp: salario, horas_extras, comisiones, ley_2466, bonificaciones, rodamiento, aplica_programacion, fecha_ingreso, auxilio_listado.
-    nov: dias_programados (None = toda la quincena), ausencias, licencias, suspensiones, incapacidad, incapacidad_previos."""
+    nov: dias_programados (None = toda la quincena), ausencias, licencias, suspensiones, desprogramados, permisos_remunerados,
+    vacaciones, incapacidad, incapacidad_previos, incapacidad_tramos (días seguidos de cada incapacidad), sin_programacion,
+    turnos_tad, turnos_tan."""
     nov = nov or {}
     alertas: list[str] = []
     salario = _n(emp.get("salario"))
     diario = salario / 30
     contrato = dias_contrato(emp.get("fecha_ingreso"), anio, mes, quincena)
 
-    tnl = _n(nov.get("ausencias")) + _n(nov.get("licencias")) + _n(nov.get("suspensiones"))
+    tnl = sum(_n(nov.get(c)) for c in ("ausencias", "licencias", "suspensiones", "desprogramados"))
     inc = _n(nov.get("incapacidad"))
     if tnl + inc > contrato:
         alertas.append(f"Los días no laborados e incapacidad ({tnl + inc:g}) superan los días de la quincena ({contrato}): se toman {contrato}")
         inc = min(inc, contrato)
         tnl = contrato - inc
-    trabajados = max(0.0, contrato - tnl - inc)
+    trabajados = max(0.0, contrato - tnl - inc)  # días con salario (incluye vacaciones y licencias remuneradas)
+    vacaciones = min(_n(nov.get("vacaciones")), trabajados)
+    remunerados = min(_n(nov.get("permisos_remunerados")), trabajados - vacaciones)
+    laborados = trabajados - vacaciones - remunerados  # para el auxilio de transporte
 
     if emp.get("aplica_programacion"):
         prog = nov.get("dias_programados")
         programados = contrato if prog in (None, "") else min(_n(prog), contrato)
-        dias_variables = max(0.0, programados - tnl - inc)
+        dias_variables = max(0.0, programados - tnl - inc - vacaciones - remunerados)
+        sin_prog = _n(nov.get("sin_programacion"))
+        if sin_prog:
+            alertas.append(f"{sin_prog:g} días sin programación en la quincena: esos días no pagan variables")
     else:
         programados = None
         dias_variables = trabajados
 
-    # Incapacidad: los primeros días al 100 %; los siguientes al %, sin bajar del mínimo diario
+    # Incapacidad: los primeros días de cada incapacidad al 100 %; los siguientes al %, sin bajar del mínimo diario
     previos = _n(nov.get("incapacidad_previos"))
-    al_100 = max(0.0, min(inc, _n(p["dias_incapacidad_100"]) - previos))
+    dias_100 = _n(p["dias_incapacidad_100"])
+    tramos = [_n(t) for t in (nov.get("incapacidad_tramos") or [])]
+    if tramos and abs(sum(tramos) - inc) < 0.001:
+        al_100 = 0.0
+        for i, t in enumerate(tramos):
+            al_100 += max(0.0, min(t, dias_100 - (previos if i == 0 else 0)))
+    else:
+        al_100 = max(0.0, min(inc, dias_100 - previos))
     al_pct = inc - al_100
     minimo_diario = _n(p["salario_minimo"]) / 30
     diario_pct = max(diario * _n(p["pct_incapacidad"]) / 100, minimo_diario) if al_pct else 0.0
@@ -130,7 +153,7 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
     # Auxilio de transporte: hasta N SMLMV en lo salarial (salario + horas extras del mes)
     salarial_mes = salario + _n(emp.get("horas_extras"))
     aplica_auxilio = salarial_mes <= _n(p["smlmv_auxilio"]) * _n(p["salario_minimo"]) + 0.5
-    auxilio = prorrata(_n(p["auxilio_transporte"]), trabajados) if aplica_auxilio else 0.0
+    auxilio = prorrata(_n(p["auxilio_transporte"]), laborados) if aplica_auxilio else 0.0
     listado = emp.get("auxilio_listado")
     if listado is not None and (_n(listado) > 0) != aplica_auxilio:
         alertas.append("El auxilio de transporte del Listado no coincide con la regla de 2 SMLMV "
@@ -138,7 +161,8 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
 
     var = lambda clave: prorrata(_n(emp.get(clave)), dias_variables)  # noqa: E731
     conceptos = {
-        "salario": redondear(prorrata(salario, trabajados)),
+        "salario": redondear(prorrata(salario, trabajados - vacaciones)),
+        "vacaciones": redondear(prorrata(salario, vacaciones)),
         "incapacidad": redondear(incapacidad),
         "auxilio_transporte": redondear(auxilio),
         "horas_extras": redondear(var("horas_extras")),
@@ -147,6 +171,10 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
         "bonificaciones": redondear(var("bonificaciones")),
         "rodamiento": redondear(var("rodamiento")),
     }
+    tad, tan = _n(nov.get("turnos_tad")), _n(nov.get("turnos_tan"))
+    conceptos["turnos_adicionales"] = redondear(tad * _n(p.get("valor_tad")) + tan * _n(p.get("valor_tan")))
+    if (tad or tan) and not conceptos["turnos_adicionales"]:
+        alertas.append(f"Tiene {tad:g} TAD y {tan:g} TAN, pero el valor del turno adicional está en 0 (Parámetros)")
 
     # Pagos adicionales (menores valores pagados) suman; los salariales entran a salud y pensión
     detalle_desc: list[dict] = []
@@ -164,11 +192,10 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
         detalle_desc.append({"id": d.id, "tipo": d.tipo, "descripcion": d.descripcion, "valor": valor})
     conceptos["pago_adicional"] = redondear(adicional)
 
-    ibc = conceptos["salario"] + conceptos["incapacidad"] + conceptos["horas_extras"] + adicional_salarial
+    ibc = conceptos["salario"] + conceptos["vacaciones"] + conceptos["incapacidad"] + conceptos["horas_extras"] + adicional_salarial
     conceptos["salud"] = redondear(ibc * _n(p["pct_salud"]) / 100)
     conceptos["pension"] = redondear(ibc * _n(p["pct_pension"]) / 100)
-    devengado = sum(conceptos[k] for k in ("salario", "incapacidad", "auxilio_transporte", "horas_extras", "comisiones", "ley_2466",
-                                         "bonificaciones", "rodamiento", "pago_adicional"))
+    devengado = sum(conceptos[k] for k in DEVENGADOS)
     deducciones = conceptos["salud"] + conceptos["pension"]
 
     # Embargos → préstamos → cuotas: sin dejar el neto en negativo
@@ -193,6 +220,7 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
     if contrato == 0:
         alertas.append("Ingresó después de esta quincena: no tiene días")
     dias = {"contrato": contrato, "trabajados": trabajados, "no_laborados": tnl, "incapacidad": inc, "incapacidad_100": al_100,
-            "incapacidad_pct": al_pct, "programados": programados, "variables": dias_variables}
+            "incapacidad_pct": al_pct, "programados": programados, "variables": dias_variables, "vacaciones": vacaciones,
+            "remunerados": remunerados, "laborados": laborados, "turnos_tad": tad, "turnos_tan": tan}
     return Resultado(dias=dias, conceptos=conceptos, descuentos=detalle_desc, ibc=redondear(ibc), devengado=redondear(devengado),
                      deducciones=redondear(deducciones), neto=redondear(devengado - deducciones), alertas=alertas, aplicados=aplicados)

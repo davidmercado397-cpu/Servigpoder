@@ -13,7 +13,7 @@ from app.apps.speed.models import (
     ABIERTO, ADICIONAL, CERRADO, TIPOS_DESCUENTO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad,
     SpdParametro, SpdPeriodo,
 )
-from app.apps.speed.services import listado, servicio
+from app.apps.speed.services import listado, programacion, servicio
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
@@ -215,7 +215,8 @@ def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = De
 
 # --- Novedades de la quincena ------------------------------------------------------------------------------------
 
-CAMPOS_NOVEDAD = ("dias_programados", "ausencias", "licencias", "suspensiones", "incapacidad", "incapacidad_previos")
+CAMPOS_NOVEDAD = ("dias_programados", "ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones",
+                  "incapacidad", "incapacidad_previos", "turnos_tad", "turnos_tan")
 
 
 def _novedades(db: DbSession, p: SpdPeriodo) -> list[dict]:
@@ -225,6 +226,8 @@ def _novedades(db: DbSession, p: SpdPeriodo) -> list[dict]:
     return [{"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "aplica_programacion": e.aplica_programacion,
                 "fecha_ingreso": e.fecha_ingreso.isoformat() if e.fecha_ingreso else None,
                 **{c: (_f(getattr(nov[e.id], c)) if e.id in nov else (None if c == "dias_programados" else 0)) for c in CAMPOS_NOVEDAD},
+                "sin_programacion": _f(nov[e.id].sin_programacion) if e.id in nov else 0,
+                "programacion": nov[e.id].programacion if e.id in nov else None,
                 "observacion": nov[e.id].observacion if e.id in nov else "", "origen": nov[e.id].origen if e.id in nov else None}
                for e in emp]
 
@@ -239,8 +242,13 @@ class NovedadIn(BaseModel):
     ausencias: float = Field(default=0, ge=0, le=15)
     licencias: float = Field(default=0, ge=0, le=15)
     suspensiones: float = Field(default=0, ge=0, le=15)
+    desprogramados: float = Field(default=0, ge=0, le=15)
+    permisos_remunerados: float = Field(default=0, ge=0, le=15)
+    vacaciones: float = Field(default=0, ge=0, le=15)
     incapacidad: float = Field(default=0, ge=0, le=15)
     incapacidad_previos: float = Field(default=0, ge=0, le=1000)
+    turnos_tad: int = Field(default=0, ge=0, le=31)
+    turnos_tan: int = Field(default=0, ge=0, le=31)
     observacion: str = Field(default="", max_length=300)
 
 
@@ -248,14 +256,16 @@ def _guardar_novedad(db: DbSession, p: SpdPeriodo, empleado_id: int, data: dict,
     n = db.scalar(select(SpdNovedad).where(SpdNovedad.periodo_id == p.id, SpdNovedad.empleado_id == empleado_id))
     vacia = data.get("dias_programados") is None and not any(data.get(c) for c in CAMPOS_NOVEDAD[1:]) and not data.get("observacion")
     if vacia:
-        if n is not None:
+        # En pantalla, dejarla en blanco la borra; en la plantilla, una fila sin datos no cambia nada
+        if n is not None and origen == "manual":
             db.delete(n)
         return
     if n is None:
-        n = SpdNovedad(periodo_id=p.id, empleado_id=empleado_id)
+        n = SpdNovedad(periodo_id=p.id, empleado_id=empleado_id, observacion="")
         db.add(n)
     for c in (*CAMPOS_NOVEDAD, "observacion"):
-        setattr(n, c, data.get(c) if c in data else getattr(n, c))
+        if c in data:
+            setattr(n, c, data[c])
     n.origen = origen
 
 
@@ -285,19 +295,22 @@ def plantilla(periodo_id: int, db: DbSession, _=Depends(require(VER))):
     for i, f in enumerate(filas, start=1):
         hoja.write_string(i, 0, f["cedula"])
         hoja.write_string(i, 1, f["nombre"])
-        for j, c in enumerate(("dias_programados", "ausencias", "licencias", "suspensiones", "incapacidad", "incapacidad_previos"), start=2):
+        for j, c in enumerate(CAMPOS_NOVEDAD, start=2):
             if f[c] not in (None, 0):
                 hoja.write_number(i, j, f[c])
-        hoja.write_string(i, 8, f["observacion"] or "")
+        hoja.write_string(i, 2 + len(CAMPOS_NOVEDAD), f["observacion"] or "")
     hoja.set_column(0, 0, 13)
     hoja.set_column(1, 1, 34)
-    hoja.set_column(2, 7, 14)
-    hoja.set_column(8, 8, 40)
+    hoja.set_column(2, 1 + len(CAMPOS_NOVEDAD), 14)
+    hoja.set_column(2 + len(CAMPOS_NOVEDAD), 2 + len(CAMPOS_NOVEDAD), 40)
     hoja.freeze_panes(1, 2)
     nota = libro.add_worksheet("Instrucciones")
     for i, t in enumerate([
         "Días programados: días de la quincena con programación (solo para quienes aplican a la regla). Vacío = toda la quincena.",
-        "Ausencias, licencias no remuneradas y suspensiones descuentan salario, auxilio de transporte y variables.",
+        "Ausencias, licencias no remuneradas, suspensiones, renuncia y desprogramado descuentan salario, auxilio de transporte y variables.",
+        "Licencias remuneradas (PR, calamidad, luto, día de la familia, ley María) y vacaciones pagan salario, pero no auxilio ni variables.",
+        "Turnos TAD y TAN: turnos adicionales; se pagan aparte con el valor por turno de Parámetros.",
+        "Lo normal es cargar estos días con el archivo de programación; esta plantilla sirve para corregir o para quien no está en él.",
         "Días de incapacidad: los 2 primeros de cada incapacidad al 100 % y desde el 3.º al 66,67 %.",
         "Días previos de la misma incapacidad: los que ya llevaba antes de esta quincena (si es una prórroga).",
         "Las filas sin datos no cambian nada; para borrar una novedad déjela en blanco desde la pantalla.",
@@ -332,6 +345,27 @@ async def importar_novedades(periodo_id: int, request: Request, db: DbSession, a
     auditar(db, request, "spd_novedades_importadas", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", filas=cargadas)
     db.commit()
     return ok({"cargadas": cargadas, "advertencias": advertencias})
+
+
+@router.post("/periodos/{periodo_id}/programacion/importar", response_model=ApiResponse[dict],
+             dependencies=[Depends(limitar("spd_importar", 10, 60))])
+async def importar_programacion(periodo_id: int, request: Request, db: DbSession, archivo: UploadFile = File(...),
+                                actual: Usuario = Depends(require(LIQUIDAR))):
+    """Archivo de programación de la quincena (hojas de programación general y de la señora Sandra). Se lee y se descarta."""
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    nombre = (archivo.filename or "")[:200]
+    contenido = await leer_xlsx(archivo)
+    try:
+        personas, advertencias, info = programacion.leer(contenido)
+    except programacion.ProgramacionInvalida as e:
+        raise ApiError(422, str(e), "ARCHIVO_INVALIDO") from e
+    del contenido
+    r = servicio.importar_programacion(db, p, personas, info)
+    auditar(db, request, "spd_programacion_importada", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", archivo=nombre,
+            personas=r["personas"], cargadas=r["cargadas"], no_encontrados=len(r["no_encontrados"]))
+    db.commit()
+    return ok({**r, "avisos": r["avisos"] + advertencias})
 
 
 # --- Descuentos y pagos adicionales ----------------------------------------------------------------------------

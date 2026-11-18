@@ -13,21 +13,52 @@ export type PeriodoSpeed = {
 };
 
 export type Conceptos = Record<
-  "salario" | "incapacidad" | "auxilio_transporte" | "horas_extras" | "comisiones" | "ley_2466" | "bonificaciones" | "rodamiento"
-  | "pago_adicional" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas", number>;
+  "salario" | "vacaciones" | "incapacidad" | "auxilio_transporte" | "horas_extras" | "comisiones" | "ley_2466" | "bonificaciones" | "rodamiento"
+  | "turnos_adicionales" | "pago_adicional" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas", number>;
 
 export type LiquidacionSpeed = {
   empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; devengado: number; deducciones: number; neto: number;
   ibc: number; aplica_programacion: boolean; salario_mensual: number; alertas: string[];
   dias: { contrato: number; trabajados: number; no_laborados: number; incapacidad: number; incapacidad_100: number; incapacidad_pct: number;
-    programados: number | null; variables: number };
+    programados: number | null; variables: number; vacaciones?: number; remunerados?: number; laborados?: number; turnos_tad?: number;
+    turnos_tan?: number };
   conceptos: Conceptos; descuentos: { id: number; tipo: string; descripcion: string; valor: number }[];
 };
 
 export type NovedadSpeed = {
   empleado_id: number; cedula: string; nombre: string; cargo: string; aplica_programacion: boolean; fecha_ingreso: string | null;
-  dias_programados: number | null; ausencias: number; licencias: number; suspensiones: number; incapacidad: number; incapacidad_previos: number;
-  observacion: string; origen: string | null;
+  dias_programados: number | null; ausencias: number; licencias: number; suspensiones: number; desprogramados: number;
+  permisos_remunerados: number; vacaciones: number; incapacidad: number; incapacidad_previos: number; turnos_tad: number; turnos_tan: number;
+  sin_programacion: number; programacion: ProgramacionDias | null; observacion: string; origen: string | null;
+};
+
+/** Lo que trajo el archivo de programación para una persona en la quincena. */
+export type ProgramacionDias = { dias: Record<string, string>; puestos: string[]; conflictos: string[]; tramos_incapacidad: number[] };
+
+export type ResultadoProgramacion = {
+  hojas: string[]; personas: number; cargadas: number; quitadas: number; avisos: string[];
+  no_encontrados: { cedula: string; nombre: string; puestos: string[] }[];
+  por_nombre: { nombre: string; cedula: string; en_archivo: string }[];
+  sin_programacion: { cedula: string; nombre: string; cargo: string }[];
+  conflictos: { cedula: string; nombre: string; detalle: string[] }[];
+  resumen: { vacaciones: number; incapacidad: number; no_laborados: number; remunerados: number; turnos_tad: number; turnos_tan: number;
+    sin_programacion: number };
+};
+
+/** Códigos de la programación: nombre y color de la casilla. */
+export const CODIGOS_PROGRAMACION: Record<string, [string, string]> = {
+  D: ["Turno diurno", "bg-sky-100 text-sky-800"], N: ["Turno nocturno", "bg-indigo-100 text-indigo-800"],
+  A: ["Turno 06:00 a 14:00", "bg-sky-100 text-sky-800"], B: ["Turno 14:00 a 22:00", "bg-sky-100 text-sky-800"],
+  C: ["Turno 22:00 a 06:00", "bg-indigo-100 text-indigo-800"], IND: ["Inducción diurno", "bg-sky-100 text-sky-800"],
+  INN: ["Inducción nocturno", "bg-indigo-100 text-indigo-800"], TMA: ["Turno mutuo acuerdo", "bg-sky-100 text-sky-800"],
+  DISP: ["Disponible", "bg-sky-100 text-sky-800"], X: ["Descanso", "bg-slate-100 text-slate-500"],
+  TAD: ["Turno adicional diurno", "bg-emerald-200 text-emerald-900"], TAN: ["Turno adicional nocturno", "bg-emerald-200 text-emerald-900"],
+  AUS: ["Ausencia", "bg-red-100 text-red-800"], PNR: ["Permiso no remunerado", "bg-red-100 text-red-800"],
+  SUS: ["Suspensión", "bg-red-100 text-red-800"], RUN: ["Renuncia", "bg-red-100 text-red-800"], DESPR: ["Desprogramado", "bg-red-100 text-red-800"],
+  PR: ["Permiso remunerado", "bg-amber-100 text-amber-800"], CD: ["Calamidad doméstica", "bg-amber-100 text-amber-800"],
+  LUT: ["Licencia de luto", "bg-amber-100 text-amber-800"], DDF: ["Día de la familia", "bg-amber-100 text-amber-800"],
+  LYM: ["Ley María", "bg-amber-100 text-amber-800"], VAC: ["Vacaciones", "bg-violet-100 text-violet-800"],
+  INC: ["Incapacidad", "bg-orange-100 text-orange-800"],
 };
 
 export type DescuentoSpeed = {

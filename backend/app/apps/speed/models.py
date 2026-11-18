@@ -92,7 +92,16 @@ class SpdNovedad(BaseEmpresa):
     ausencias: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     licencias: Mapped[float] = mapped_column(Numeric(5, 2), default=0)  # no remuneradas
     suspensiones: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
+    desprogramados: Mapped[float] = mapped_column(Numeric(5, 2), default=0)  # renuncia (RUN) y desprogramado (DESPR)
+    # Pagan salario pero no auxilio ni variables
+    permisos_remunerados: Mapped[float] = mapped_column(Numeric(5, 2), default=0)  # PR, CD, LUT, DDF, LYM
+    vacaciones: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     incapacidad: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
+    turnos_tad: Mapped[int] = mapped_column(Integer, default=0)  # turnos adicionales (se pagan aparte)
+    turnos_tan: Mapped[int] = mapped_column(Integer, default=0)
+    sin_programacion: Mapped[float] = mapped_column(Numeric(5, 2), default=0)  # días sin código en la programación
+    # Códigos por día, puestos, tramos de incapacidad y avisos del archivo de programación (el archivo no se guarda)
+    programacion: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Días que ya llevaba la misma incapacidad antes de esta quincena (para saber desde cuándo va al 66,67 %)
     incapacidad_previos: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     observacion: Mapped[str] = mapped_column(String(300), default="")

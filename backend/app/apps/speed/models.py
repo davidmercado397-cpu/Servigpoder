@@ -58,6 +58,18 @@ class SpdParametro(BaseEmpresa):
     orden: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class SpdConceptoWO(BaseEmpresa):
+    """Concepto de World Office con el que va cada código de la programación en el archivo plano de novedades."""
+
+    __tablename__ = "spd_concepto_wo"
+
+    codigo: Mapped[str] = mapped_column(String(20), primary_key=True)
+    concepto: Mapped[str] = mapped_column(String(120))
+    incluir: Mapped[bool] = mapped_column(Boolean, default=True)
+    descripcion: Mapped[str] = mapped_column(String(200), default="")
+    orden: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class SpdPeriodo(BaseEmpresa):
     """Una quincena (comercial: 1–15 y 16–30)."""
 

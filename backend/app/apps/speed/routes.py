@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession, require
 from app.apps.speed.models import (
-    ABIERTO, ADICIONAL, CERRADO, TIPOS_DESCUENTO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad,
+    ABIERTO, ADICIONAL, CERRADO, TIPOS_DESCUENTO, SpdConceptoWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad,
     SpdParametro, SpdPeriodo,
 )
 from app.apps.speed.services import listado, programacion, servicio
@@ -48,6 +48,37 @@ def guardar_parametros(data: dict[str, float], request: Request, db: DbSession, 
             cambios[p.clave] = [float(p.valor), data[p.clave]]
             p.valor = data[p.clave]
     auditar(db, request, "spd_parametros", actual.id, cambios=cambios)
+    db.commit()
+    return ok({"cambios": len(cambios)})
+
+
+# --- Conceptos de World Office (archivo plano de novedades) ---------------------------------------------------
+
+@router.get("/conceptos-wo", response_model=ApiResponse[list[dict]])
+def ver_conceptos_wo(db: DbSession, _=Depends(require(VER))):
+    return ok([{"codigo": c.codigo, "concepto": c.concepto, "incluir": c.incluir, "descripcion": c.descripcion}
+               for c in db.scalars(select(SpdConceptoWO).order_by(SpdConceptoWO.orden))])
+
+
+class ConceptoWOIn(BaseModel):
+    codigo: str = Field(max_length=20)
+    concepto: str = Field(min_length=1, max_length=120)
+    incluir: bool
+
+
+@router.put("/conceptos-wo", response_model=ApiResponse[dict])
+def guardar_conceptos_wo(data: list[ConceptoWOIn], request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
+    actuales = {c.codigo: c for c in db.scalars(select(SpdConceptoWO))}
+    cambios = {}
+    for d in data:
+        c = actuales.get(d.codigo)
+        if c is None:
+            raise ApiError(422, f"Código desconocido: {d.codigo}")
+        nuevo = d.concepto.strip()
+        if c.concepto != nuevo or c.incluir != d.incluir:
+            cambios[d.codigo] = [[c.concepto, c.incluir], [nuevo, d.incluir]]
+            c.concepto, c.incluir = nuevo, d.incluir
+    auditar(db, request, "spd_conceptos_wo", actual.id, cambios=cambios)
     db.commit()
     return ok({"cambios": len(cambios)})
 
@@ -212,6 +243,27 @@ def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = De
     db.commit()
     return StreamingResponse(io.BytesIO(contenido), media_type=XLSX,
                              headers={"Content-Disposition": f'attachment; filename="nomina_speed_{p.anio}-{p.mes:02d}_q{p.quincena}.xlsx"'})
+
+
+@router.get("/periodos/{periodo_id}/world-office")
+def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+    """Archivo plano de novedades para World Office (turnos adicionales, ausencias, licencias e incapacidades por día)."""
+    p = _periodo(db, periodo_id)
+    contenido, filas, avisos = servicio.plano_world_office(db, p)
+    auditar(db, request, "spd_plano_world_office", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", filas=filas)
+    db.commit()
+    nombre = f"NOVEDADES WO {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
+    encabezados = {"Content-Disposition": f'attachment; filename="{nombre}"', "X-Filas": str(filas)}
+    if avisos:
+        encabezados["X-Avisos"] = str(len(avisos))
+    return StreamingResponse(io.BytesIO(contenido), media_type=XLSX, headers=encabezados)
+
+
+@router.get("/periodos/{periodo_id}/world-office/avisos", response_model=ApiResponse[dict])
+def avisos_world_office(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+    """Cuántas filas tendría el plano y qué no se pudo incluir (para mostrarlo antes de descargar)."""
+    _, filas, avisos = servicio.plano_world_office(db, _periodo(db, periodo_id))
+    return ok({"filas": filas, "avisos": avisos})
 
 
 # --- Novedades de la quincena ------------------------------------------------------------------------------------

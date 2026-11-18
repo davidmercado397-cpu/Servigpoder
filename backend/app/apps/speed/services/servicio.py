@@ -11,10 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.apps.speed.models import (
-    ABIERTO, ADICIONAL, TIPOS_DESCUENTO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad, SpdParametro,
+    ABIERTO, ADICIONAL, TIPOS_DESCUENTO, SpdConceptoWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad, SpdParametro,
     SpdPeriodo,
 )
-from app.apps.speed.services import calculo, programacion
+from app.apps.speed.services import calculo, programacion, world_office
 
 CAMPOS_EMPLEADO = ("nombre", "fecha_ingreso", "tipo_contrato", "grupo", "cargo", "area", "puesto", "cliente", "tipo_turno", "salario",
                    "auxilio_listado", "horas_extras", "comisiones", "ley_2466", "bonificaciones", "rodamiento", "nota", "aplica_programacion")
@@ -25,6 +25,38 @@ def sembrar(db: Session) -> None:
     for orden, (clave, (valor, nombre, ayuda)) in enumerate(calculo.PARAMETROS.items()):
         if clave not in existentes:
             db.add(SpdParametro(clave=clave, valor=valor, nombre=nombre, ayuda=ayuda, orden=orden))
+    conceptos = {c.codigo for c in db.scalars(select(SpdConceptoWO))}
+    for orden, (codigo, (concepto, incluir, descripcion)) in enumerate(world_office.CONCEPTOS.items()):
+        if codigo not in conceptos:
+            db.add(SpdConceptoWO(codigo=codigo, concepto=concepto, incluir=incluir, descripcion=descripcion, orden=orden))
+
+
+def conceptos_wo(db: Session) -> dict[str, tuple[str, bool]]:
+    c = {k: (v[0], v[1]) for k, v in world_office.CONCEPTOS.items()}
+    c.update({x.codigo: (x.concepto, x.incluir) for x in db.scalars(select(SpdConceptoWO))})
+    return c
+
+
+def plano_world_office(db: Session, periodo: SpdPeriodo) -> tuple[bytes, int, list[str]]:
+    """Archivo plano de novedades de la quincena para World Office (desde los códigos de la programación)."""
+    p = periodo.parametros if periodo.estado != ABIERTO and periodo.parametros else parametros(db)
+    conceptos = conceptos_wo(db)
+    filas: list[world_office.Fila] = []
+    avisos: list[str] = []
+    for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)):
+        e = n.empleado
+        dias = {int(k): v for k, v in ((n.programacion or {}).get("dias") or {}).items()}
+        if not dias:
+            if any(float(getattr(n, c) or 0) for c in DIAS_NOVEDAD if c not in ("incapacidad_previos", "sin_programacion")):
+                avisos.append(f"{e.nombre} ({e.cedula}): sus novedades se digitaron sin programación (no hay fechas); no van en el plano")
+            continue
+        filas += world_office.filas_persona(e.nombre, e.cedula, float(e.salario or 0), e.aplica_programacion, dias,
+                                            float(n.incapacidad_previos or 0), periodo.anio, periodo.mes, periodo.quincena, p, conceptos)
+    if any(f.concepto == conceptos["TAD"][0] for f in filas) and not float(p.get("valor_tad") or 0):
+        avisos.append("Hay turnos TAD pero su valor está en 0 (Parámetros)")
+    if any(f.concepto == conceptos["TAN"][0] for f in filas) and not float(p.get("valor_tan") or 0):
+        avisos.append("Hay turnos TAN pero su valor está en 0 (Parámetros)")
+    return world_office.excel(filas), len(filas), avisos
 
 
 def parametros(db: Session) -> dict[str, float]:

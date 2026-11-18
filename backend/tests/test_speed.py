@@ -361,3 +361,47 @@ def test_quien_no_esta_en_el_listado_se_crea_asigna_o_descarta(speed):
     liq = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]}
     assert liq["79557182"]["dias"]["contrato"] == 3 and liq["79557182"]["dias"]["variables"] == 3
     assert "111" not in liq
+
+
+def test_plano_de_novedades_para_world_office(speed):
+    from datetime import datetime
+
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS ADMIN", salario=3000000, regla="NO APLICA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    assert speed.put(f"{API}/parametros", json={"valor_tad": 75000, "valor_tan": 82000}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    uno = ["X", "TAD", "AUS", "N", "INC", "INC", "INC", "X", "LUT", "TAN", "D", "VAC", "PR", "D", "N"]
+    dos = ["D", "D", "INC", "INC", "INC", "D", "D", "D", "D", "D", "D", "D", "D", "D", "D"]
+    archivo = programacion_xlsx([["TORRE", "UNO GUARDA", 1006306373, uno], ["OFICINA", "DOS ADMIN", 52112768, dos]])
+    assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
+
+    r = speed.get(f"{API}/periodos/{p['id']}/world-office")
+    assert r.status_code == 200 and r.headers["x-filas"] == "11"
+    hoja = load_workbook(io.BytesIO(r.content))["Hoja1"]
+    assert [c.value for c in hoja[1]] == ["Empleado", "Tipo", "Fecha", "Cantidad", "Valor", "Unidad de medida", "Centro de Costos", "Nota",
+                                          "Proceso", "Pasa a Nómina", "Aprobado", "Procesado"]
+    filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2)]
+    uno_f = [f for f in filas if f[0] == "UNO GUARDA - 1006306373"]
+    tipos = {(f[2].day, f[1]): f[4] for f in uno_f}
+    diario = 1750905 / 30
+    assert tipos == {(2, "Auxilio de Compensacion por descanso Diurno"): 75000, (3, "Ausencias"): round(diario, 2),
+                     (5, "incapacidades Empresa 100%"): round(diario, 2), (6, "incapacidades Empresa 100%"): round(diario, 2),
+                     (7, "Incapacidades EPS 100%"): round(diario, 2),  # el 66,67 % del mínimo sube al mínimo
+                     (9, "LICENCIA POR LUTO"): round(diario, 2), (10, "Auxilio de compensacion por descanso Nocturno"): 82000,
+                     (13, "Licencia Remunerada"): round(diario, 2)}  # VAC no va (se liquida en World Office)
+    f = next(x for x in uno_f if x[2].day == 3)
+    assert f[2] == datetime(2026, 11, 3) and f[3] == 1 and f[5] == "Día" and f[6] == "Produccion"
+    assert f[7] == "NOVEDADES 1RA QUINCENA DE NOVIEMBRE 2026-03 NOV: Ausencia" and f[8] in ("", None) and f[9:] == [-1, -1, -1]
+    # Administrativo, salario alto: desde el 3.er día de incapacidad, al 66,67 %
+    dos_f = {x[2].day: x for x in filas if x[0] == "DOS ADMIN - 52112768"}
+    assert dos_f[3][6] == "Administrativo" and dos_f[5][1] == "Incapacidades EPS 66.67%" and dos_f[5][4] == round(100000 * 0.6667, 2)
+
+    # El concepto se cambia en Parámetros y se puede incluir VAC
+    conceptos = speed.get(f"{API}/conceptos-wo").json()["data"]
+    cambio = [{**c, "incluir": True} if c["codigo"] == "VAC" else c for c in conceptos]
+    cambio = [{**c, "concepto": "Ausencia injustificada"} if c["codigo"] == "AUS" else c for c in cambio]
+    assert speed.put(f"{API}/conceptos-wo", json=cambio).status_code == 200
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
+    tipos = {(f[2].value.day, f[1].value) for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("UNO")}
+    assert (12, "Vacaciones") in tipos and (3, "Ausencia injustificada") in tipos
+    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 12

@@ -77,6 +77,15 @@ export default function QuincenaSpeed() {
           {liquidar && abierto && <button className="btn-primario" disabled={ocupado} onClick={() => accion(() => api(`/speed/periodos/${id}/liquidar`, { method: "POST" }), "Quincena liquidada.")}>
             <Calculator className="h-4 w-4" /> {ocupado ? "Liquidando…" : p.calculado_en ? "Volver a liquidar" : "Liquidar"}</button>}
           {p.calculado_en && <a className="btn-secundario" href={`/api/speed/periodos/${id}/excel`}><Download className="h-4 w-4" /> Excel</a>}
+          <button className="btn-secundario" title="Archivo plano de novedades por día para World Office" onClick={async () => {
+            setMsg(null);
+            try {
+              const r = await api<{ filas: number; avisos: string[] }>(`/speed/periodos/${id}/world-office/avisos`);
+              if (!r.filas) { setMsg({ tipo: "error", texto: "No hay novedades con fecha para el plano: suba primero la programación de la quincena." }); return; }
+              window.location.href = `/api/speed/periodos/${id}/world-office`;
+              setMsg({ tipo: r.avisos.length ? "info" : "ok", texto: `Plano de World Office con ${r.filas} filas.${r.avisos.length ? " " + r.avisos.join(" · ") : ""}` });
+            } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
+          }}><Download className="h-4 w-4" /> Plano World Office</button>
           {liquidar && abierto && p.calculado_en && <button className="btn-secundario" onClick={() => confirm("¿Cerrar la quincena? Ya no se podrá cambiar ni volver a liquidar hasta reabrirla.")
             && accion(() => api(`/speed/periodos/${id}/estado`, { method: "POST", json: { estado: "cerrado" } }), "Quincena cerrada.")}><Lock className="h-4 w-4" /> Cerrar</button>}
           {liquidar && !abierto && <button className="btn-secundario" onClick={() => accion(() => api(`/speed/periodos/${id}/estado`, { method: "POST", json: { estado: "abierto" } }), "Quincena reabierta.")}>

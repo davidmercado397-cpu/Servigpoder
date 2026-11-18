@@ -421,3 +421,31 @@ def test_plano_de_ajustes_siesa(admin):
     todas = filas["Positivos"][1:] + filas["Negativos"][1:]
     assert all(v > 0 for _, _, v in filas["Positivos"][1:]) and all(v < 0 for _, _, v in filas["Negativos"][1:])
     assert not {k for _, k, _ in todas} & {"100", "103"}
+
+
+def test_sin_nomina_con_vacaciones_va_a_vacaciones():
+    """Programado sin nómina con vacaciones: si todo lo trabajado es antes de las vacaciones va a la pestaña Vacaciones
+    (lo paga la liquidación); si trabajó después de regresar, la nómina le debía esos días: alerta."""
+    from datetime import date, timedelta
+
+    from app.apps.nomina.services import motor
+
+    fechas = [date(2026, 11, 1) + timedelta(days=i) for i in range(15)]
+
+    def fila(dias: dict[int, str]) -> list[dict]:
+        return [{"puesto": "10", "ubicacion": "10", "dias": {date(2026, 11, d).isoformat(): c for d, c in dias.items()}}]
+
+    def alerta(dias: dict[int, str]):
+        return motor._programado_sin_nomina("quincenal", "98", "PERSONA", fila(dias), fechas, {}, fechas[0], fechas[-1])
+
+    # Trabajó del 1 al 6 y salió a vacaciones el 7: correcto que no esté en la nómina
+    a = alerta({**{d: "06:00 - 18:00" for d in range(1, 7)}, **{d: "[VAC]" for d in range(7, 16)}})
+    assert a.tipo == "VACACIONES_VERIFICAR" and a.informativa
+    assert "vacaciones del 07 al 15 (9 días)" in a.mensaje and "6 días trabajados antes (del 01 al 06)" in a.mensaje
+    assert "Programación: 01–06 06:00 - 18:00 · 07–15 [VAC]" in a.mensaje
+    # Regresó el 11 y trabajó hasta el 15: esos 5 días los debía pagar la nómina
+    a = alerta({**{d: "[VAC]" for d in range(1, 11)}, **{d: "Z" if d == 13 else "18:00 - 06:00" for d in range(11, 16)}})
+    assert a.tipo == "PROGRAMADO_SIN_NOMINA" and a.esperado == 5 and "después del regreso (del 11 al 15)" in a.mensaje
+    # Sin vacaciones: la alerta de siempre, ahora con la programación resumida
+    a = alerta({d: "06:00 - 18:00" for d in range(1, 16)})
+    assert a.tipo == "PROGRAMADO_SIN_NOMINA" and "Tiene 15 días con programación del 01 al 15" in a.mensaje

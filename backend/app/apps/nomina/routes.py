@@ -257,7 +257,7 @@ def personas(periodo_id: int, db: DbSession, p: Paginacion, q: str = Query("", m
 def persona(periodo_id: int, nomina: str, cedula: str, db: DbSession, _=Depends(require(VER))):
     x = db.scalar(select(NomPersona).where(NomPersona.periodo_id == periodo_id, NomPersona.nomina == nomina, NomPersona.cedula == cedula))
     if x is None:
-        raise ApiError(404, "La persona no está en esa nómina del periodo")
+        raise ApiError(404, "La persona no aparece en la nómina de este periodo: su programación está en el detalle de la alerta")
     filas = db.execute(_consulta_alertas(periodo_id, "", nomina, "", "", "").where(NomAlerta.cedula == cedula)).all()
     return ok({**x.detalle, "alertas_lista": [_alerta_out(a, d) for a, d in filas]})
 

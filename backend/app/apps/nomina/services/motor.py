@@ -217,13 +217,61 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
                                           f"Tiene {len(codigos_periodo)} días programados y no tiene contrato activo.",
                                           datos={"puestos": sorted({f['puesto'] for f in filas})}))
             elif contrato["tipo_nomina"] == nomina.upper():
-                alertas.append(Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_NOMINA",
-                                      f"Tiene {len(codigos_periodo)} días con programación del {desde:%d} al {hasta:%d} y no aparece en la nómina {nomina}.",
-                                      datos={"puestos": sorted({f['puesto'] for f in filas})}))
+                alertas.append(_programado_sin_nomina(nomina, ced, nombre, filas, fechas, codigos, desde, hasta))
 
     lista_sin_mod = _puestos_sin_modalidad(puestos, prog["filas"], puestos_aprobados, sin_modalidad, mods)
     resumen = _resumen(personas, alertas, lista_sin_mod, datos)
     return Resultado(personas, alertas, lista_sin_mod, resumen)
+
+
+def _tramos(por_dia: list[tuple[date, list[tuple[str, Codigo]]]]) -> str:
+    """La programación del periodo resumida por tramos: «01–06 A · 07–15 [VAC]»."""
+    tramos: list[list] = []
+    for d, cand in por_dia:
+        cod = " / ".join(dict.fromkeys(c[0].strip() for c in cand)) or "sin programación"
+        if tramos and tramos[-1][2] == cod and (d - tramos[-1][1]).days == 1:
+            tramos[-1][1] = d
+        else:
+            tramos.append([d, d, cod])
+    return " · ".join(f"{a:%d}" + (f"–{b:%d}" if b != a else "") + f" {c}" for a, b, c in tramos)
+
+
+def _programado_sin_nomina(nomina: str, ced: str, nombre: str, filas: list[dict], fechas: list[date], codigos: dict[str, Codigo],
+                           desde: date, hasta: date) -> Alerta:
+    """Programado en el periodo y sin nómina. Con vacaciones en el periodo: lo trabajado antes se paga en la liquidación de
+    vacaciones, así que no estar en la nómina es correcto (va a la pestaña Vacaciones para verificar); solo es alerta si
+    trabajó después de regresar, porque esos días los paga la nómina."""
+    por_dia: list[tuple[date, list[tuple[str, Codigo]]]] = []
+    for d in fechas:
+        cand = []
+        for f in filas:
+            crudo = f["dias"].get(d.isoformat())
+            if crudo:
+                cand.append((crudo, codigos.get(codigo_programacion(crudo).upper()) or codigo_por_defecto(crudo)))
+        por_dia.append((d, cand))
+    programados = sum(1 for _, c in por_dia if c)
+    programacion = _tramos(por_dia)
+    datos = {"puestos": sorted({f["puesto"] for f in filas})}
+    vac = [d for d, c in por_dia if c and all(x[1].descuenta for x in c) and any(x[1].vacaciones for x in c)]
+    if not vac:
+        return Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_NOMINA",
+                      f"Tiene {programados} días con programación del {desde:%d} al {hasta:%d} y no aparece en la nómina {nomina}. "
+                      f"Programación: {programacion}.", datos=datos)
+    trabaja = lambda c: any(not x[1].descuenta for x in c)  # noqa: E731 - turno, descanso (Z, L) o inducción
+    antes = [d for d, c in por_dia if d < vac[0] and trabaja(c)]
+    despues = [d for d, c in por_dia if d > vac[0] and trabaja(c)]
+    rango_vac = f"vacaciones del {vac[0]:%d} al {vac[-1]:%d} ({len(vac)} días)"
+    if despues:
+        return Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_NOMINA",
+                      f"Tiene {rango_vac} y {len(despues)} días programados después del regreso (del {despues[0]:%d} al {despues[-1]:%d}) "
+                      f"que debe pagar la nómina {nomina}, pero no aparece en ella. Programación: {programacion}.",
+                      esperado=len(despues), datos=datos)
+    txt_antes = (f"{len(antes)} días trabajados antes (del {antes[0]:%d} al {antes[-1]:%d}) que se pagan en la liquidación de vacaciones"
+                 if antes else "sin días trabajados antes")
+    return Alerta(nomina, ced, nombre, "VACACIONES_VERIFICAR",
+                  f"No aparece en la nómina {nomina}: {rango_vac}; {txt_antes}; ningún día después del regreso. "
+                  f"Verificar que la liquidación de vacaciones lo incluya. Programación: {programacion}.",
+                  esperado=0, pagado=0, datos=datos)
 
 
 def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas, codigos, puestos, puestos_aprobados,

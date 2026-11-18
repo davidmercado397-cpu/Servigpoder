@@ -139,6 +139,8 @@ export default function PeriodoNomina() {
             Personas con vacaciones en el periodo. Los días trabajados <b>antes</b> de las vacaciones se pagan en la liquidación de vacaciones, así que
             es correcto que esta nómina no los pague; los días trabajados <b>después</b> del regreso sí van en la nómina. Verifique cada caso en la
             liquidación de vacaciones y márquelo como revisado. Si la nómina les paga de más, aparece como alerta en la pestaña Alertas.
+            También salen aquí quienes <b>no aparecen en la nómina</b> porque salieron a vacaciones sin volver a trabajar en el periodo;
+            si regresaron y trabajaron, esos días los debe pagar la nómina y quedan como alerta «Programado y sin nómina».
           </Alerta>
           <Alertas key="vacaciones" p={p} tipoInicial={VACACIONES} fijo onPersona={setPersona} onCambio={leer} />
         </div>

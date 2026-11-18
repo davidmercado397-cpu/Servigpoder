@@ -71,6 +71,8 @@ class SpdPeriodo(BaseEmpresa):
     estado: Mapped[str] = mapped_column(String(10), default=ABIERTO)
     parametros: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # con los que se liquidó la última vez
     calculado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Resultado de la última programación importada (cruce, pendientes y cómo se resolvieron); el archivo no se guarda
+    programacion_resultado: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

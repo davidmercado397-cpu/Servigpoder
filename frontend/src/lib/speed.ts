@@ -35,9 +35,15 @@ export type NovedadSpeed = {
 /** Lo que trajo el archivo de programación para una persona en la quincena. */
 export type ProgramacionDias = { dias: Record<string, string>; puestos: string[]; conflictos: string[]; tramos_incapacidad: number[] };
 
+/** Persona de la programación que no está en el Listado: se crea, se asigna a un empleado o se descarta. */
+export type PendienteProgramacion = {
+  clave: string; cedula: string; nombre: string; puestos: string[]; dias: Record<string, string>; ingreso_sugerido: string | null;
+  estado: "pendiente" | "creado" | "asignado" | "descartado"; empleado?: { cedula: string; nombre: string };
+};
+
 export type ResultadoProgramacion = {
-  hojas: string[]; personas: number; cargadas: number; quitadas: number; avisos: string[];
-  no_encontrados: { cedula: string; nombre: string; puestos: string[] }[];
+  hojas: string[]; personas: number; cargadas: number; quitadas: number; avisos: string[]; archivo?: string; fecha?: string;
+  no_encontrados: PendienteProgramacion[];
   por_nombre: { nombre: string; cedula: string; en_archivo: string }[];
   sin_programacion: { cedula: string; nombre: string; cargo: string }[];
   conflictos: { cedula: string; nombre: string; detalle: string[] }[];

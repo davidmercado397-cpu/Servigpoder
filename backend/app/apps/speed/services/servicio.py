@@ -1,9 +1,10 @@
 """Servicios de la nómina de Speed: parámetros, importación del Listado y de la programación, liquidación y Excel."""
 
+import copy
 import io
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import xlsxwriter
 from sqlalchemy import func, select
@@ -125,6 +126,56 @@ def _previos(nueva: dict, anterior: SpdNovedad | None) -> float:
     return al_cierre + (float(anterior.incapacidad_previos or 0) if viene else 0.0)
 
 
+def _cargar_novedad(db: Session, periodo: SpdPeriodo, e: SpdEmpleado, per: "programacion.Persona", n: SpdNovedad | None,
+                    previa: SpdNovedad | None) -> dict:
+    """Escribe en la novedad de la quincena lo que dice la programación de la persona."""
+    d = programacion.novedad(per, periodo.anio, periodo.mes, periodo.quincena, e.fecha_ingreso)
+    if n is None:
+        n = SpdNovedad(periodo_id=periodo.id, empleado_id=e.id, observacion="")
+        db.add(n)
+    for c in ("ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones", "incapacidad",
+              "turnos_tad", "turnos_tan", "sin_programacion", "dias_programados", "programacion"):
+        setattr(n, c, d[c])
+    n.incapacidad_previos = _previos(d, previa)
+    n.origen = "programacion"
+    return d
+
+
+def _pendiente(clave: str, per: "programacion.Persona", periodo: SpdPeriodo) -> dict:
+    """Persona de la programación que no está en el Listado: se guardan sus códigos para poder crearla o asignarla después."""
+    dias = sorted(per.dias)
+    ingreso = None
+    if dias and dias[0] > 1:  # empezó a trabajar en el mes: se sugiere ese día como fecha de ingreso
+        ingreso = date(periodo.anio, periodo.mes, dias[0]).isoformat()
+    return {"clave": clave, "cedula": per.cedula, "nombre": per.nombre, "puestos": per.puestos[:3],
+            "dias": {str(d): per.dias[d] for d in dias}, "ingreso_sugerido": ingreso, "estado": "pendiente"}
+
+
+def resolver_pendiente(db: Session, periodo: SpdPeriodo, clave: str, accion: str, empleado: SpdEmpleado | None) -> dict:
+    """Crear / asignar: carga la programación de la persona en la novedad de ese empleado. Descartar: solo la marca."""
+    resultado = copy.deepcopy(periodo.programacion_resultado or {})
+    item = next((x for x in resultado.get("no_encontrados", []) if x.get("clave") == clave), None)
+    if item is None:
+        raise ValueError("La persona ya no está en el resultado de la programación (vuelva a subir el archivo)")
+    if item.get("estado") != "pendiente":
+        raise ValueError("Esa persona ya se resolvió")
+    if accion != "descartar":
+        assert empleado is not None
+        per = programacion.Persona(empleado.cedula, item["nombre"], list(item.get("puestos") or []),
+                                   {int(k): v for k, v in (item.get("dias") or {}).items()})
+        existente = db.scalar(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id, SpdNovedad.empleado_id == empleado.id))
+        anterior = _anterior(db, periodo)
+        previa = (db.scalar(select(SpdNovedad).where(SpdNovedad.periodo_id == anterior.id, SpdNovedad.empleado_id == empleado.id))
+                  if anterior else None)
+        _cargar_novedad(db, periodo, empleado, per, existente, previa)
+        item["empleado"] = {"cedula": empleado.cedula, "nombre": empleado.nombre}
+        resultado["cargadas"] = int(resultado.get("cargadas") or 0) + 1
+    item["estado"] = {"crear": "creado", "asignar": "asignado"}.get(accion, "descartado")
+    periodo.programacion_resultado = resultado
+    db.flush()
+    return item
+
+
 def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, "programacion.Persona"], info: dict) -> dict:
     """Llena la novedad de la quincena de cada persona con lo que dice la programación (reemplaza lo cargado antes desde
     la programación; las novedades digitadas a mano de quien no viene en el archivo se conservan)."""
@@ -151,21 +202,12 @@ def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, 
                 e = candidatos[0]
                 por_nombre_cruzados.append({"nombre": per.nombre, "cedula": e.cedula, "en_archivo": per.cedula or "sin documento"})
         if e is None:
-            no_encontrados.append({"cedula": per.cedula, "nombre": per.nombre, "puestos": per.puestos[:3]})
+            no_encontrados.append(_pendiente(clave, per, periodo))
             continue
         if e.id in cargados:
             conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": ["aparece con dos documentos o nombres distintos; se tomó el primero"]})
             continue
-        d = programacion.novedad(per, periodo.anio, periodo.mes, periodo.quincena, e.fecha_ingreso)
-        n = existentes.get(e.id)
-        if n is None:
-            n = SpdNovedad(periodo_id=periodo.id, empleado_id=e.id, observacion="")
-            db.add(n)
-        for c in ("ausencias", "licencias", "suspensiones", "desprogramados", "permisos_remunerados", "vacaciones", "incapacidad",
-                  "turnos_tad", "turnos_tan", "sin_programacion", "dias_programados", "programacion"):
-            setattr(n, c, d[c])
-        n.incapacidad_previos = _previos(d, previas.get(e.id))
-        n.origen = "programacion"
+        d = _cargar_novedad(db, periodo, e, per, existentes.get(e.id), previas.get(e.id))
         cargados.add(e.id)
         if d["programacion"]["conflictos"]:
             conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": d["programacion"]["conflictos"]})

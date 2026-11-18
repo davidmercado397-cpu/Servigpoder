@@ -322,3 +322,42 @@ def test_importar_programacion_en_la_quincena(speed):
     malo = listado_xlsx([fila(1, 1, "X")])
     r = speed.post(f"{API}/periodos/{p1['id']}/programacion/importar", files={"archivo": ("x.xlsx", malo, XLSX)})
     assert r.status_code == 422 and "DOCUMENTO" in r.json()["error"]["message"]
+
+
+def test_quien_no_esta_en_el_listado_se_crea_asigna_o_descarta(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS GUARDA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    assert speed.get(f"{API}/periodos/{p['id']}/programacion").json()["data"] is None
+    # Un ingreso nuevo desde el día 13, una cédula mal escrita y un error
+    archivo = programacion_xlsx([["OIKOS", "NUEVO INGRESO", 79557182, [None] * 12 + ["IND", "D", "N"]],
+                                 ["TORRE", "DOS GUARDA MAL", 5211276, ["D", "N", "X"] * 5],
+                                 ["TORRE", "NADIE", 111, ["D"] * 15]])
+    r = speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).json()["data"]
+    assert len(r["no_encontrados"]) == 3 and r["archivo"] == "p.xlsx"
+    nuevo = next(x for x in r["no_encontrados"] if x["cedula"] == "79557182")
+    assert nuevo["ingreso_sugerido"] == "2026-11-13" and nuevo["estado"] == "pendiente"
+    # El resultado queda guardado en la quincena
+    guardado = speed.get(f"{API}/periodos/{p['id']}/programacion").json()["data"]
+    assert [x["clave"] for x in guardado["no_encontrados"]] == [x["clave"] for x in r["no_encontrados"]]
+
+    url = f"{API}/periodos/{p['id']}/programacion/resolver"
+    datos = {"cedula": "79557182", "nombre": "NUEVO INGRESO", "fecha_ingreso": "2026-11-13", "cargo": "Vigilante", "salario": 1750905,
+             "horas_extras": 450000}
+    r = speed.post(url, json={"clave": "79557182", "accion": "crear", "empleado": datos})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["estado"] == "creado"
+    assert speed.post(url, json={"clave": "79557182", "accion": "descartar"}).status_code == 409  # ya resuelto
+    # Crear con una cédula que ya existe: debe asignarse
+    assert speed.post(url, json={"clave": "5211276", "accion": "crear", "empleado": {**datos, "cedula": "52112768"}}).status_code == 409
+    assert speed.post(url, json={"clave": "5211276", "accion": "asignar", "cedula": "52112768"}).status_code == 200
+    assert speed.post(url, json={"clave": "111", "accion": "descartar"}).status_code == 200
+
+    nov = {n["cedula"]: n for n in speed.get(f"{API}/periodos/{p['id']}/novedades").json()["data"]}
+    assert nov["79557182"]["origen"] == "programacion" and nov["79557182"]["programacion"]["dias"]["13"] == "IND"
+    assert nov["52112768"]["dias_programados"] == 15
+    estados = {x["clave"]: x["estado"] for x in speed.get(f"{API}/periodos/{p['id']}/programacion").json()["data"]["no_encontrados"]}
+    assert estados == {"79557182": "creado", "5211276": "asignado", "111": "descartado"}
+    liq = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]}
+    assert liq["79557182"]["dias"]["contrato"] == 3 and liq["79557182"]["dias"]["variables"] == 3
+    assert "111" not in liq

@@ -1,16 +1,30 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Calculator, ChevronDown, ChevronRight, Download, Lock, Save, Trash2, Unlock, X } from "lucide-react";
+import {
+  AlertTriangle, ArrowLeft, Ban, Calculator, ChevronDown, ChevronRight, Download, Lock, Save, Trash2, Unlock, UserCheck, UserPlus, X,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Modal } from "@/components/costeo";
+import { InputPesos } from "@/components/input-pesos";
+import { Paginador, usePaginacion } from "@/components/paginacion";
 import { Alerta, Insignia, Pestanas, SubirArchivo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 import {
-  CODIGOS_PROGRAMACION, nombrePeriodo, pesos, type LiquidacionSpeed, type NovedadSpeed, type PeriodoSpeed, type ProgramacionDias,
-  type ResultadoProgramacion,
+  CODIGOS_PROGRAMACION, nombrePeriodo, pesos, type EmpleadoSpeed, type LiquidacionSpeed, type NovedadSpeed, type PendienteProgramacion,
+  type PeriodoSpeed, type ProgramacionDias, type ResultadoProgramacion,
 } from "@/lib/speed";
+
+const TAMANOS = [20, 50, 100] as const;
+
+/** Las filas de la página actual (20, 50 o 100 por página). */
+function paginar<T>(lista: T[], pagina: number, tamano: number) {
+  const paginas = Math.max(1, Math.ceil(lista.length / tamano));
+  const actual = Math.min(pagina, paginas);
+  return { filas: lista.slice((actual - 1) * tamano, actual * tamano), meta: { total: lista.length, pagina: actual, tamano, paginas } };
+}
 
 type Detalle = PeriodoSpeed & { liquidaciones: LiquidacionSpeed[] };
 type Campo = "dias_programados" | "ausencias" | "licencias" | "suspensiones" | "desprogramados" | "permisos_remunerados" | "vacaciones"
@@ -84,7 +98,7 @@ export default function QuincenaSpeed() {
 
       <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"]]} valor={pestana} onChange={setPestana} />
       {pestana === "liquidacion" ? <Liquidacion filas={p.liquidaciones} />
-        : <Novedades periodoId={Number(id)} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
+        : <Novedades periodoId={Number(id)} quincena={p.quincena} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
     </div>
   );
 }
@@ -113,6 +127,8 @@ function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
   const [soloAlertas, setSoloAlertas] = useState(false);
   const visibles = useMemo(() => filas.filter((f) => (!soloAlertas || f.alertas.length)
     && (!buscar || `${f.cedula} ${f.nombre} ${f.puesto}`.toLowerCase().includes(buscar.toLowerCase()))), [filas, buscar, soloAlertas]);
+  const pag = usePaginacion([buscar, soloAlertas], TAMANOS);
+  const pagina = paginar(visibles, pag.pagina, pag.tamano);
   if (!filas.length) return <p className="text-sm text-slate-500">Aún no se ha liquidado. Revise las novedades y dé <b>Liquidar</b>.</p>;
   const conAlertas = filas.filter((f) => f.alertas.length).length;
   return (
@@ -128,7 +144,7 @@ function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
           <thead><tr><th /><th>Colaborador</th><th className="text-right">Días</th><th className="text-right">Salario</th><th className="text-right">Aux. transp.</th>
             <th className="text-right">Variables</th><th className="text-right">T. adicionales</th><th className="text-right">Devengado</th><th className="text-right">Deducciones</th><th className="text-right">Neto</th></tr></thead>
           <tbody>
-            {visibles.map((f) => {
+            {pagina.filas.map((f) => {
               const c = f.conceptos;
               const variables = c.horas_extras + c.comisiones + c.ley_2466 + c.bonificaciones + c.rodamiento;
               return (
@@ -173,25 +189,30 @@ function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
           </tbody>
         </table>
       </div>
+      <Paginador meta={pagina.meta} tamanos={TAMANOS} onPagina={pag.setPagina} onTamano={pag.setTamano} />
     </div>
   );
 }
 
-function Novedades({ periodoId, editable, onCambio }: { periodoId: number; editable: boolean; onCambio: () => void }) {
+function Novedades({ periodoId, quincena, editable, onCambio }: { periodoId: number; quincena: number; editable: boolean; onCambio: () => void }) {
   const [filas, setFilas] = useState<NovedadSpeed[] | null>(null);
   const [cambiadas, setCambiadas] = useState<Record<number, NovedadSpeed>>({});
   const [buscar, setBuscar] = useState("");
   const [soloCon, setSoloCon] = useState(false);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [resultado, setResultado] = useState<ResultadoProgramacion | null>(null);
+  const [verResultado, setVerResultado] = useState(true);
   const cargar = useCallback(() => api<NovedadSpeed[]>(`/speed/periodos/${periodoId}/novedades`).then(setFilas).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) })), [periodoId]);
-  useEffect(() => { cargar(); }, [cargar]);
+  const cargarResultado = useCallback(() => api<ResultadoProgramacion | null>(`/speed/periodos/${periodoId}/programacion`).then(setResultado).catch(() => {}), [periodoId]);
+  useEffect(() => { cargar(); cargarResultado(); }, [cargar, cargarResultado]);
+  const pag = usePaginacion([buscar, soloCon], TAMANOS);
   if (!filas) return <p className="text-sm text-slate-500">Cargando…</p>;
 
   const tiene = (n: NovedadSpeed) => (n.dias_programados !== null && n.dias_programados < 15) || n.observacion || n.sin_programacion
     || CAMPOS.some(([k]) => k !== "dias_programados" && n[k]) || (n.programacion?.conflictos.length ?? 0) > 0;
   const visibles = filas.map((f) => cambiadas[f.empleado_id] ?? f)
     .filter((f) => (!soloCon || tiene(f)) && (!buscar || `${f.cedula} ${f.nombre}`.toLowerCase().includes(buscar.toLowerCase())));
+  const pagina = paginar(visibles, pag.pagina, pag.tamano);
   const cambiar = (n: NovedadSpeed, x: Partial<NovedadSpeed>) => setCambiadas({ ...cambiadas, [n.empleado_id]: { ...n, ...x } });
 
   async function guardar() {
@@ -217,9 +238,9 @@ function Novedades({ periodoId, editable, onCambio }: { periodoId: number; edita
         <div className="ml-auto flex flex-wrap gap-2">
           {editable && <SubirArchivo texto="Subir programación" onArchivo={async (f) => {
             setMsg(null);
-            setResultado(null);
             try {
               setResultado(await subirArchivo<ResultadoProgramacion>(`/speed/periodos/${periodoId}/programacion/importar`, f));
+              setVerResultado(true);
               await cargar();
               onCambio();
             } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
@@ -241,12 +262,16 @@ function Novedades({ periodoId, editable, onCambio }: { periodoId: number; edita
         se cuentan los códigos de cada día y el archivo se descarta. Después puede corregir a mano o con la plantilla. Quien no tiene novedad toma la quincena
         completa (desde la fecha de ingreso).</Alerta>
       {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
-      {resultado && <Resultado r={resultado} onCerrar={() => setResultado(null)} />}
+      {resultado && (verResultado
+        ? <Resultado r={resultado} periodoId={periodoId} quincena={quincena} editable={editable} onCerrar={() => setVerResultado(false)}
+          onResuelto={async () => { await Promise.all([cargar(), cargarResultado()]); onCambio(); }} />
+        : <button className="text-sm text-marca-700 hover:underline" onClick={() => setVerResultado(true)}>
+          Ver el resultado de la programación{resultado.no_encontrados.some((x) => x.estado === "pendiente") ? " (hay personas por revisar)" : ""}</button>)}
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead><tr><th>Colaborador</th>{CAMPOS.map(([k, t, ayuda]) => <th key={k} className="text-right" title={ayuda}>{t}</th>)}<th>Observación</th></tr></thead>
           <tbody>
-            {visibles.map((n) => (
+            {pagina.filas.map((n) => (
               <tr key={n.empleado_id} className={cambiadas[n.empleado_id] ? "bg-amber-50" : ""}>
                 <td><p className="font-medium">{n.nombre}</p><p className="text-xs text-slate-500">{n.cedula} · {n.aplica_programacion ? "aplica programación" : "no aplica"}
                   {n.origen ? ` · ${n.origen}` : ""}{n.sin_programacion ? ` · ${n.sin_programacion} días sin programación` : ""}</p>
@@ -265,16 +290,17 @@ function Novedades({ periodoId, editable, onCambio }: { periodoId: number; edita
             ))}
           </tbody>
         </table>
+        <Paginador meta={pagina.meta} tamanos={TAMANOS} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
     </div>
   );
 }
 
 /** Los códigos de cada día de la quincena, como vienen en la programación. */
-function Dias({ p }: { p: ProgramacionDias }) {
+function Dias({ p, desde: inicio }: { p: ProgramacionDias; desde?: number }) {
   const dias = Object.keys(p.dias).map(Number).sort((a, b) => a - b);
   if (!dias.length) return null;
-  const desde = dias[0] > 15 ? 16 : 1;
+  const desde = inicio ?? (dias[0] > 15 ? 16 : 1);
   const hasta = desde === 1 ? 15 : Math.max(30, dias[dias.length - 1]);
   return (
     <div className="mt-1">
@@ -292,20 +318,31 @@ function Dias({ p }: { p: ProgramacionDias }) {
   );
 }
 
-function Resultado({ r, onCerrar }: { r: ResultadoProgramacion; onCerrar: () => void }) {
+function Resultado({ r, periodoId, quincena, editable, onCerrar, onResuelto }: {
+  r: ResultadoProgramacion; periodoId: number; quincena: number; editable: boolean; onCerrar: () => void; onResuelto: () => Promise<void>;
+}) {
   const s = r.resumen;
+  const pendientes = r.no_encontrados.filter((x) => x.estado === "pendiente").length;
   return (
-    <div className="tarjeta space-y-2 border-l-4 border-l-green-500 p-4 text-sm">
+    <div className={`tarjeta space-y-2 border-l-4 p-4 text-sm ${pendientes ? "border-l-amber-500" : "border-l-green-500"}`}>
       <div className="flex items-start gap-2">
-        <p className="flex-1"><b>{r.cargadas} personas cargadas</b> de {r.personas} en la programación ({r.hojas.join(", ")}).
+        <p className="flex-1"><b>{r.cargadas} personas cargadas</b> de {r.personas} en la programación ({r.hojas.join(", ")})
+          {r.fecha ? ` · subida el ${new Date(r.fecha).toLocaleString("es-CO")}` : ""}{r.archivo ? ` · ${r.archivo}` : ""}.
           {" "}Días: {s.no_laborados} no laborados, {s.incapacidad} de incapacidad, {s.vacaciones} de vacaciones, {s.remunerados} de licencias remuneradas;
           {" "}{s.turnos_tad} TAD y {s.turnos_tan} TAN{s.sin_programacion ? `; ${s.sin_programacion} días sin programación` : ""}.
-          {r.quitadas ? ` Se quitaron ${r.quitadas} novedades de una programación anterior.` : ""} Vuelva a liquidar la quincena.</p>
-        <button onClick={onCerrar} title="Cerrar"><X className="h-4 w-4 text-slate-400" /></button>
+          {r.quitadas ? ` Se quitaron ${r.quitadas} novedades de una programación anterior.` : ""}</p>
+        <button onClick={onCerrar} title="Ocultar"><X className="h-4 w-4 text-slate-400" /></button>
       </div>
       {r.avisos.map((a, i) => <p key={i} className="text-amber-800">• {a}</p>)}
-      <Lista titulo={`${r.no_encontrados.length} personas de la programación no están en el Listado (no se liquidan)`} items={r.no_encontrados.map((x) =>
-        `${x.nombre} (${x.cedula || "sin documento"})${x.puestos.length ? " · " + x.puestos.join(", ") : ""}`)} alerta />
+      {r.no_encontrados.length > 0 && (
+        <details open={pendientes > 0}>
+          <summary className="cursor-pointer text-amber-800">{r.no_encontrados.length} personas de la programación no están en el Listado
+            {pendientes ? ` (${pendientes} por revisar: mientras tanto no se liquidan)` : " (todas revisadas)"}</summary>
+          <div className="mt-2 space-y-2">
+            {r.no_encontrados.map((x) => <Pendiente key={x.clave} x={x} periodoId={periodoId} quincena={quincena} editable={editable} onResuelto={onResuelto} />)}
+          </div>
+        </details>
+      )}
       <Lista titulo={`${r.sin_programacion.length} personas del Listado que aplican a la regla no están en la programación (se liquida la quincena completa)`}
         items={r.sin_programacion.map((x) => `${x.nombre} (${x.cedula}) · ${x.cargo}`)} alerta />
       <Lista titulo={`${r.por_nombre.length} cruzadas por el nombre (el documento no coincide o falta en la programación)`}
@@ -313,6 +350,140 @@ function Resultado({ r, onCerrar }: { r: ResultadoProgramacion; onCerrar: () => 
       <Lista titulo={`${r.conflictos.length} personas con códigos distintos el mismo día en dos filas (se tomó el que más afecta el pago)`}
         items={r.conflictos.map((x) => `${x.nombre} (${x.cedula}): ${x.detalle.join("; ")}`)} />
     </div>
+  );
+}
+
+/** Una persona de la programación que no está en el Listado, con lo que se puede hacer con ella. */
+function Pendiente({ x, periodoId, quincena, editable, onResuelto }: {
+  x: PendienteProgramacion; periodoId: number; quincena: number; editable: boolean; onResuelto: () => Promise<void>;
+}) {
+  const [modo, setModo] = useState<"crear" | "asignar" | null>(null);
+  const [error, setError] = useState("");
+  const [desde, hasta] = quincena === 1 ? [1, 15] : [16, 31];
+  const dias = Object.fromEntries(Object.entries(x.dias).filter(([d]) => Number(d) >= desde && Number(d) <= hasta));
+  async function resolver(cuerpo: Record<string, unknown>) {
+    setError("");
+    try {
+      await api(`/speed/periodos/${periodoId}/programacion/resolver`, { method: "POST", json: { clave: x.clave, ...cuerpo } });
+      setModo(null);
+      await onResuelto();
+    } catch (e) { setError(mensajeError(e)); throw e; }
+  }
+  const estado = { creado: "Creado en el Listado", asignado: "Asignado a", descartado: "Descartado (error de la programación)", pendiente: "" }[x.estado];
+  return (
+    <div className={`rounded-md border p-2 ${x.estado === "pendiente" ? "border-amber-200 bg-amber-50/40" : "border-slate-200 bg-slate-50 opacity-80"}`}>
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-[16rem] flex-1">
+          <p className="font-medium">{x.nombre} <span className="font-normal text-slate-500">· {x.cedula || "sin documento"}{x.puestos.length ? ` · ${x.puestos.join(", ")}` : ""}</span></p>
+          {Object.keys(dias).length > 0 ? <Dias p={{ dias, puestos: [], conflictos: [], tramos_incapacidad: [] }} desde={desde} />
+            : <p className="text-xs text-slate-500">Sin turnos en esta quincena</p>}
+        </div>
+        {x.estado !== "pendiente" ? (
+          <Insignia color={x.estado === "descartado" ? "bg-slate-200 text-slate-700" : "bg-green-100 text-green-800"}>
+            {estado}{x.empleado && x.estado === "asignado" ? ` ${x.empleado.nombre} (${x.empleado.cedula})` : ""}</Insignia>
+        ) : editable && (
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-primario" onClick={() => setModo("crear")}><UserPlus className="h-4 w-4" /> Crear en el Listado</button>
+            <button className="btn-secundario" onClick={() => setModo("asignar")}><UserCheck className="h-4 w-4" /> Es un empleado del Listado</button>
+            <button className="btn-secundario" onClick={async () => {
+              if (confirm(`¿Descartar a ${x.nombre}? No se liquida (queda anotado como error de la programación).`)) await resolver({ accion: "descartar" }).catch(() => {});
+            }}><Ban className="h-4 w-4" /> Descartar</button>
+          </div>
+        )}
+      </div>
+      {error && !modo && <p className="mt-1 text-xs text-red-700">{error}</p>}
+      {modo === "crear" && <CrearEmpleado x={x} error={error} onCerrar={() => setModo(null)} onGuardar={(empleado) => resolver({ accion: "crear", empleado })} />}
+      {modo === "asignar" && <AsignarEmpleado x={x} error={error} onCerrar={() => setModo(null)} onGuardar={(cedula) => resolver({ accion: "asignar", cedula })} />}
+    </div>
+  );
+}
+
+function CrearEmpleado({ x, error, onCerrar, onGuardar }: {
+  x: PendienteProgramacion; error: string; onCerrar: () => void; onGuardar: (e: Record<string, unknown>) => Promise<void>;
+}) {
+  const [f, setF] = useState({
+    cedula: x.cedula, nombre: x.nombre, fecha_ingreso: x.ingreso_sugerido ?? "", cargo: "Vigilante", puesto: x.puestos[0] ?? "", tipo_turno: "",
+    salario: null as number | null, horas_extras: null as number | null, ley_2466: null as number | null, bonificaciones: null as number | null,
+    rodamiento: null as number | null, comisiones: null as number | null, aplica_programacion: true,
+  });
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => {
+    api<{ clave: string; valor: number }[]>("/speed/parametros")
+      .then((l) => setF((v) => v.salario === null ? { ...v, salario: l.find((p) => p.clave === "salario_minimo")?.valor ?? null } : v)).catch(() => {});
+  }, []);
+  const pesosCampo = (k: "salario" | "horas_extras" | "ley_2466" | "bonificaciones" | "rodamiento" | "comisiones", t: string) => (
+    <div><label className="label">{t}</label><InputPesos vacio valor={f[k]} onValor={(v) => setF({ ...f, [k]: v })} /></div>
+  );
+  return (
+    <Modal titulo="Crear empleado en el Listado" onCerrar={onCerrar} ancho="max-w-2xl">
+      <form className="space-y-3" onSubmit={async (e) => {
+        e.preventDefault();
+        setGuardando(true);
+        try {
+          await onGuardar({ ...f, fecha_ingreso: f.fecha_ingreso || null, salario: f.salario ?? 0,
+            ...Object.fromEntries((["horas_extras", "ley_2466", "bonificaciones", "rodamiento", "comisiones"] as const).map((k) => [k, f[k] ?? 0])) });
+        } catch { /* el error se muestra abajo */ } finally { setGuardando(false); }
+      }}>
+        <p className="text-sm text-slate-600">Se crea con los valores mensuales que ponga aquí y se le cargan sus días de la programación en esta quincena.
+          Agréguelo también al Excel del Listado: si no viene en la próxima importación del Listado, queda inactivo.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div><label className="label">Cédula</label><input className="input" required pattern="\d{3,20}" value={f.cedula}
+            onChange={(e) => setF({ ...f, cedula: e.target.value.replace(/\D/g, "") })} /></div>
+          <div><label className="label">Nombre</label><input className="input" required maxLength={160} value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>
+          <div><label className="label">Fecha de ingreso</label><input className="input" type="date" value={f.fecha_ingreso} onChange={(e) => setF({ ...f, fecha_ingreso: e.target.value })} />
+            {x.ingreso_sugerido && <p className="mt-0.5 text-xs text-slate-500">Sugerida: el primer día con turno en la programación</p>}</div>
+          <div><label className="label">Cargo</label><input className="input" maxLength={120} value={f.cargo} onChange={(e) => setF({ ...f, cargo: e.target.value })} /></div>
+          <div><label className="label">Puesto</label><input className="input" maxLength={120} value={f.puesto} onChange={(e) => setF({ ...f, puesto: e.target.value })} /></div>
+          <div><label className="label">Tipo de turno</label><input className="input" maxLength={120} value={f.tipo_turno} placeholder="Ej. Turnos 2x2x2"
+            onChange={(e) => setF({ ...f, tipo_turno: e.target.value })} /></div>
+          {pesosCampo("salario", "Salario mensual")}
+          {pesosCampo("horas_extras", "Horas extras (mes)")}
+          {pesosCampo("ley_2466", "Ley 2466 (mes)")}
+          {pesosCampo("bonificaciones", "Bonificaciones (mes)")}
+          {pesosCampo("rodamiento", "Rodamiento (mes)")}
+          {pesosCampo("comisiones", "Comisiones (mes)")}
+        </div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.aplica_programacion} onChange={(e) => setF({ ...f, aplica_programacion: e.target.checked })} />
+          Aplica a la regla de programación (variables ÷ 30 × días con programación)</label>
+        {error && <Alerta>{error}</Alerta>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primario" disabled={guardando || !f.salario}><UserPlus className="h-4 w-4" /> {guardando ? "Creando…" : "Crear y cargar sus días"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AsignarEmpleado({ x, error, onCerrar, onGuardar }: {
+  x: PendienteProgramacion; error: string; onCerrar: () => void; onGuardar: (cedula: string) => Promise<void>;
+}) {
+  const [empleados, setEmpleados] = useState<EmpleadoSpeed[]>([]);
+  const [buscar, setBuscar] = useState(x.nombre.split(" ")[0] ?? "");
+  const [cedula, setCedula] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { api<EmpleadoSpeed[]>("/speed/empleados?inactivos=true").then(setEmpleados).catch(() => {}); }, []);
+  const opciones = useMemo(() => empleados.filter((e) => !buscar || `${e.cedula} ${e.nombre}`.toLowerCase().includes(buscar.toLowerCase())).slice(0, 100),
+    [empleados, buscar]);
+  return (
+    <Modal titulo="Asignar a un empleado del Listado" onCerrar={onCerrar} ancho="max-w-xl">
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">Use esta opción si en la programación la cédula o el nombre vienen mal escritos. Los días de
+          <b> {x.nombre} ({x.cedula || "sin documento"})</b> se cargan a la persona que elija.</p>
+        <input className="input" placeholder="Buscar por cédula o nombre" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
+        <select className="input" size={8} value={cedula} onChange={(e) => setCedula(e.target.value)}>
+          {opciones.map((e) => <option key={e.id} value={e.cedula}>{e.nombre} · {e.cedula}{e.activo ? "" : " · inactivo"}</option>)}
+        </select>
+        {error && <Alerta>{error}</Alerta>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primario" disabled={!cedula || guardando} onClick={async () => {
+            setGuardando(true);
+            try { await onGuardar(cedula); } catch { /* el error se muestra arriba */ } finally { setGuardando(false); }
+          }}><UserCheck className="h-4 w-4" /> Asignar</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

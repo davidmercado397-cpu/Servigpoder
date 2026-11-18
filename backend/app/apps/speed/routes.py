@@ -1,6 +1,7 @@
 """Rutas de la Nómina Speed: /api/speed/…"""
 
 import io
+from datetime import date, datetime, timezone
 
 import xlsxwriter
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
@@ -362,10 +363,72 @@ async def importar_programacion(periodo_id: int, request: Request, db: DbSession
         raise ApiError(422, str(e), "ARCHIVO_INVALIDO") from e
     del contenido
     r = servicio.importar_programacion(db, p, personas, info)
+    r["avisos"] = r["avisos"] + advertencias
+    p.programacion_resultado = {**r, "archivo": nombre, "fecha": datetime.now(timezone.utc).isoformat()}
     auditar(db, request, "spd_programacion_importada", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", archivo=nombre,
             personas=r["personas"], cargadas=r["cargadas"], no_encontrados=len(r["no_encontrados"]))
     db.commit()
-    return ok({**r, "avisos": r["avisos"] + advertencias})
+    return ok(p.programacion_resultado)
+
+
+@router.get("/periodos/{periodo_id}/programacion", response_model=ApiResponse[dict | None])
+def resultado_programacion(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+    """El resultado de la última programación importada en la quincena (con los pendientes por resolver)."""
+    return ok(_periodo(db, periodo_id).programacion_resultado)
+
+
+class EmpleadoNuevo(BaseModel):
+    cedula: str = Field(min_length=3, max_length=20, pattern=r"^\d+$")
+    nombre: str = Field(min_length=3, max_length=160)
+    fecha_ingreso: date | None = None
+    cargo: str = Field(default="", max_length=120)
+    puesto: str = Field(default="", max_length=120)
+    tipo_turno: str = Field(default="", max_length=120)
+    salario: float = Field(gt=0, le=100_000_000)
+    horas_extras: float = Field(default=0, ge=0, le=100_000_000)
+    comisiones: float = Field(default=0, ge=0, le=100_000_000)
+    ley_2466: float = Field(default=0, ge=0, le=100_000_000)
+    bonificaciones: float = Field(default=0, ge=0, le=100_000_000)
+    rodamiento: float = Field(default=0, ge=0, le=100_000_000)
+    aplica_programacion: bool = True
+
+
+class ResolverIn(BaseModel):
+    clave: str = Field(max_length=200)
+    accion: str = Field(pattern="^(crear|asignar|descartar)$")
+    empleado: EmpleadoNuevo | None = None  # para crear
+    cedula: str | None = Field(default=None, max_length=20)  # para asignar a un empleado que ya está en el Listado
+
+
+@router.post("/periodos/{periodo_id}/programacion/resolver", response_model=ApiResponse[dict])
+def resolver_pendiente(periodo_id: int, data: ResolverIn, request: Request, db: DbSession, actual: Usuario = Depends(require(LIQUIDAR))):
+    """Quien viene en la programación y no está en el Listado: crearlo como empleado, asignarlo a uno que ya existe
+    (la cédula venía mal) o descartarlo (era un error)."""
+    p = _periodo(db, periodo_id)
+    _abierto(p)
+    empleado = None
+    if data.accion == "crear":
+        if data.empleado is None:
+            raise ApiError(422, "Faltan los datos del empleado")
+        nuevo = data.empleado
+        if db.scalar(select(SpdEmpleado).where(SpdEmpleado.cedula == nuevo.cedula)):
+            raise ApiError(409, f"La cédula {nuevo.cedula} ya está en el Listado: use «Es un empleado del Listado»")
+        empleado = SpdEmpleado(**nuevo.model_dump(), auxilio_listado=0, grupo="", area="", cliente="", tipo_contrato="",
+                               nota="Creado desde la programación", activo=True)
+        db.add(empleado)
+        db.flush()
+    elif data.accion == "asignar":
+        empleado = db.scalar(select(SpdEmpleado).where(SpdEmpleado.cedula == (data.cedula or "").strip()))
+        if empleado is None:
+            raise ApiError(404, "No hay un empleado con esa cédula en el Listado")
+    try:
+        item = servicio.resolver_pendiente(db, p, data.clave, data.accion, empleado)
+    except ValueError as e:
+        raise ApiError(409, str(e)) from e
+    auditar(db, request, "spd_programacion_pendiente", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", decision=data.accion,
+            en_programacion=item.get("cedula") or item.get("nombre"), empleado=empleado.cedula if empleado else None)
+    db.commit()
+    return ok(item)
 
 
 # --- Descuentos y pagos adicionales ----------------------------------------------------------------------------

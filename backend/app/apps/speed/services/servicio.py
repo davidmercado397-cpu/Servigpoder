@@ -37,6 +37,81 @@ def conceptos_wo(db: Session) -> dict[str, tuple[str, bool]]:
     return c
 
 
+def _tramos(dias: dict[int, str], codigo: str) -> list[tuple[int, int]]:
+    """Días seguidos con el código: [(desde, hasta), …]."""
+    salida: list[tuple[int, int]] = []
+    for d in sorted(k for k, v in dias.items() if v == codigo):
+        if salida and salida[-1][1] == d - 1:
+            salida[-1] = (salida[-1][0], d)
+        else:
+            salida.append((d, d))
+    return salida
+
+
+def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo) -> dict:
+    """Quién tiene vacaciones y quién se retira en la quincena, con las fechas (para cargarlo en World Office)."""
+    desde, hasta = (1, 15) if periodo.quincena == 1 else (16, 30)
+    fecha = lambda d: date(periodo.anio, periodo.mes, d).isoformat()  # noqa: E731
+    vacaciones: list[dict] = []
+    retiros: list[dict] = []
+    novedades = list(db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)))
+    for n in novedades:
+        e = n.empleado
+        base = {"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
+                "centro": "Produccion" if e.aplica_programacion else "Administrativo"}
+        dias = {int(k): v for k, v in ((n.programacion or {}).get("dias") or {}).items() if desde <= int(k) <= hasta}
+        if float(n.vacaciones or 0):
+            tramos = _tramos(dias, "VAC")
+            vacaciones.append({**base, "dias": float(n.vacaciones), "tramos": [[fecha(a), fecha(b)] for a, b in tramos],
+                               "desde_antes": bool(tramos) and tramos[0][0] == desde, "sigue": bool(tramos) and tramos[-1][1] == hasta,
+                               "sin_fechas": not tramos})
+        run = _tramos(dias, "RUN")
+        if run:
+            trabajados = [d for d, c in dias.items() if d < run[0][0] and c not in ("RUN", "DESPR")]
+            retiros.append({**base, "primer_dia_retiro": fecha(run[0][0]), "ultimo_dia": fecha(max(trabajados)) if trabajados else None,
+                            "dias_retiro": sum(b - a + 1 for a, b in run), "motivo": "Renuncia (RUN en la programación)"})
+    con_retiro = {r["empleado_id"] for r in retiros}
+    # Quien tiene novedad en la quincena pero ya no viene en el Listado (inactivo): posible retiro
+    for n in novedades:
+        e = n.empleado
+        if not e.activo and e.id not in con_retiro:
+            retiros.append({"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
+                            "centro": "Produccion" if e.aplica_programacion else "Administrativo", "primer_dia_retiro": None,
+                            "ultimo_dia": None, "dias_retiro": 0, "motivo": "Ya no viene en el Listado (inactivo)"})
+    vacaciones.sort(key=lambda x: x["nombre"])
+    retiros.sort(key=lambda x: x["nombre"])
+    return {"vacaciones": vacaciones, "retiros": retiros}
+
+
+def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
+    buf = io.BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True, "bg_color": "#e2e8f0", "border": 1})
+    hoja = libro.add_worksheet("Vacaciones")
+    hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "CENTRO DE COSTOS", "DÍAS EN LA QUINCENA", "FECHAS", "OBSERVACIÓN"], negrita)
+    for i, v in enumerate(datos["vacaciones"], start=1):
+        obs = "; ".join(t for t, si in (("viene de la quincena anterior", v["desde_antes"]), ("sigue en la próxima quincena", v["sigue"]),
+                                        ("digitadas a mano, sin fechas", v["sin_fechas"])) if si)
+        hoja.write_string(i, 0, v["cedula"])
+        hoja.write_row(i, 1, [v["nombre"], v["cargo"], v["puesto"], v["centro"], v["dias"],
+                              ", ".join(f"{a} a {b}" if a != b else a for a, b in v["tramos"]), obs])
+    hoja.set_column(0, 0, 13)
+    hoja.set_column(1, 1, 36)
+    hoja.set_column(2, 4, 20)
+    hoja.set_column(6, 7, 40)
+    hoja = libro.add_worksheet("Retiros")
+    hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "CENTRO DE COSTOS", "ÚLTIMO DÍA CON TURNO", "DESDE (RUN)", "MOTIVO"], negrita)
+    for i, r in enumerate(datos["retiros"], start=1):
+        hoja.write_string(i, 0, r["cedula"])
+        hoja.write_row(i, 1, [r["nombre"], r["cargo"], r["puesto"], r["centro"], r["ultimo_dia"] or "", r["primer_dia_retiro"] or "", r["motivo"]])
+    hoja.set_column(0, 0, 13)
+    hoja.set_column(1, 1, 36)
+    hoja.set_column(2, 6, 20)
+    hoja.set_column(7, 7, 40)
+    libro.close()
+    return buf.getvalue()
+
+
 def plano_world_office(db: Session, periodo: SpdPeriodo) -> tuple[bytes, int, list[str]]:
     """Archivo plano de novedades de la quincena para World Office (desde los códigos de la programación)."""
     p = periodo.parametros if periodo.estado != ABIERTO and periodo.parametros else parametros(db)

@@ -26,6 +26,14 @@ function paginar<T>(lista: T[], pagina: number, tamano: number) {
   return { filas: lista.slice((actual - 1) * tamano, actual * tamano), meta: { total: lista.length, pagina: actual, tamano, paginas } };
 }
 
+type VacacionesRetiros = {
+  vacaciones: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; dias: number;
+    tramos: [string, string][]; desde_antes: boolean; sigue: boolean; sin_fechas: boolean }[];
+  retiros: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; primer_dia_retiro: string | null;
+    ultimo_dia: string | null; dias_retiro: number; motivo: string }[];
+};
+const fechaCorta = (iso: string | null) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "—";
+
 type Detalle = PeriodoSpeed & { liquidaciones: LiquidacionSpeed[] };
 type Campo = "dias_programados" | "ausencias" | "licencias" | "suspensiones" | "desprogramados" | "permisos_remunerados" | "vacaciones"
   | "incapacidad" | "incapacidad_previos" | "turnos_tad" | "turnos_tan";
@@ -48,7 +56,10 @@ export default function QuincenaSpeed() {
   const router = useRouter();
   const liquidar = usePermiso("speed.liquidar");
   const [p, setP] = useState<Detalle | null>(null);
-  const [pestana, setPestana] = useState<"liquidacion" | "novedades">("liquidacion");
+  const [pestana, setPestana] = useState<"liquidacion" | "novedades" | "vacaciones">("liquidacion");
+  const [vr, setVr] = useState<VacacionesRetiros | null>(null);
+  const cargarVr = useCallback(() => api<VacacionesRetiros>(`/speed/periodos/${id}/vacaciones-retiros`).then(setVr).catch(() => {}), [id]);
+  useEffect(() => { cargarVr(); }, [cargarVr]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error" | "info"; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
@@ -105,8 +116,10 @@ export default function QuincenaSpeed() {
         <Dato titulo="Neto a pagar" valor={pesos(p.neto)} fuerte />
       </div>
 
-      <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"]]} valor={pestana} onChange={setPestana} />
-      {pestana === "liquidacion" ? <Liquidacion filas={p.liquidaciones} />
+      <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"],
+        ["vacaciones", `Vacaciones y retiros${vr ? ` (${vr.vacaciones.length + vr.retiros.length})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
+      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} />
+        : pestana === "liquidacion" ? <Liquidacion filas={p.liquidaciones} vr={vr} />
         : <Novedades periodoId={Number(id)} quincena={p.quincena} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
     </div>
   );
@@ -130,13 +143,17 @@ const DEDUCCIONES: [keyof LiquidacionSpeed["conceptos"], string][] = [
   ["salud", "Salud"], ["pension", "Pensión"], ["embargos", "Embargos"], ["prestamos", "Préstamos"], ["cuotas", "Cuotas"],
 ];
 
-function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
+function Liquidacion({ filas, vr }: { filas: LiquidacionSpeed[]; vr: VacacionesRetiros | null }) {
   const [buscar, setBuscar] = useState("");
   const [abierta, setAbierta] = useState<number | null>(null);
   const [soloAlertas, setSoloAlertas] = useState(false);
+  const [filtro, setFiltro] = useState<"" | "vacaciones" | "retiro">("");
+  const conVacaciones = useMemo(() => new Set(vr?.vacaciones.map((x) => x.empleado_id)), [vr]);
+  const conRetiro = useMemo(() => new Set(vr?.retiros.map((x) => x.empleado_id)), [vr]);
   const visibles = useMemo(() => filas.filter((f) => (!soloAlertas || f.alertas.length)
-    && (!buscar || `${f.cedula} ${f.nombre} ${f.puesto}`.toLowerCase().includes(buscar.toLowerCase()))), [filas, buscar, soloAlertas]);
-  const pag = usePaginacion([buscar, soloAlertas], TAMANOS);
+    && (filtro !== "vacaciones" || conVacaciones.has(f.empleado_id)) && (filtro !== "retiro" || conRetiro.has(f.empleado_id))
+    && (!buscar || `${f.cedula} ${f.nombre} ${f.puesto}`.toLowerCase().includes(buscar.toLowerCase()))), [filas, buscar, soloAlertas, filtro, conVacaciones, conRetiro]);
+  const pag = usePaginacion([buscar, soloAlertas, filtro], TAMANOS);
   const pagina = paginar(visibles, pag.pagina, pag.tamano);
   if (!filas.length) return <p className="text-sm text-slate-500">Aún no se ha liquidado. Revise las novedades y dé <b>Liquidar</b>.</p>;
   const conAlertas = filas.filter((f) => f.alertas.length).length;
@@ -146,6 +163,11 @@ function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
         <input className="input w-72" placeholder="Buscar por cédula, nombre o puesto" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
         {conAlertas > 0 && <label className="flex items-center gap-2 text-sm text-amber-800"><input type="checkbox" checked={soloAlertas} onChange={(e) => setSoloAlertas(e.target.checked)} />
           Solo con alertas ({conAlertas})</label>}
+        <select className="input w-56" value={filtro} onChange={(e) => setFiltro(e.target.value as typeof filtro)}>
+          <option value="">Todas las personas</option>
+          <option value="vacaciones">Con vacaciones ({conVacaciones.size})</option>
+          <option value="retiro">Con retiro ({conRetiro.size})</option>
+        </select>
         <span className="ml-auto text-sm text-slate-500">{visibles.length} de {filas.length}</span>
       </div>
       <div className="overflow-x-auto">
@@ -161,7 +183,9 @@ function Liquidacion({ filas }: { filas: LiquidacionSpeed[] }) {
                   <tr className="hover:bg-slate-50">
                     <td><button onClick={() => setAbierta(abierta === f.empleado_id ? null : f.empleado_id)}>
                       {abierta === f.empleado_id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button></td>
-                    <td><p className="font-medium">{f.nombre}{f.alertas.length > 0 && <AlertTriangle className="ml-1 inline h-4 w-4 text-amber-600" />}</p>
+                    <td><p className="font-medium">{f.nombre}{f.alertas.length > 0 && <AlertTriangle className="ml-1 inline h-4 w-4 text-amber-600" />}
+                      {conVacaciones.has(f.empleado_id) && <span className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800">VACACIONES</span>}
+                      {conRetiro.has(f.empleado_id) && <span className="ml-1 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-800">RETIRO</span>}</p>
                       <p className="text-xs text-slate-500">{f.cedula} · {f.cargo} · {f.puesto}{f.aplica_programacion ? "" : " · no aplica programación"}</p></td>
                     <td className="text-right tabular-nums">{f.dias.trabajados}{f.dias.variables !== f.dias.trabajados && <p className="text-xs text-slate-500">variables {f.dias.variables}</p>}</td>
                     <td className="text-right tabular-nums">{pesos(c.salario + (c.vacaciones ?? 0) + c.incapacidad)}</td>
@@ -503,5 +527,56 @@ function Lista({ titulo, items, alerta }: { titulo: string; items: string[]; ale
       <summary className={`cursor-pointer ${alerta ? "text-amber-800" : "text-slate-700"}`}>{titulo}</summary>
       <ul className="mt-1 max-h-60 overflow-y-auto text-xs text-slate-600">{items.map((t, i) => <li key={i}>• {t}</li>)}</ul>
     </details>
+  );
+}
+
+/** Quién tiene vacaciones y quién se retira en la quincena, con fechas, para cargarlo en World Office. */
+function VacacionesYRetiros({ periodoId, datos }: { periodoId: number; datos: VacacionesRetiros | null }) {
+  if (!datos) return <p className="text-sm text-slate-500">Cargando…</p>;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="flex-1 text-sm text-slate-600">Salen de los códigos de la programación (VAC y RUN). Las vacaciones y los retiros no van en el plano de novedades:
+          cárguelos en World Office con estas fechas.</p>
+        <a className="btn-secundario" href={`/api/speed/periodos/${periodoId}/vacaciones-retiros/excel`}><Download className="h-4 w-4" /> Excel</a>
+      </div>
+      <div className="tarjeta overflow-x-auto">
+        <p className="border-b border-slate-100 px-4 py-2 font-semibold text-violet-800">Vacaciones ({datos.vacaciones.length})</p>
+        <table className="tabla">
+          <thead><tr><th>Colaborador</th><th>Centro de costos</th><th className="text-right">Días en la quincena</th><th>Fechas</th><th>Observación</th></tr></thead>
+          <tbody>
+            {!datos.vacaciones.length && <tr><td colSpan={5} className="py-4 text-center text-slate-400">Nadie tiene vacaciones en esta quincena.</td></tr>}
+            {datos.vacaciones.map((v) => (
+              <tr key={v.empleado_id}>
+                <td><p className="font-medium">{v.nombre}</p><p className="text-xs text-slate-500">{v.cedula} · {v.cargo} · {v.puesto}</p></td>
+                <td>{v.centro}</td>
+                <td className="text-right tabular-nums">{v.dias}</td>
+                <td>{v.tramos.map(([a, b]) => a === b ? fechaCorta(a) : `${fechaCorta(a)} al ${fechaCorta(b)}`).join(", ") || "—"}</td>
+                <td className="text-xs text-slate-600">{[v.desde_antes && "viene de la quincena anterior", v.sigue && "sigue en la próxima quincena",
+                  v.sin_fechas && "digitadas a mano, sin fechas"].filter(Boolean).join(" · ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="tarjeta overflow-x-auto">
+        <p className="border-b border-slate-100 px-4 py-2 font-semibold text-red-800">Retiros ({datos.retiros.length})</p>
+        <table className="tabla">
+          <thead><tr><th>Colaborador</th><th>Centro de costos</th><th>Último día con turno</th><th>Retiro desde</th><th>Motivo</th></tr></thead>
+          <tbody>
+            {!datos.retiros.length && <tr><td colSpan={5} className="py-4 text-center text-slate-400">Nadie se retira en esta quincena.</td></tr>}
+            {datos.retiros.map((r) => (
+              <tr key={r.empleado_id}>
+                <td><p className="font-medium">{r.nombre}</p><p className="text-xs text-slate-500">{r.cedula} · {r.cargo} · {r.puesto}</p></td>
+                <td>{r.centro}</td>
+                <td>{fechaCorta(r.ultimo_dia)}</td>
+                <td>{fechaCorta(r.primer_dia_retiro)}</td>
+                <td className="text-xs text-slate-600">{r.motivo}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

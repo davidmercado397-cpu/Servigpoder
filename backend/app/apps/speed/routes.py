@@ -259,6 +259,20 @@ def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual:
     return StreamingResponse(io.BytesIO(contenido), media_type=XLSX, headers=encabezados)
 
 
+@router.get("/periodos/{periodo_id}/vacaciones-retiros", response_model=ApiResponse[dict])
+def vacaciones_retiros(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+    """Quién tiene vacaciones y quién se retira en la quincena (con fechas), para cargarlo en World Office."""
+    return ok(servicio.vacaciones_y_retiros(db, _periodo(db, periodo_id)))
+
+
+@router.get("/periodos/{periodo_id}/vacaciones-retiros/excel")
+def vacaciones_retiros_excel(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+    p = _periodo(db, periodo_id)
+    contenido = servicio.excel_vacaciones_retiros(p, servicio.vacaciones_y_retiros(db, p))
+    nombre = f"VACACIONES Y RETIROS {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
+    return StreamingResponse(io.BytesIO(contenido), media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
 @router.get("/periodos/{periodo_id}/world-office/avisos", response_model=ApiResponse[dict])
 def avisos_world_office(periodo_id: int, db: DbSession, _=Depends(require(VER))):
     """Cuántas filas tendría el plano y qué no se pudo incluir (para mostrarlo antes de descargar)."""

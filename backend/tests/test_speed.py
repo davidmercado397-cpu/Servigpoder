@@ -405,3 +405,27 @@ def test_plano_de_novedades_para_world_office(speed):
     tipos = {(f[2].value.day, f[1].value) for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("UNO")}
     assert (12, "Vacaciones") in tipos and (3, "Ausencia injustificada") in tipos
     assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 12
+
+
+def test_vacaciones_y_retiros_de_la_quincena(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS RENUNCIA"), fila(3, 80128728, "TRES SALE")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    uno = ["VAC"] * 4 + ["D", "N", "X"] + ["VAC"] * 8
+    dos = ["D", "N", "X", "D", "N"] + ["RUN"] * 10
+    tres = ["D"] * 15
+    archivo = programacion_xlsx([["T", "UNO GUARDA", 1006306373, uno], ["T", "DOS RENUNCIA", 52112768, dos], ["T", "TRES SALE", 80128728, tres]])
+    assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
+    # El Listado nuevo ya no trae a TRES: queda inactivo y se muestra como posible retiro
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS RENUNCIA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+
+    d = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]
+    v = d["vacaciones"][0]
+    assert v["cedula"] == "1006306373" and v["dias"] == 12 and v["tramos"] == [["2026-11-01", "2026-11-04"], ["2026-11-08", "2026-11-15"]]
+    assert v["desde_antes"] and v["sigue"] and v["centro"] == "Produccion"
+    retiros = {r["cedula"]: r for r in d["retiros"]}
+    assert retiros["52112768"]["ultimo_dia"] == "2026-11-05" and retiros["52112768"]["primer_dia_retiro"] == "2026-11-06"
+    assert "inactivo" in retiros["80128728"]["motivo"]
+    x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
+    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros"]

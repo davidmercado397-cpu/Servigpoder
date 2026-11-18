@@ -487,3 +487,29 @@ def test_los_siete_sin_nomina_solo_vacaciones():
     con_vac = motor._programado_sin_nomina("quincenal", "7", "SIETE", filas({**{d: "[VAC]" for d in range(1, 11)}, 12: "A"}), fechas, {},
                                            fechas[0], fechas[-1], solo_vacaciones=True)
     assert con_vac.tipo == "VACACIONES_VERIFICAR" and con_vac.mensaje.startswith("Grupo de los 7.") and "1 días programados después" in con_vac.mensaje
+
+
+def test_justificacion_se_reabre_si_cambia_el_valor(admin):
+    pid = _cargar_todo(admin)
+    modalidad = {"nomina": "quincenal", "cedula": "1003", "tipo": "MODALIDAD_MAYOR", "referencia": "130"}
+    auxilio = {"nomina": "quincenal", "cedula": "1003", "tipo": "AUX_CERO", "referencia": "103"}
+    r = admin.put(f"{API}/periodos/{pid}/alertas/decision",
+                  json={"items": [modalidad, auxilio], "estado": "justificada", "comentario": "Pactado con el cliente"})
+    assert r.status_code == 200
+    # Nueva nómina: la modalidad de Carla sube (cambia el valor); el auxilio sigue igual
+    cambiada = {**QUINCENAL, "1003": {**QUINCENAL["1003"], "DEVENGO_130": 500000}}
+    r = admin.post(f"{API}/periodos/{pid}/archivos/quincenal", files=archivo(_nomina(cambiada), "nomina_v2.xlsx"))
+    assert r.status_code == 200
+    lista = {a["tipo"]: a for a in admin.get(f"{API}/periodos/{pid}/alertas?q=1003").json()["data"]}
+    assert lista["AUX_CERO"]["estado"] == "justificada" and lista["AUX_CERO"]["anterior"] is None
+    m = lista["MODALIDAD_MAYOR"]
+    assert m["estado"] == "pendiente" and m["comentario"] == "" and m["pagado"] == 500000
+    assert m["anterior"]["estado"] == "justificada" and m["anterior"]["comentario"] == "Pactado con el cliente"
+    assert m["anterior"]["valores"]["pagado"] == 400000
+    historial = admin.get(f"{API}/periodos/{pid}").json()["data"]["historial"]
+    assert max(historial, key=lambda h: h["n"])["reabiertas"] == 1
+    # Se vuelve a justificar con el valor nuevo: ya no muestra lo anterior y se conserva al recalcular
+    admin.put(f"{API}/periodos/{pid}/alertas/decision", json={"items": [modalidad], "estado": "justificada", "comentario": "Nuevo pacto"})
+    assert admin.post(f"{API}/periodos/{pid}/recalcular").status_code == 200
+    m = next(a for a in admin.get(f"{API}/periodos/{pid}/alertas?q=1003").json()["data"] if a["tipo"] == "MODALIDAD_MAYOR")
+    assert m["estado"] == "justificada" and m["comentario"] == "Nuevo pacto" and m["anterior"] is None

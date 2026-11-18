@@ -248,7 +248,8 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
           <table className="tabla text-sm">
             <thead>
               <tr><th>#</th><th>Fecha</th><th>Motivo</th><th>Archivo de nómina</th><th className="text-right">Alertas</th>
-                <th className="text-right">Corregidas</th><th className="text-right">Persisten</th><th className="text-right">Nuevas</th></tr>
+                <th className="text-right">Corregidas</th><th className="text-right">Persisten</th><th className="text-right">Nuevas</th>
+                <th className="text-right">Reabiertas</th></tr>
             </thead>
             <tbody>
               {p.historial.map((h) => (
@@ -261,11 +262,13 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
                   <td className="text-right tabular-nums">{h.n > 1 ? <b className="text-emerald-700">{h.corregidas}</b> : "—"}</td>
                   <td className="text-right tabular-nums">{h.n > 1 ? h.persisten : "—"}</td>
                   <td className="text-right tabular-nums">{h.n > 1 ? (h.nuevas ? <b className="text-red-700">{h.nuevas}</b> : 0) : "—"}</td>
+                  <td className="text-right tabular-nums">{h.reabiertas ? <b className="text-amber-700">{h.reabiertas}</b> : h.n > 1 ? 0 : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="px-4 py-2 text-xs text-slate-500">Corregidas: alertas de la carga anterior que ya no aparecen. Nuevas: no estaban en la carga anterior (filtre &quot;Solo nuevas&quot; en Alertas).</p>
+          <p className="px-4 py-2 text-xs text-slate-500">Corregidas: alertas de la carga anterior que ya no aparecen. Nuevas: no estaban en la carga anterior (filtre &quot;Solo nuevas&quot; en Alertas).
+            Reabiertas: estaban justificadas, revisadas o marcadas como error, pero cambió el valor y volvieron a pendiente.</p>
         </section>
       )}
     </div>
@@ -386,7 +389,16 @@ function Alertas({ p, tipoInicial, fijo = false, onPersona, onCambio }: {
                     {a.titulo}
                     {a.nueva && <span className="ml-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">nueva</span>}
                   </td>
-                  <td className="max-w-md text-slate-600">{a.mensaje}{a.comentario && <span className="mt-1 block text-xs italic text-slate-500">“{a.comentario}”</span>}</td>
+                  <td className="max-w-md text-slate-600">{a.mensaje}{a.comentario && <span className="mt-1 block text-xs italic text-slate-500">“{a.comentario}”</span>}
+                    {a.anterior && a.estado === "pendiente" && (
+                      <span className="mt-1 block rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                        Cambió el valor: estaba <b>{a.anterior.estado === "revisada" ? "revisada y correcta" : a.anterior.estado}</b>
+                        {a.anterior.comentario && <> («{a.anterior.comentario}»)</>} con esperado{" "}
+                        {a.anterior.valores.esperado !== null && a.referencia !== "100" ? pesos(a.anterior.valores.esperado) : a.anterior.valores.esperado ?? "—"} y pagado{" "}
+                        {a.anterior.valores.pagado !== null && a.referencia !== "100" ? pesos(a.anterior.valores.pagado) : a.anterior.valores.pagado ?? "—"}. Revísela de nuevo.
+                      </span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap text-right tabular-nums">{a.esperado !== null && a.referencia !== "100" ? pesos(a.esperado) : a.esperado ?? "—"}</td>
                   <td className="whitespace-nowrap text-right tabular-nums">{a.pagado !== null && a.referencia !== "100" ? pesos(a.pagado) : a.pagado ?? "—"}</td>
                   <td><Insignia color={ec}>{et}</Insignia></td>

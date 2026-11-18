@@ -110,7 +110,8 @@ class NomAlerta(Base):
 
 
 class NomDecision(Base):
-    """Revisión de una alerta. Se conserva al recalcular (clave: periodo, nómina, cédula, tipo, referencia)."""
+    """Revisión de una alerta (clave: periodo, nómina, cédula, tipo, referencia). Se conserva al recalcular solo si la alerta
+    trae los mismos valores con que se decidió; si cambian, vuelve a pendiente y lo decidido queda en «anterior»."""
 
     __tablename__ = "nom_decision"
     __table_args__ = (UniqueConstraint("periodo_id", "nomina", "cedula", "tipo", "referencia"),)
@@ -125,6 +126,10 @@ class NomDecision(Base):
     comentario: Mapped[str] = mapped_column(Text, default="")
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey(Usuario.id, ondelete="SET NULL"), nullable=True)
     decidido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Valores de la alerta cuando se decidió: {"esperado": .., "pagado": ..}
+    valores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Decisión que se reabrió porque los valores cambiaron: estado, comentario, valores, fecha
+    anterior: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class NomCodigo(Base):

@@ -6,7 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.apps.nomina.models import (
-    ADMINISTRATIVO, CONTRATOS, CUOTAS, EXCLUIDO, MAESTROS, MENSUAL, MODALIDADES, PROGRAMACION, QUINCENAL, UBICACIONES,
+    ADMINISTRATIVO, CONTRATOS, CUOTAS, EXCLUIDO, MAESTROS, MENSUAL, MODALIDADES, PENDIENTE, PROGRAMACION, QUINCENAL, UBICACIONES,
     VALIDAR, NomAlerta, NomDecision, NomArchivo, NomCodigo, NomGrupo, NomParametros, NomPeriodo, NomPersona, NomPuestoDecision,
 )
 from app.apps.nomina.services import lectores, motor
@@ -160,6 +160,31 @@ def faltantes(db: Session, periodo: NomPeriodo) -> list[str]:
     return [NOMBRES_ARCHIVO[t] for t in archivos_del_periodo(periodo) if t not in tipos]
 
 
+def valores_alerta(esperado, pagado) -> dict:
+    """Los valores de una alerta que, si cambian, obligan a revisarla de nuevo."""
+    r = lambda v: None if v is None else round(float(v), 2)  # noqa: E731
+    return {"esperado": r(esperado), "pagado": r(pagado)}
+
+
+def _reabrir_cambiadas(db: Session, periodo_id: int, alertas: list) -> int:
+    """Una decisión (justificada, revisada o error) solo se conserva si la alerta trae los mismos valores. Si cambió
+    (p. ej. antes pagaba 2 días de más y ahora 5), vuelve a pendiente y lo decidido queda en «anterior»."""
+    nuevas = {(a.nomina, a.cedula, a.tipo, a.referencia[:40]): valores_alerta(a.esperado, a.pagado) for a in alertas}
+    reabiertas = 0
+    for d in db.scalars(select(NomDecision).where(NomDecision.periodo_id == periodo_id, NomDecision.estado != PENDIENTE)):
+        v = nuevas.get((d.nomina, d.cedula, d.tipo, d.referencia))
+        if v is None:
+            continue  # la alerta ya no está: la decisión se guarda por si vuelve con los mismos valores
+        if d.valores is None:
+            d.valores = v  # decisión anterior a este control: se toma la foto actual
+        elif d.valores != v:
+            d.anterior = {"estado": d.estado, "comentario": d.comentario, "valores": d.valores,
+                          "decidido_en": d.decidido_en.isoformat() if d.decidido_en else None}
+            d.estado, d.comentario, d.valores = PENDIENTE, "", None
+            reabiertas += 1
+    return reabiertas
+
+
 def _claves(db: Session, periodo_id: int) -> set[tuple[str, str, str]]:
     return {(a.cedula, a.tipo, a.referencia) for a in db.scalars(select(NomAlerta).where(NomAlerta.periodo_id == periodo_id))}
 
@@ -197,6 +222,7 @@ def recalcular(db: Session, periodo: NomPeriodo, motivo: str = "Recálculo") -> 
     corregidas = anteriores - actuales
     marcadas_error = {(d.cedula, d.tipo, d.referencia) for d in db.scalars(select(NomDecision).where(
         NomDecision.periodo_id == periodo.id, NomDecision.estado == "error"))}
+    reabiertas = _reabrir_cambiadas(db, periodo.id, r.alertas)
     nomina = datos.get(periodo.nomina) or {}
     periodo.historial = [*periodo.historial, {
         "n": len(periodo.historial) + 1, "fecha": datetime.now(timezone.utc).isoformat(), "motivo": motivo,
@@ -206,6 +232,7 @@ def recalcular(db: Session, periodo: NomPeriodo, motivo: str = "Recálculo") -> 
         "corregidas": 0 if primera else len(corregidas), "persisten": 0 if primera else len(actuales & anteriores),
         "nuevas": 0 if primera else len(actuales - anteriores),
         "errores_corregidos": len(corregidas & marcadas_error),
+        "reabiertas": reabiertas,
     }]
     periodo.resumen = {**r.resumen, "sin_modalidad_lista": r.puestos_sin_modalidad}
     periodo.calculado_en = datetime.now(timezone.utc)

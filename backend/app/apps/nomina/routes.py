@@ -191,7 +191,7 @@ def _alerta_out(a: NomAlerta, d: NomDecision | None) -> dict:
             "grupo": motor.TIPOS[a.tipo][2], "referencia": a.referencia, "severidad": a.severidad, "mensaje": a.mensaje,
             "esperado": float(a.esperado) if a.esperado is not None else None, "pagado": float(a.pagado) if a.pagado is not None else None,
             "nueva": a.nueva, "estado": d.estado if d else PENDIENTE, "comentario": d.comentario if d else "",
-            "decidido_en": d.decidido_en if d else None}
+            "decidido_en": d.decidido_en if d else None, "anterior": d.anterior if d else None}
 
 
 @router.get("/periodos/{periodo_id}/alertas", response_model=ApiResponse[list[dict]])
@@ -230,6 +230,12 @@ def decidir(periodo_id: int, data: DecisionIn, request: Request, db: DbSession, 
             d = NomDecision(periodo_id=periodo_id, nomina=it.nomina, cedula=it.cedula, tipo=it.tipo, referencia=it.referencia)
             db.add(d)
         d.estado, d.comentario, d.usuario_id = data.estado, data.comentario.strip(), actual.id
+        # Foto de los valores con que se decide: si al recalcular cambian, la alerta vuelve a pendiente
+        a = db.scalar(select(NomAlerta).where(NomAlerta.periodo_id == periodo_id, NomAlerta.nomina == it.nomina, NomAlerta.cedula == it.cedula,
+                                              NomAlerta.tipo == it.tipo, NomAlerta.referencia == it.referencia).limit(1))
+        d.valores = servicio.valores_alerta(a.esperado, a.pagado) if a and data.estado != PENDIENTE else None
+        if data.estado != PENDIENTE:
+            d.anterior = None
     auditar(db, request, "nom_alertas_revisadas", actual.id, periodo_id=periodo_id, estado=data.estado, cantidad=len(data.items))
     db.commit()
     return ok({"actualizadas": len(data.items)})

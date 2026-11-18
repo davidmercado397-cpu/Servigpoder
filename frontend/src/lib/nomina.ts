@@ -6,7 +6,7 @@ export type TipoAlerta = { titulo: string; severidad: "alta" | "media" | "baja" 
 
 export type Revision = {
   n: number; fecha: string; motivo: string; archivo_nomina: string; personas: number; alertas: number;
-  corregidas: number; persisten: number; nuevas: number; errores_corregidos: number;
+  corregidas: number; persisten: number; nuevas: number; errores_corregidos: number; reabiertas?: number;
 };
 
 export type Periodo = {
@@ -27,6 +27,8 @@ export type Alerta = {
   id: number; nomina: string; cedula: string; nombre: string; tipo: string; titulo: string; grupo: string; referencia: string;
   severidad: string; mensaje: string; esperado: number | null; pagado: number | null; nueva: boolean; estado: string; comentario: string;
   decidido_en: string | null;
+  /** Lo que estaba decidido antes de que la alerta cambiara de valor (volvió a pendiente). */
+  anterior?: { estado: string; comentario: string; valores: { esperado: number | null; pagado: number | null }; decidido_en: string | null } | null;
 };
 
 export type PersonaLista = {

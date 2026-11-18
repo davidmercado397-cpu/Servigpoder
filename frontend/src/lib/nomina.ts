@@ -15,7 +15,7 @@ export type Periodo = {
   archivos: Record<string, ArchivoCargado>; alertas: number; pendientes: number; personas: Record<string, number>;
   resumen?: {
     personas: Record<string, number>; personas_con_alertas: number; alertas: number; puestos_sin_modalidad: number;
-    puestos_sin_modalidad_pendientes: number; excluidas: Record<string, number>; por_tipo: Record<string, Record<string, number>>;
+    puestos_sin_modalidad_pendientes: number; excluidas: Record<string, number>; los_siete?: number; por_tipo: Record<string, Record<string, number>>;
     vacaciones?: number;
   };
   faltan?: string[];

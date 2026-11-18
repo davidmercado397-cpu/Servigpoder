@@ -216,7 +216,7 @@ function Resumen({ p, onTipo }: { p: Periodo; onTipo: (t: string) => void }) {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {tile("Personas validadas", (r.personas.quincenal ?? 0) + (r.personas.mensual ?? 0))}
-        {tile("Fuera de la revisión (los 7)", Object.values(r.excluidas).reduce((s, n) => s + n, 0))}
+        {tile("Los 7 (solo vacaciones y cuotas)", r.los_siete ?? Object.values(r.excluidas).reduce((s, n) => s + n, 0))}
         {tile("Alertas", r.alertas, `${r.personas_con_alertas.toLocaleString("es-CO")} personas`)}
         {tile("Pendientes de revisar", p.pendientes)}
         {tile("Puestos sin modalidad", r.puestos_sin_modalidad_pendientes, `de ${r.puestos_sin_modalidad} por decidir`)}
@@ -406,7 +406,13 @@ function Personas({ id, onPersona }: { id: string; onPersona: (x: { nomina: stri
   const [f, setF] = useState({ q: "", nomina: "", con_alertas: false });
   const [lista, setLista] = useState<PersonaLista[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const [porQue, setPorQue] = useState<{ cedula: string; nombre: string; motivo: string }[] | null>(null);
   const pag = usePaginacion([f]);
+  useEffect(() => { setPorQue(null); }, [f.q]);
+  async function explicar() {
+    try { setPorQue(await api<{ cedula: string; nombre: string; motivo: string }[]>(`/nomina/periodos/${id}/por-que?q=${encodeURIComponent(f.q.trim())}`)); }
+    catch (e) { setPorQue([{ cedula: "", nombre: "", motivo: mensajeError(e) }]); }
+  }
 
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -432,6 +438,15 @@ function Personas({ id, onPersona }: { id: string; onPersona: (x: { nomina: stri
           <input type="checkbox" className="h-4 w-4" checked={f.con_alertas} onChange={(e) => setF({ ...f, con_alertas: e.target.checked })} /> Solo con alertas
         </label>
       </div>
+      {/* ¿No aparece? Se busca en lo que se cargó del periodo y se explica por qué */}
+      {f.q.trim().length >= 3 && meta && meta.total === 0 && (
+        <div className="space-y-2">
+          <button className="btn-secundario" onClick={explicar}><Search className="h-4 w-4" /> ¿Por qué no aparece «{f.q.trim()}»?</button>
+          {porQue?.map((x, i) => (
+            <Alerta key={i} tipo="info">{x.nombre && <b>{x.nombre} ({x.cedula}): </b>}{x.motivo}</Alerta>
+          ))}
+        </div>
+      )}
       <div className="tarjeta overflow-auto">
         <table className="tabla text-sm">
           <thead><tr><th>Persona</th><th>Nómina</th><th>Grupo</th><th className="text-right">Días pagables</th><th className="text-right">Días de salario</th><th className="text-right">Novedad</th><th className="text-right">Neto</th><th className="text-right">Alertas</th></tr></thead>
@@ -559,6 +574,10 @@ function DetallePersona({ id, nomina, cedula, onCerrar }: { id: string; nomina: 
         {error && <div className="p-5"><Alerta>{error}</Alerta></div>}
         {d && (
           <div className="space-y-5 p-5">
+            {d.tratamiento === "excluido" && (
+              <Alerta tipo="info">Grupo de los 7 (pago por horas): solo se le revisan las <b>vacaciones</b> y las <b>cuotas</b>. Los valores
+                esperados de salario y modalidad de abajo son solo de referencia.</Alerta>
+            )}
             {d.alertas_lista.length > 0 && (
               <section className="space-y-1.5">
                 {d.alertas_lista.map((a) => (

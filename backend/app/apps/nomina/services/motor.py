@@ -190,12 +190,11 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 
         for ced, pago in archivo["personas"].items():
             trat = tratamiento(ced)
-            if trat == EXCLUIDO:
-                continue
             contrato = contratos.get(ced)
             persona = _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas_por_persona.get(ced, []),
                                codigos, puestos, puestos_aprobados, mods, conceptos_modalidad, desc_concepto, p, sin_modalidad)
-            a = _alertas_persona(persona, pago, contrato, trat, nomina, base_dias, p)
+            # Los 7 (pago por horas): solo se revisan las vacaciones y las cuotas
+            a = _alertas_vacaciones(persona, nomina) if trat == EXCLUIDO else _alertas_persona(persona, pago, contrato, trat, nomina, base_dias, p)
             a += _alertas_cuotas(persona, pago, cuotas_por_persona.get(ced, []), conceptos_cuota, archivo["conceptos"], nomina, p,
                                  quincena)
             persona["alertas"] = sum(1 for x in a if not x.informativa)
@@ -204,13 +203,21 @@ def calcular(anio: int, mes: int, datos: dict, codigos: dict[str, Codigo], grupo
 
         # Programados (con algún código en el periodo) que no están en esta nómina
         for ced, filas in filas_por_persona.items():
-            if ced in en_nomina or tratamiento(ced) in (EXCLUIDO, ADMINISTRATIVO):
+            if ced in en_nomina or tratamiento(ced) == ADMINISTRATIVO:
                 continue
             codigos_periodo = {d for f in filas for d in fechas if f["dias"].get(d.isoformat())}  # días distintos
             if not codigos_periodo:
                 continue
             contrato = contratos.get(ced)
             nombre = filas[0]["nombre"]
+            if tratamiento(ced) == EXCLUIDO:
+                # Los 7: sin nómina solo interesa si salió a vacaciones (para verificar la liquidación), en su tipo de nómina
+                if contrato["tipo_nomina"] != nomina.upper():
+                    continue
+                a = _programado_sin_nomina(nomina, ced, nombre, filas, fechas, codigos, desde, hasta, solo_vacaciones=True)
+                if a is not None:
+                    alertas.append(a)
+                continue
             if contrato is None or not contrato["activo"]:
                 if nomina == QUINCENAL or not datos.get(QUINCENAL):  # una sola vez por persona
                     alertas.append(Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_CONTRATO",
@@ -237,7 +244,7 @@ def _tramos(por_dia: list[tuple[date, list[tuple[str, Codigo]]]]) -> str:
 
 
 def _programado_sin_nomina(nomina: str, ced: str, nombre: str, filas: list[dict], fechas: list[date], codigos: dict[str, Codigo],
-                           desde: date, hasta: date) -> Alerta:
+                           desde: date, hasta: date, solo_vacaciones: bool = False) -> Alerta | None:
     """Programado en el periodo y sin nómina. Con vacaciones en el periodo: lo trabajado antes se paga en la liquidación de
     vacaciones, así que no estar en la nómina es correcto (va a la pestaña Vacaciones para verificar); solo es alerta si
     trabajó después de regresar, porque esos días los paga la nómina."""
@@ -253,6 +260,8 @@ def _programado_sin_nomina(nomina: str, ced: str, nombre: str, filas: list[dict]
     programacion = _tramos(por_dia)
     datos = {"puestos": sorted({f["puesto"] for f in filas})}
     vac = [d for d, c in por_dia if c and all(x[1].descuenta for x in c) and any(x[1].vacaciones for x in c)]
+    if not vac and solo_vacaciones:
+        return None
     if not vac:
         return Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_NOMINA",
                       f"Tiene {programados} días con programación del {desde:%d} al {hasta:%d} y no aparece en la nómina {nomina}. "
@@ -261,15 +270,17 @@ def _programado_sin_nomina(nomina: str, ced: str, nombre: str, filas: list[dict]
     antes = [d for d, c in por_dia if d < vac[0] and trabaja(c)]
     despues = [d for d, c in por_dia if d > vac[0] and trabaja(c)]
     rango_vac = f"vacaciones del {vac[0]:%d} al {vac[-1]:%d} ({len(vac)} días)"
-    if despues:
+    if despues and not solo_vacaciones:
         return Alerta(nomina, ced, nombre, "PROGRAMADO_SIN_NOMINA",
                       f"Tiene {rango_vac} y {len(despues)} días programados después del regreso (del {despues[0]:%d} al {despues[-1]:%d}) "
                       f"que debe pagar la nómina {nomina}, pero no aparece en ella. Programación: {programacion}.",
                       esperado=len(despues), datos=datos)
     txt_antes = (f"{len(antes)} días trabajados antes (del {antes[0]:%d} al {antes[-1]:%d}) que se pagan en la liquidación de vacaciones"
                  if antes else "sin días trabajados antes")
+    txt_despues = (f"{len(despues)} días programados después del regreso (del {despues[0]:%d} al {despues[-1]:%d})" if despues
+                   else "ningún día después del regreso")
     return Alerta(nomina, ced, nombre, "VACACIONES_VERIFICAR",
-                  f"No aparece en la nómina {nomina}: {rango_vac}; {txt_antes}; ningún día después del regreso. "
+                  f"{'Grupo de los 7. ' if solo_vacaciones else ''}No aparece en la nómina {nomina}: {rango_vac}; {txt_antes}; {txt_despues}. "
                   f"Verificar que la liquidación de vacaciones lo incluya. Programación: {programacion}.",
                   esperado=0, pagado=0, datos=datos)
 
@@ -387,6 +398,22 @@ def _persona(ced, pago, nomina, contrato, trat, fechas, faltan_mes_corto, filas,
         "devengado": round(sum(devengos.values())), "deducido": round(sum(deducciones.values())), "neto": round(pago["neto"]),
         "devengos": devengos, "deducciones": deducciones, "horas": horas,
     }
+
+
+def _alertas_vacaciones(per: dict, nomina: str) -> list[Alerta]:
+    """Los 7 se pagan por horas (factor de conversión): no se validan días, salario ni modalidad; solo se avisa si tienen
+    vacaciones en el periodo, para verificar la liquidación de vacaciones."""
+    vac = per.get("vacaciones")
+    if not vac:
+        return []
+    hasta_antes = (date.fromisoformat(vac["desde"]) - timedelta(days=1)).day
+    antes = (f"{vac['antes']} días trabajados antes (del {per['desde'][8:]} al {hasta_antes:02d}) que se pagan en la liquidación de vacaciones"
+             if vac["antes"] else "sin días trabajados antes")
+    despues = per["conteo"]["pagables"]
+    return [Alerta(nomina, per["cedula"], per["nombre"], "VACACIONES_VERIFICAR",
+                   f"Grupo de los 7. Vacaciones del {vac['desde'][8:]} al {vac['hasta'][8:]} ({vac['dias']} días); {antes}; "
+                   f"{f'{despues} días después del regreso' if despues else 'ningún día después del regreso'}. "
+                   f"En esta nómina se le pagan {per['dias_salario']:g} días de salario.", esperado=despues, pagado=per["dias_salario"])]
 
 
 def _alertas_persona(per: dict, pago: dict, contrato: dict | None, trat: str, nomina: str, base_dias: int, p: Parametros) -> list[Alerta]:
@@ -579,6 +606,8 @@ def _resumen(personas, alertas, sin_mod, datos) -> dict:
         validadas[x["nomina"]].add(x["cedula"])
     return {
         "personas": dict(por_nomina),
+        # Los 7: están en la revisión, pero solo se les revisan vacaciones y cuotas
+        "los_siete": sum(1 for x in personas if x.get("tratamiento") == EXCLUIDO),
         "personas_con_alertas": len({(a.nomina, a.cedula) for a in reales}),
         "alertas": len(reales),
         "vacaciones": sum(1 for a in alertas if a.tipo == "VACACIONES_VERIFICAR"),

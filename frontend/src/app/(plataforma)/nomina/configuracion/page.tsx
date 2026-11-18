@@ -14,7 +14,7 @@ type Parametros = {
 const TRATAMIENTOS: [string, string, string][] = [
   ["validar", "Se valida", "Se revisa todo: días, salario, auxilio, modalidad y cuotas"],
   ["administrativo", "Administrativo", "Solo contrato y cuotas (no necesita programación)"],
-  ["excluido", "Excluido (los 7)", "No se revisa"],
+  ["excluido", "Los 7 (pago por horas)", "Solo vacaciones y cuotas (no se validan días, salario ni modalidad)"],
 ];
 
 const CAMPOS: [keyof Parametros, string, string, "numero" | "texto"][] = [

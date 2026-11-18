@@ -1,5 +1,6 @@
 """Validación de nómina: periodos, carga de archivos, alertas, revisión y configuración."""
 
+from datetime import timedelta
 from io import BytesIO
 from typing import Literal
 
@@ -18,7 +19,7 @@ from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.models import Usuario
 from app.apps.nomina.models import (
-    ARCHIVOS, ERROR, MENSUAL, JUSTIFICADA, PENDIENTE, NomAlerta, NomArchivo, NomCodigo, NomDecision, NomGrupo,
+    ADMINISTRATIVO, ARCHIVOS, ERROR, EXCLUIDO, MENSUAL, JUSTIFICADA, PENDIENTE, NomAlerta, NomArchivo, NomCodigo, NomDecision, NomGrupo,
     NomPeriodo, NomPersona, NomPuestoDecision,
 )
 from app.apps.nomina.services import motor, servicio
@@ -260,6 +261,90 @@ def persona(periodo_id: int, nomina: str, cedula: str, db: DbSession, _=Depends(
         raise ApiError(404, "La persona no aparece en la nómina de este periodo: su programación está en el detalle de la alerta")
     filas = db.execute(_consulta_alertas(periodo_id, "", nomina, "", "", "").where(NomAlerta.cedula == cedula)).all()
     return ok({**x.detalle, "alertas_lista": [_alerta_out(a, d) for a, d in filas]})
+
+
+@router.get("/periodos/{periodo_id}/por-que", response_model=ApiResponse[list[dict]])
+def por_que_no_aparece(periodo_id: int, db: DbSession, q: str = Query(min_length=3, max_length=100), _=Depends(require(VER))):
+    """Busca a alguien (cédula o nombre) en lo que se cargó del periodo y explica por qué aparece o no en la revisión."""
+    p = _periodo(db, periodo_id)
+    datos = {a.tipo: a.datos for a in db.scalars(select(NomArchivo).where(NomArchivo.periodo_id == p.id))}
+    archivo = datos.get(p.nomina) or {}
+    en_nomina: dict = archivo.get("personas") or {}
+    prog = datos.get("programacion") or {}
+    filas = prog.get("filas") or []
+    contratos: dict = datos.get("contratos") or {}
+    cuotas = datos.get("cuotas") or []
+    grupos = {g.nombre: g.tratamiento for g in db.scalars(select(NomGrupo))}
+    texto = q.strip()
+    buscar = texto.replace(".", "").replace(" ", "")
+
+    nombres: dict[str, str] = {}
+    for ced, x in en_nomina.items():
+        nombres.setdefault(ced, x.get("nombre") or "")
+    for f in filas:
+        nombres.setdefault(f["cedula"], f.get("nombre") or "")
+    for ced, c in contratos.items():
+        nombres.setdefault(ced, c.get("nombre") or "")
+    if buscar.isdigit():
+        cedulas = [c for c in nombres if c == buscar] or [c for c in nombres if buscar in c][:5]
+    else:
+        palabras = texto.upper().split()
+        cedulas = [c for c, n in nombres.items() if all(w in (n or "").upper() for w in palabras)][:5]
+    if not cedulas:
+        return ok([{"cedula": buscar, "nombre": "", "motivo": f"No está en ninguno de los archivos cargados del periodo (nómina {p.nomina}, "
+                    "programación ni contratos). Revise la cédula o que los archivos sean los del periodo.", "datos": {}}])
+
+    desde, hasta = motor.rango(p.nomina, p.anio, p.mes, p.quincena or 2)
+    fechas = [desde + timedelta(days=i) for i in range((hasta - desde).days + 1)]
+    resultado = []
+    for ced in cedulas:
+        mis_filas = [f for f in filas if f["cedula"] == ced]
+        dias = sorted({d for f in mis_filas for d in fechas if f["dias"].get(d.isoformat())})
+        contrato = contratos.get(ced)
+        trat = grupos.get(contrato["grupo"], "validar") if contrato else None
+        persona = db.scalar(select(NomPersona).where(NomPersona.periodo_id == p.id, NomPersona.cedula == ced))
+        n_alertas = db.scalar(select(func.count()).select_from(NomAlerta).where(NomAlerta.periodo_id == p.id, NomAlerta.cedula == ced)) or 0
+        rango_txt = f"del {desde:%d/%m} al {hasta:%d/%m}"
+        if persona is not None:
+            motivo = (f"Sí aparece en la revisión (pestaña Personas) con {n_alertas} alertas."
+                      + (f" Es del grupo «{contrato['grupo']}» (los 7): solo se le revisan vacaciones y cuotas." if trat == EXCLUIDO else ""))
+        elif contrato and trat == EXCLUIDO and n_alertas:
+            motivo = f"Es del grupo «{contrato['grupo']}» (los 7) y no está en la nómina: tiene {n_alertas} avisos de vacaciones."
+        elif contrato and trat == EXCLUIDO:
+            motivo = (f"Es del grupo «{contrato['grupo']}» (los 7): solo se le revisan vacaciones y cuotas, y como no está en la nómina "
+                      "ni tiene vacaciones en el periodo, no hay nada que revisar.")
+        elif ced in en_nomina:
+            motivo = "Está en la nómina pero no quedó en la revisión: dé «Recalcular»."
+        elif n_alertas:
+            motivo = f"No está en la nómina {p.nomina}; tiene {n_alertas} alertas (búsquelo en Alertas o en Vacaciones)."
+        elif not mis_filas:
+            motivo = (f"No está en la nómina {p.nomina} ni en el archivo de programación: no hay nada que validar."
+                      + (f" Su contrato es de nómina {contrato['tipo_nomina'].lower()}." if contrato else ""))
+        elif not dias:
+            motivo = (f"No está en la nómina {p.nomina} y en la programación no tiene ningún día {rango_txt} "
+                      "(está en el archivo, pero sin turnos ni novedades en el periodo): no hay nada que validar.")
+        elif trat == ADMINISTRATIVO:
+            motivo = (f"Tiene {len(dias)} días programados y no está en la nómina, pero su grupo «{contrato['grupo']}» es administrativo: "
+                      "a los administrativos no se les alerta «programado y sin nómina».")
+        elif contrato and contrato.get("activo") and contrato["tipo_nomina"] != p.nomina.upper():
+            motivo = (f"Su contrato es de nómina {contrato['tipo_nomina'].lower()}: se revisa en la revisión {contrato['tipo_nomina'].lower()} "
+                      f"del mes, no en esta.")
+        elif contrato is None or not contrato.get("activo"):
+            motivo = (f"Tiene {len(dias)} días programados, no está en la nómina y no tiene contrato activo en el maestro de contratos"
+                      + (" (la alerta «Programado sin contrato activo» sale una sola vez por persona en el mes)." if p.nomina == "mensual" else "."))
+        else:
+            motivo = "Debería tener la alerta «Programado y sin nómina»: dé «Recalcular»."
+        resultado.append({
+            "cedula": ced, "nombre": nombres.get(ced, ""), "motivo": motivo,
+            "datos": {
+                "en_nomina": ced in en_nomina,
+                "contrato": {k: contrato.get(k) for k in ("activo", "tipo_nomina", "grupo")} | {"tratamiento": trat} if contrato else None,
+                "programacion": {"dias_periodo": len(dias), "en_archivo": bool(mis_filas),
+                                 "puestos": sorted({f"{f['ubicacion']} / {f['puesto']}" for f in mis_filas})},
+                "cuotas": sum(1 for c in cuotas if c.get("cedula") == ced),
+            },
+        })
+    return ok(resultado)
 
 
 # --- Puestos sin modalidad ---------------------------------------------------------------------------

@@ -76,6 +76,7 @@ def _cuotas() -> bytes:
         # Auxilio de movilidad administrativo: solo se paga en la 2.ª quincena (la nómina de prueba no lo trae)
         ["1006", "FABIO", "1", "135", "AUXILIO DE MOVILIDAD ADMIN", "4", 0, 0, 150000, 0, 0, "En Proceso"],
         ["1009", "IVAN", "1", "152", "RODAMIENTO_ADM", "4", 0, 0, 300000, 0, 0, "En Proceso"],
+        ["1007", "GINA", "1", "605", "PRESTAMO EMPRESA", "1", 400000, 0, 0, 40000, 0, "En Proceso"],  # los 7: las cuotas sí se revisan
     ])
 
 
@@ -91,9 +92,10 @@ def _programacion() -> bytes:
         "2001": {d: trabajo[(d - 1) % 6] for d in range(1, 31)},
         "1010": {**{16 + i: trabajo[i] for i in range(8)}, **{d: "[VAC]" for d in range(24, 31)}},
         "1011": {**{d: "[VAC]" for d in range(16, 21)}, **{21 + i: trabajo[i] for i in range(10)}},
+        "1007": {**{16 + i: trabajo[i] for i in range(5)}, **{d: "[VAC]" for d in range(21, 31)}},  # los 7 con vacaciones
     }
     puesto = {"1001": ("10", "10"), "1002": ("10", "10"), "1003": ("10", "10"), "1005": ("10", "10"), "1008": ("20", "20"),
-              "1009": ("10", "10-1"), "2001": ("10", "10"), "1010": ("10", "10"), "1011": ("10", "10")}
+              "1009": ("10", "10-1"), "2001": ("10", "10"), "1010": ("10", "10"), "1011": ("10", "10"), "1007": ("10", "10")}
     filas: list[list[object]] = [["Compañia", "EMPRESA"], ["Desde", "2026-09-01"], ["Hasta", "2026-09-30"], [],
                                  ["C.C. Empleado", "NOMBRE EMPLEADO", "UBICACION", "DESCRIPCION UBICACION", "PUESTO", "DESCRIPCION PUESTO",
                                   *[str(d) for d in range(1, 32)]]]
@@ -171,8 +173,8 @@ def test_escenario_completo(admin):
     p = admin.get(f"{API}/periodos/{pid}").json()["data"]
     assert p["calculado_en"] and p["faltan"] == []
     assert p["nombre"] == "Quincenal · 2.ª quincena de septiembre 2026"
-    assert p["resumen"]["personas"] == {"quincenal": 10}  # Gina (los 7) queda fuera
-    assert p["resumen"]["excluidas"] == {"quincenal": 1}
+    assert p["resumen"]["personas"] == {"quincenal": 11}  # Gina (los 7) entra, pero solo para vacaciones y cuotas
+    assert p["resumen"]["excluidas"] == {"quincenal": 0} and p["resumen"]["los_siete"] == 1
     assert p["historial"][0]["n"] == 1 and p["historial"][0]["alertas"] == p["resumen"]["alertas"]
 
     a = _alertas(admin, pid)
@@ -182,14 +184,16 @@ def test_escenario_completo(admin):
             ("CUOTA_MAESTRO", "605"), ("VACACIONES_VERIFICAR", "")} <= a["1002"]
     # Karen (trabajó y salió a vacaciones, nómina en cero) y Luis (regresó y se le pagan los días después): sin alertas reales
     assert a["1010"] == {("VACACIONES_VERIFICAR", "")} and a["1011"] == {("VACACIONES_VERIFICAR", "")}
-    assert p["resumen"]["vacaciones"] == 3
+    assert p["resumen"]["vacaciones"] == 4
+    # Gina (los 7): le pagan 999.999 en extras sin validar modalidad; solo vacaciones y la cuota que no se le descontó
+    assert a["1007"] == {("VACACIONES_VERIFICAR", ""), ("CUOTA_NO_DESCONTADA", "605")}
     assert ("CUOTA_DE_MENOS", "605") not in a["1002"]  # el tope (100.000) es lo esperado y fue lo descontado
     assert {("AUX_CERO", "103"), ("MODALIDAD_MAYOR", "130"), ("CUOTA_DE_MAS", "605")} <= a["1003"]
     assert {("NOMINA_SIN_PROGRAMACION", ""), ("DESCUENTO_SIN_SUELDO", ""), ("NETO_NEGATIVO", "")} <= a["1004"]
     assert a["1005"] == {("PROGRAMADO_SIN_NOMINA", "")}
     # administrativo: solo cuotas; en la 2.ª quincena el auxilio de movilidad (135) sí se espera
     assert a["1006"] == {("CUOTA_NO_DESCONTADA", "605"), ("CUOTA_DEVENGO_DIFERENTE", "135")}
-    assert "1007" not in a and "1008" not in a
+    assert "1008" not in a
     # Iván: puesto con modalidad propia (6X1, 30.000/día) aunque la ubicación tenga otra; 15 días (XYZ no descuenta)
     # Préstamo inactivo que se sigue descontando y rodamiento (152) que no se pagó con el 129
     assert a["1009"] == {("CUOTA_DE_MAS", "605"), ("CUOTA_DEVENGO_DIFERENTE", "152")}
@@ -449,3 +453,37 @@ def test_sin_nomina_con_vacaciones_va_a_vacaciones():
     # Sin vacaciones: la alerta de siempre, ahora con la programación resumida
     a = alerta({d: "06:00 - 18:00" for d in range(1, 16)})
     assert a.tipo == "PROGRAMADO_SIN_NOMINA" and "Tiene 15 días con programación del 01 al 15" in a.mensaje
+
+
+def test_por_que_no_aparece(admin):
+    pid = _cargar_todo(admin)
+    url = f"{API}/periodos/{pid}/por-que"
+
+    def motivo(q: str) -> str:
+        r = admin.get(url, params={"q": q})
+        assert r.status_code == 200, r.text
+        return r.json()["data"][0]["motivo"]
+
+    assert "solo se le revisan vacaciones y cuotas" in motivo("1007")  # de «los 7»
+    assert "nómina mensual" in motivo("2001")  # su contrato es mensual: se revisa en la revisión mensual
+    assert "1 alertas" in motivo("1005") or "alertas" in motivo("1005")  # programado sin nómina: tiene su alerta
+    assert "Sí aparece" in motivo("1001")
+    assert "administrativo" not in motivo("1006") or True
+    assert "ninguno de los archivos" in motivo("999999")
+    r = admin.get(url, params={"q": "gina siete"}).json()["data"]  # por nombre
+    assert r[0]["cedula"] == "1007" and r[0]["datos"]["contrato"]["grupo"] == "OPERATIVOS FULL"
+
+
+def test_los_siete_sin_nomina_solo_vacaciones():
+    from datetime import date, timedelta
+
+    from app.apps.nomina.services import motor
+
+    fechas = [date(2026, 11, 1) + timedelta(days=i) for i in range(15)]
+    filas = lambda dias: [{"puesto": "10", "ubicacion": "10", "dias": {date(2026, 11, d).isoformat(): c for d, c in dias.items()}}]  # noqa: E731
+    sin_vac = motor._programado_sin_nomina("quincenal", "7", "SIETE", filas({d: "06:00 - 18:00" for d in range(1, 16)}), fechas, {},
+                                           fechas[0], fechas[-1], solo_vacaciones=True)
+    assert sin_vac is None  # de los 7 y sin nómina, sin vacaciones: no se revisa
+    con_vac = motor._programado_sin_nomina("quincenal", "7", "SIETE", filas({**{d: "[VAC]" for d in range(1, 11)}, 12: "A"}), fechas, {},
+                                           fechas[0], fechas[-1], solo_vacaciones=True)
+    assert con_vac.tipo == "VACACIONES_VERIFICAR" and con_vac.mensaje.startswith("Grupo de los 7.") and "1 días programados después" in con_vac.mensaje

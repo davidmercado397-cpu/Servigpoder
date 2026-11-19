@@ -39,12 +39,13 @@ export type ProgramacionDias = { dias: Record<string, string>; puestos: string[]
 export type PendienteProgramacion = {
   clave: string; cedula: string; nombre: string; puestos: string[]; dias: Record<string, string>; ingreso_sugerido: string | null;
   estado: "pendiente" | "creado" | "asignado" | "descartado"; empleado?: { cedula: string; nombre: string };
+  sugeridos?: { cedula: string; nombre: string }[];
 };
 
 export type ResultadoProgramacion = {
   hojas: string[]; personas: number; cargadas: number; quitadas: number; avisos: string[]; archivo?: string; fecha?: string;
   no_encontrados: PendienteProgramacion[];
-  por_nombre: { nombre: string; cedula: string; en_archivo: string }[];
+  por_nombre: { nombre: string; cedula: string; en_archivo: string; nombre_listado?: string; parecido?: boolean }[];
   sin_programacion: { cedula: string; nombre: string; cargo: string }[];
   conflictos: { cedula: string; nombre: string; detalle: string[] }[];
   resumen: { vacaciones: number; incapacidad: number; no_laborados: number; remunerados: number; turnos_tad: number; turnos_tan: number;

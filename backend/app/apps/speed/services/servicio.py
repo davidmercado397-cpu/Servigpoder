@@ -2,6 +2,7 @@
 
 import copy
 import io
+from difflib import SequenceMatcher
 import re
 import unicodedata
 from datetime import date, datetime, timezone
@@ -212,6 +213,32 @@ def _clave_nombre(t: str) -> str:
     return " ".join(sorted(re.findall(r"[a-z0-9]+", t)))
 
 
+def _mismo_nombre(a: str, b: str) -> bool:
+    """El mismo nombre aunque esté escrito un poco distinto (JHON / JOHN) o le falte un nombre o apellido.
+
+    Pide al menos 3 palabras en el más corto, 2 iguales y a lo sumo 1 parecida (≥ 75 % de letras en común)."""
+    x, y = _clave_nombre(a).split(), _clave_nombre(b).split()
+    corto, largo = (x, y) if len(x) <= len(y) else (y, x)
+    if len(corto) < 3:
+        return False
+    restantes, exactos, parecidos = list(largo), 0, 0
+    for t in corto:
+        if t in restantes:
+            restantes.remove(t)
+            exactos += 1
+            continue
+        mejor = max(restantes, key=lambda r: SequenceMatcher(None, t, r).ratio(), default=None)
+        if mejor is None or SequenceMatcher(None, t, mejor).ratio() < 0.75:
+            return False
+        restantes.remove(mejor)
+        parecidos += 1
+    return exactos >= 2 and parecidos <= 1
+
+
+def _parecidos(nombre: str, empleados: list[SpdEmpleado]) -> list[SpdEmpleado]:
+    return [e for e in empleados if _mismo_nombre(nombre, e.nombre)]
+
+
 def _anterior(db: Session, periodo: SpdPeriodo) -> SpdPeriodo | None:
     if periodo.quincena == 2:
         anio, mes, q = periodo.anio, periodo.mes, 1
@@ -248,14 +275,16 @@ def _cargar_novedad(db: Session, periodo: SpdPeriodo, e: SpdEmpleado, per: "prog
     return d
 
 
-def _pendiente(clave: str, per: "programacion.Persona", periodo: SpdPeriodo) -> dict:
+def _pendiente(clave: str, per: "programacion.Persona", periodo: SpdPeriodo, sugeridos: list[SpdEmpleado]) -> dict:
     """Persona de la programación que no está en el Listado: se guardan sus códigos para poder crearla o asignarla después."""
     dias = sorted(per.dias)
     ingreso = None
     if dias and dias[0] > 1:  # empezó a trabajar en el mes: se sugiere ese día como fecha de ingreso
         ingreso = date(periodo.anio, periodo.mes, dias[0]).isoformat()
     return {"clave": clave, "cedula": per.cedula, "nombre": per.nombre, "puestos": per.puestos[:3],
-            "dias": {str(d): per.dias[d] for d in dias}, "ingreso_sugerido": ingreso, "estado": "pendiente"}
+            "dias": {str(d): per.dias[d] for d in dias}, "ingreso_sugerido": ingreso, "estado": "pendiente",
+            # Empleados del Listado con un nombre parecido (para «Es un empleado del Listado»)
+            "sugeridos": [{"cedula": e.cedula, "nombre": e.nombre} for e in sugeridos[:3]]}
 
 
 def resolver_pendiente(db: Session, periodo: SpdPeriodo, clave: str, accion: str, empleado: SpdEmpleado | None) -> dict:
@@ -303,13 +332,22 @@ def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, 
     resumen = {"vacaciones": 0, "incapacidad": 0, "no_laborados": 0, "remunerados": 0, "turnos_tad": 0, "turnos_tan": 0, "sin_programacion": 0}
     for clave, per in personas.items():
         e = por_cedula.get(clave)
+        parecidos: list[SpdEmpleado] = []
         if e is None:
             candidatos = por_nombre.get(_clave_nombre(per.nombre), [])
             if len(candidatos) == 1:
                 e = candidatos[0]
-                por_nombre_cruzados.append({"nombre": per.nombre, "cedula": e.cedula, "en_archivo": per.cedula or "sin documento"})
+                por_nombre_cruzados.append({"nombre": per.nombre, "cedula": e.cedula, "en_archivo": per.cedula or "sin documento",
+                                            "nombre_listado": e.nombre})
+            else:
+                parecidos = _parecidos(per.nombre, [x for x in empleados if x.cedula not in personas])
+                # Sin documento en la programación y un solo nombre parecido en el Listado: se cruza (y se muestra para revisar)
+                if not per.cedula and len(parecidos) == 1:
+                    e = parecidos[0]
+                    por_nombre_cruzados.append({"nombre": per.nombre, "cedula": e.cedula, "en_archivo": "sin documento",
+                                                "nombre_listado": e.nombre, "parecido": True})
         if e is None:
-            no_encontrados.append(_pendiente(clave, per, periodo))
+            no_encontrados.append(_pendiente(clave, per, periodo, parecidos))
             continue
         if e.id in cargados:
             conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": ["aparece con dos documentos o nombres distintos; se tomó el primero"]})

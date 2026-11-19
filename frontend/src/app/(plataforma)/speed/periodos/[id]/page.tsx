@@ -379,7 +379,8 @@ function Resultado({ r, periodoId, quincena, editable, onCerrar, onResuelto }: {
       <Lista titulo={`${r.sin_programacion.length} personas del Listado que aplican a la regla no están en la programación (se liquida la quincena completa)`}
         items={r.sin_programacion.map((x) => `${x.nombre} (${x.cedula}) · ${x.cargo}`)} alerta />
       <Lista titulo={`${r.por_nombre.length} cruzadas por el nombre (el documento no coincide o falta en la programación)`}
-        items={r.por_nombre.map((x) => `${x.nombre}: ${x.cedula} en el Listado, ${x.en_archivo} en la programación`)} />
+        items={r.por_nombre.map((x) => `${x.nombre}${x.nombre_listado && x.nombre_listado !== x.nombre ? ` → ${x.nombre_listado} (escrito distinto en el Listado)` : ""}: `
+          + `${x.cedula} en el Listado, ${x.en_archivo} en la programación`)} alerta={r.por_nombre.some((x) => x.parecido)} />
       <Lista titulo={`${r.conflictos.length} personas con códigos distintos el mismo día en dos filas (se tomó el que más afecta el pago)`}
         items={r.conflictos.map((x) => `${x.nombre} (${x.cedula}): ${x.detalle.join("; ")}`)} />
     </div>
@@ -410,6 +411,8 @@ function Pendiente({ x, periodoId, quincena, editable, onResuelto }: {
           <p className="font-medium">{x.nombre} <span className="font-normal text-slate-500">· {x.cedula || "sin documento"}{x.puestos.length ? ` · ${x.puestos.join(", ")}` : ""}</span></p>
           {Object.keys(dias).length > 0 ? <Dias p={{ dias, puestos: [], conflictos: [], tramos_incapacidad: [] }} desde={desde} />
             : <p className="text-xs text-slate-500">Sin turnos en esta quincena</p>}
+          {x.estado === "pendiente" && (x.sugeridos?.length ?? 0) > 0 && <p className="mt-0.5 text-xs text-marca-700">
+            Nombre parecido en el Listado: {x.sugeridos!.map((s) => `${s.nombre} (${s.cedula})`).join(", ")}</p>}
         </div>
         {x.estado !== "pendiente" ? (
           <Insignia color={x.estado === "descartado" ? "bg-slate-200 text-slate-700" : "bg-green-100 text-green-800"}>
@@ -492,8 +495,9 @@ function AsignarEmpleado({ x, error, onCerrar, onGuardar }: {
   x: PendienteProgramacion; error: string; onCerrar: () => void; onGuardar: (cedula: string) => Promise<void>;
 }) {
   const [empleados, setEmpleados] = useState<EmpleadoSpeed[]>([]);
-  const [buscar, setBuscar] = useState(x.nombre.split(" ")[0] ?? "");
-  const [cedula, setCedula] = useState("");
+  const sugerido = x.sugeridos?.[0];
+  const [buscar, setBuscar] = useState(sugerido ? sugerido.cedula : x.nombre.split(" ")[0] ?? "");
+  const [cedula, setCedula] = useState(sugerido?.cedula ?? "");
   const [guardando, setGuardando] = useState(false);
   useEffect(() => { api<EmpleadoSpeed[]>("/speed/empleados?inactivos=true").then(setEmpleados).catch(() => {}); }, []);
   const opciones = useMemo(() => empleados.filter((e) => !buscar || `${e.cedula} ${e.nombre}`.toLowerCase().includes(buscar.toLowerCase())).slice(0, 100),

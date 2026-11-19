@@ -429,3 +429,18 @@ def test_vacaciones_y_retiros_de_la_quincena(speed):
     assert "inactivo" in retiros["80128728"]["motivo"]
     x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
     assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros"]
+
+
+def test_cruce_por_nombre_escrito_distinto(speed):
+    archivo = listado_xlsx([fila(1, 1018000001, "UCHUBO GOMEZ JOHN FELIPE"), fila(2, 52112768, "PEREZ LOPEZ CARLOS ANDRES")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    dias = ["D", "AUS", "N", "X", "X"] * 3
+    archivo = programacion_xlsx([["METRO", "UCHUBO GOMEZ JHON FELIPE", None, dias],  # sin cédula y JHON en vez de JOHN
+                                 ["TORRE", "PEREZ LOPEZ CARLOS ANDRE", 5211276, dias]])  # con otra cédula: solo se sugiere
+    d = speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).json()["data"]
+    assert d["por_nombre"] == [{"nombre": "UCHUBO GOMEZ JHON FELIPE", "cedula": "1018000001", "en_archivo": "sin documento",
+                                "nombre_listado": "UCHUBO GOMEZ JOHN FELIPE", "parecido": True}]
+    assert d["no_encontrados"][0]["sugeridos"] == [{"cedula": "52112768", "nombre": "PEREZ LOPEZ CARLOS ANDRES"}]
+    nov = {n["cedula"]: n for n in speed.get(f"{API}/periodos/{p['id']}/novedades").json()["data"]}
+    assert nov["1018000001"]["ausencias"] == 3

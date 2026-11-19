@@ -75,6 +75,7 @@ export const CODIGOS_PROGRAMACION: Record<string, [string, string]> = {
   LUT: ["Licencia de luto", "bg-amber-100 text-amber-800"], DDF: ["Día de la familia", "bg-amber-100 text-amber-800"],
   LYM: ["Ley María", "bg-amber-100 text-amber-800"], VAC: ["Vacaciones", "bg-violet-100 text-violet-800"],
   INC: ["Incapacidad", "bg-orange-100 text-orange-800"],
+  INC180: ["Incapacidad de más de 180 días (no se paga)", "bg-stone-300 text-stone-800"],
 };
 
 export type DescuentoSpeed = {

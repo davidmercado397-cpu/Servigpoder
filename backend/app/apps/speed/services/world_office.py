@@ -33,6 +33,7 @@ CONCEPTOS: dict[str, tuple[str, bool, str]] = {
     "DDF": ("Licencia Remunerada", True, "Día de la familia"),
     "LYM": ("Licencia de Paternidad", True, "Ley María"),
     "VAC": ("Vacaciones", False, "Vacaciones (normalmente se liquidan en World Office)"),
+    "INC180": ("Incapacidad mayor a 180 dias", False, "Incapacidad de más de 180 días (no la paga la empresa)"),
     "INC_EMPRESA": ("incapacidades Empresa 100%", True, "Incapacidad: primeros días al 100 % (los paga la empresa)"),
     "INC_EPS": ("Incapacidades EPS 66.67%", True, "Incapacidad: desde el 3.er día al 66,67 %"),
     "INC_EPS_MINIMO": ("Incapacidades EPS 100%", True, "Incapacidad desde el 3.er día cuando el 66,67 % no llega al mínimo (se paga el día completo)"),

@@ -32,6 +32,8 @@ type VacacionesRetiros = {
     tramos: [string, string][]; desde_antes: boolean; sigue: boolean; sin_fechas: boolean }[];
   retiros: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; primer_dia_retiro: string | null;
     ultimo_dia: string | null; dias_retiro: number; motivo: string; retirado?: string | null }[];
+  incapacidad_180?: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; dias: number; toda: boolean;
+    tramos: [string, string][] }[];
   sin_programacion?: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; motivo: string; dias: number | null;
     puestos: string[]; fecha_ingreso: string | null }[];
   programacion_cargada?: boolean;
@@ -128,12 +130,13 @@ export default function QuincenaSpeed() {
       </div>
 
       <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"],
-        ["vacaciones", `Vacaciones, retiros y sin programación${vr ? ` (${vr.vacaciones.length + vr.retiros.length + (vr.sin_programacion?.length ?? 0)})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
-      {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length + (vr.sin_programacion?.length ?? 0)) > 0 && (
+        ["vacaciones", `Vacaciones, retiros y sin programación${vr ? ` (${vr.vacaciones.length + vr.retiros.length + (vr.incapacidad_180?.length ?? 0) + (vr.sin_programacion?.length ?? 0)})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
+      {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length + (vr.incapacidad_180?.length ?? 0) + (vr.sin_programacion?.length ?? 0)) > 0 && (
         <Alerta tipo="info">
           <AlertTriangle className="mr-1 inline h-4 w-4 text-amber-600" />
           {vr.vacaciones.length + vr.retiros.length > 0 && <><b>{vr.vacaciones.length} con vacaciones</b> y <b>{vr.retiros.length} con retiro</b> en esta
             quincena: no se liquidan en esta nómina porque van en otra.{" "}</>}
+          {(vr.incapacidad_180?.length ?? 0) > 0 && <><b>{vr.incapacidad_180!.length} con incapacidad de más de 180 días</b> (INC 180): esos días no se pagan.{" "}</>}
           {(vr.sin_programacion?.length ?? 0) > 0 && <><b>{vr.sin_programacion!.length} que dependen de la programación no están programados</b>.</>}{" "}
           <button className="font-medium text-marca-700 hover:underline" onClick={() => { setPestana("vacaciones"); cargarVr(); }}>Ver quiénes son</button>
         </Alerta>
@@ -568,7 +571,7 @@ function VacacionesYRetiros({ periodoId, datos, nomina, editable, onCambio }: {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="flex-1 text-sm text-slate-600">Salen de los códigos de la programación (VAC y RUN) y de los retiros registrados en Empleados.
+        <p className="flex-1 text-sm text-slate-600">Salen de los códigos de la programación (VAC, RUN e INC 180) y de los retiros registrados en Empleados.
           Estas personas <b>no se liquidan en esta nómina</b> ni van en su plano de novedades: van en otra nómina. Cárguelas en World Office con estas fechas.</p>
         <a className="btn-secundario" href={`/api/speed/periodos/${periodoId}/vacaciones-retiros/excel?grupo=${nomina}`}><Download className="h-4 w-4" /> Excel</a>
       </div>
@@ -608,6 +611,23 @@ function VacacionesYRetiros({ periodoId, datos, nomina, editable, onCambio }: {
                   ? <Insignia color="bg-slate-200 text-slate-700">Retirado el {fechaCorta(r.retirado)}</Insignia>
                   : editable && <button className="inline-flex items-center gap-1 text-sm text-red-700 hover:underline" onClick={() => setRetirar(r)}>
                     <UserMinus className="h-4 w-4" /> Retirar</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="tarjeta overflow-x-auto">
+        <p className="border-b border-slate-100 px-4 py-2 font-semibold text-stone-700">Incapacidad de más de 180 días — INC 180 ({datos.incapacidad_180?.length ?? 0})</p>
+        <table className="tabla">
+          <thead><tr><th>Colaborador</th><th className="text-right">Días INC 180</th><th>Fechas</th><th>En esta nómina</th></tr></thead>
+          <tbody>
+            {!datos.incapacidad_180?.length && <tr><td colSpan={4} className="py-4 text-center text-slate-400">Nadie tiene INC 180 en esta quincena.</td></tr>}
+            {datos.incapacidad_180?.map((x) => (
+              <tr key={x.empleado_id}>
+                <td><p className="font-medium">{x.nombre}</p><p className="text-xs text-slate-500">{x.cedula} · {x.cargo} · {x.puesto}</p></td>
+                <td className="text-right tabular-nums">{x.dias}</td>
+                <td>{x.tramos.map(([a, b]) => a === b ? fechaCorta(a) : `${fechaCorta(a)} al ${fechaCorta(b)}`).join(", ") || "—"}</td>
+                <td className="text-xs text-slate-600">{x.toda ? "No se liquida (toda la quincena en INC 180)" : "Se liquida sin pagar los días INC 180"}</td>
               </tr>
             ))}
           </tbody>

@@ -70,6 +70,7 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general
     fecha = lambda d: date(periodo.anio, periodo.mes, d).isoformat()  # noqa: E731
     vacaciones: list[dict] = []
     retiros: list[dict] = []
+    inc180: list[dict] = []
     novedades = [n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)) if en_nomina(n.empleado, grupo)]
     for n in novedades:
         e = n.empleado
@@ -81,6 +82,10 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general
             vacaciones.append({**base, "dias": float(n.vacaciones), "tramos": [[fecha(a), fecha(b)] for a, b in tramos],
                                "desde_antes": bool(tramos) and tramos[0][0] == desde, "sigue": bool(tramos) and tramos[-1][1] == hasta,
                                "sin_fechas": not tramos})
+        prog = n.programacion or {}
+        if prog.get("inc180"):
+            inc180.append({**base, "dias": float(prog["inc180"]), "toda": bool(prog.get("inc180_toda")),
+                           "tramos": [[fecha(a), fecha(b)] for a, b in _tramos(dias, "INC180")]})
         run = _tramos(dias, "RUN")
         if run:
             trabajados = [d for d, c in dias.items() if d < run[0][0] and c not in ("RUN", "DESPR")]
@@ -113,7 +118,8 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general
         r["retirado"] = e.fecha_retiro.isoformat() if e is not None and e.fecha_retiro else None
     vacaciones.sort(key=lambda x: x["nombre"])
     retiros.sort(key=lambda x: x["nombre"])
-    return {"vacaciones": vacaciones, "retiros": retiros, "sin_programacion": sin_programacion(db, periodo, grupo),
+    inc180.sort(key=lambda x: x["nombre"])
+    return {"vacaciones": vacaciones, "retiros": retiros, "incapacidad_180": inc180, "sin_programacion": sin_programacion(db, periodo, grupo),
             "programacion_cargada": bool(periodo.programacion_resultado)}
 
 
@@ -168,6 +174,16 @@ def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
     hoja.set_column(1, 1, 36)
     hoja.set_column(2, 6, 20)
     hoja.set_column(7, 7, 40)
+    hoja = libro.add_worksheet("Incapacidad +180")
+    hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "DÍAS INC 180", "FECHAS", "OBSERVACIÓN"], negrita)
+    for i, x in enumerate(datos.get("incapacidad_180") or [], start=1):
+        hoja.write_string(i, 0, x["cedula"])
+        hoja.write_row(i, 1, [x["nombre"], x["cargo"], x["puesto"], x["dias"], ", ".join(f"{a} a {b}" if a != b else a for a, b in x["tramos"]),
+                              "No se liquida en esta nómina" if x["toda"] else "Se liquida sin pagar los días INC 180"])
+    hoja.set_column(0, 0, 13)
+    hoja.set_column(1, 1, 36)
+    hoja.set_column(2, 3, 20)
+    hoja.set_column(5, 6, 40)
     hoja = libro.add_worksheet("Sin programación")
     hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "FECHA DE INGRESO", "DÍAS", "MOTIVO"], negrita)
     for i, s in enumerate(datos.get("sin_programacion") or [], start=1):
@@ -484,12 +500,15 @@ def descuentos_para(db: Session, periodo: SpdPeriodo, empleado_id: int | None = 
 
 
 def motivo_exclusion(e: SpdEmpleado, n: SpdNovedad | None) -> str | None:
-    """Quién no se liquida en esta nómina porque va en otra (2026-11-19): vacaciones, retiro o inactivo."""
+    """Quién no se liquida en esta nómina porque va en otra (2026-11-19): vacaciones, retiro o inactivo; tampoco quien está
+    toda la quincena con incapacidad de más de 180 días (INC 180)."""
     if e.fecha_retiro:
         return "retiro"
     if not e.activo:
         return "inactivo"
     if n is not None:
+        if (n.programacion or {}).get("inc180_toda"):
+            return "incapacidad_180"
         if float(n.vacaciones or 0):
             return "vacaciones"
         if "RUN" in ((n.programacion or {}).get("dias") or {}).values():

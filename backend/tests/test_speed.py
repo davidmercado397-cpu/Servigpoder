@@ -427,7 +427,7 @@ def test_vacaciones_y_retiros_de_la_quincena(speed):
     assert retiros["52112768"]["ultimo_dia"] == "2026-11-05" and retiros["52112768"]["primer_dia_retiro"] == "2026-11-06"
     assert "inactivo" in retiros["80128728"]["motivo"]
     x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
-    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Sin programación"]
+    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Incapacidad +180", "Sin programación"]
     # Quien tiene vacaciones o retiro no se liquida en esta nómina (va en otra)
     q = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]
     assert q["liquidaciones"] == [] and q["excluidos"] == 3
@@ -511,4 +511,26 @@ def test_quien_depende_de_la_programacion_y_no_esta_programado(speed):
     assert motivos == {"52112768": ("No viene en la programación", None), "79806791": ("Sale en la programación sin ningún turno", 15),
                        "1003000005": ("Tiene días sin turno en la programación", 5)}
     x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
-    assert load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Sin programación"]
+    assert load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Incapacidad +180", "Sin programación"]
+
+
+def test_incapacidad_de_mas_de_180_dias_no_se_paga(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO INC CIENTO OCHENTA"), fila(2, 52112768, "DOS LLEGA A CIENTO OCHENTA"), fila(3, 80128728, "TRES GUARDA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    archivo = programacion_xlsx([["INCAPACITADO", "UNO INC CIENTO OCHENTA", 1006306373, ["INC 180"] * 15],
+                                 ["T", "DOS LLEGA A CIENTO OCHENTA", 52112768, ["D", "N", "X"] * 2 + ["INC-180"] * 9],
+                                 ["T", "TRES GUARDA", 80128728, ["D", "N", "X"] * 5]])
+    assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
+    # Toda la quincena en INC 180: no se liquida ni sale en la nómina
+    q = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]
+    liq = {x["cedula"]: x for x in q["liquidaciones"]}
+    assert "1006306373" not in liq and q["excluidos"] == 1
+    # Parte de la quincena: los días INC 180 no pagan salario, auxilio ni variables
+    assert liq["52112768"]["dias"]["trabajados"] == 6 and liq["80128728"]["dias"]["trabajados"] == 15
+    d = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]
+    inc = {x["cedula"]: (x["dias"], x["toda"]) for x in d["incapacidad_180"]}
+    assert inc == {"1006306373": (15, True), "52112768": (9, False)}
+    assert d["sin_programacion"] == []
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
+    assert not [f for f in hoja.iter_rows(min_row=2) if f[0].value.startswith(("UNO", "DOS"))]

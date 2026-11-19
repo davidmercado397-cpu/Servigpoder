@@ -18,6 +18,9 @@ Códigos (hoja 2 del archivo y reglas acordadas con el usuario el 2026-11-18):
 - VAC: vacaciones; pagan salario pero descuentan auxilio y variables.
 - INC: incapacidad (2 días al 100 % y desde el 3.º al 66,67 %); descuenta auxilio y variables.
 - Día vacío (sin código en ninguna fila): sin programación; descuenta las variables de quien aplica a la regla.
+- INC 180: incapacidad de más de 180 días (2026-11-19). Esos días no se pagan (ni salario, ni auxilio, ni variables: la
+  incapacidad ya no la reconoce la empresa). Si toda la quincena es INC 180 (o INC 180 y descansos), la persona no se
+  liquida ni sale en la nómina: se muestra aparte en la pestaña de alertas.
 - Quien sale en la programación sin ningún turno en toda la quincena (p. ej. en el puesto INCAPACITADO sin días) no se
   paga: esos días se toman como desprogramados (2026-11-19). Lo ideal es programarlo con INC.
 """
@@ -43,9 +46,10 @@ ADICIONAL = {"TAD", "TAN"}
 NOVEDAD = {
     "AUS": "ausencias", "PNR": "licencias", "SUS": "suspensiones", "RUN": "desprogramados", "DESPR": "desprogramados",
     "PR": "permisos_remunerados", "CD": "permisos_remunerados", "LUT": "permisos_remunerados", "DDF": "permisos_remunerados",
-    "LYM": "permisos_remunerados", "VAC": "vacaciones", "INC": "incapacidad",
+    "LYM": "permisos_remunerados", "VAC": "vacaciones", "INC": "incapacidad", "INC180": "desprogramados",
 }
 ALIAS = {"DESP": "DESPR"}
+INC180 = "INC180"
 CODIGOS = TRABAJO | DESCANSO | ADICIONAL | set(NOVEDAD)
 NOMBRES = {
     "D": "Turno diurno", "N": "Turno nocturno", "A": "Turno 06:00 a 14:00", "B": "Turno 14:00 a 22:00", "C": "Turno 22:00 a 06:00",
@@ -53,9 +57,10 @@ NOMBRES = {
     "TAD": "Turno adicional diurno", "TAN": "Turno adicional nocturno", "AUS": "Ausencia", "PNR": "Permiso no remunerado",
     "SUS": "Suspensión", "RUN": "Renuncia", "DESPR": "Desprogramado", "PR": "Permiso remunerado", "CD": "Calamidad doméstica",
     "LUT": "Licencia de luto", "DDF": "Día de la familia", "LYM": "Ley María", "VAC": "Vacaciones", "INC": "Incapacidad",
+    "INC180": "Incapacidad de más de 180 días",
 }
 # Si dos filas de la misma persona traen códigos distintos el mismo día, gana el de mayor prioridad
-PRIORIDAD = {**{c: 6 for c in ("RUN", "DESPR", "AUS", "PNR", "SUS")}, "INC": 5, "VAC": 4,
+PRIORIDAD = {**{c: 6 for c in ("RUN", "DESPR", "AUS", "PNR", "SUS", "INC180")}, "INC": 5, "VAC": 4,
              **{c: 3 for c in ("PR", "CD", "LUT", "DDF", "LYM")}, "TAD": 2, "TAN": 2, **{c: 1 for c in TRABAJO}, "X": 0}
 
 
@@ -84,7 +89,7 @@ def codigo(v) -> str | None:
     """El código de una celda, o None si está vacía o es un texto (traslado, nota)."""
     if v is None:
         return None
-    t = re.sub(r"\s+", "", str(v)).upper()
+    t = re.sub(r"[\s\-_.>+]+", "", str(v)).upper()  # «INC 180», «INC-180» → INC180
     t = ALIAS.get(t, t)
     return t if t in CODIGOS else None
 
@@ -265,6 +270,10 @@ def novedad(p: Persona, anio: int, mes: int, quincena: int, ingreso: date | None
     contrato = max(0, hasta - inicio + 1) if not (ingreso and (ingreso.year, ingreso.month) > (anio, mes)) else 0
     # Sin ningún código en toda la quincena: no se paga (desprogramado), con aviso
     sin_turnos = contrato > 0 and sin_programacion >= contrato
+    # INC 180: si en la quincena no hay otro código que pague (solo INC 180 y descansos), no se liquida ni sale en la nómina
+    del_rango = [p.dias.get(d) for d in range(inicio, min(hasta, ultimo) + 1)]
+    inc180 = sum(1 for c in del_rango if c == INC180)
+    inc180_toda = inc180 > 0 and all(c in (INC180, "X", None) for c in del_rango)
     if sin_turnos:
         conteo["desprogramados"] += sin_programacion
         sin_programacion = 0
@@ -282,5 +291,7 @@ def novedad(p: Persona, anio: int, mes: int, quincena: int, ingreso: date | None
             "incapacidad_al_cierre": fin_inc,
             "conflictos": [t for d, t in p.conflictos if desde <= d <= hasta][:10],
             "sin_turnos": sin_turnos,
+            "inc180": inc180,
+            "inc180_toda": inc180_toda,
         },
     }

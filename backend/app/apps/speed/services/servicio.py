@@ -122,6 +122,11 @@ def plano_world_office(db: Session, periodo: SpdPeriodo) -> tuple[bytes, int, li
     for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)):
         e = n.empleado
         dias = {int(k): v for k, v in ((n.programacion or {}).get("dias") or {}).items()}
+        if (n.programacion or {}).get("sin_turnos") and n.origen == "programacion":
+            # Sin ningún turno en la quincena: cada día de contrato va como desprogramado (no se paga)
+            desde, hasta = (1, 15) if periodo.quincena == 1 else (16, 30)
+            inicio = e.fecha_ingreso.day if e.fecha_ingreso and (e.fecha_ingreso.year, e.fecha_ingreso.month) == (periodo.anio, periodo.mes) else desde
+            dias = {d: "DESPR" for d in range(max(desde, inicio), hasta + 1)}
         if not dias:
             if any(float(getattr(n, c) or 0) for c in DIAS_NOVEDAD if c not in ("incapacidad_previos", "sin_programacion")):
                 avisos.append(f"{e.nombre} ({e.cedula}): sus novedades se digitaron sin programación (no hay fechas); no van en el plano")
@@ -203,6 +208,7 @@ def _novedad_dict(n: SpdNovedad | None) -> dict | None:
     d = {"dias_programados": None if n.dias_programados is None else float(n.dias_programados),
          **{c: float(getattr(n, c) or 0) for c in DIAS_NOVEDAD}}
     d["incapacidad_tramos"] = (n.programacion or {}).get("tramos_incapacidad")
+    d["sin_turnos"] = bool((n.programacion or {}).get("sin_turnos")) and n.origen == "programacion"
     return d
 
 
@@ -327,6 +333,7 @@ def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, 
 
     cargados: set[int] = set()
     no_encontrados: list[dict] = []
+    sin_turnos: list[dict] = []
     por_nombre_cruzados: list[dict] = []
     conflictos: list[dict] = []
     resumen = {"vacaciones": 0, "incapacidad": 0, "no_laborados": 0, "remunerados": 0, "turnos_tad": 0, "turnos_tan": 0, "sin_programacion": 0}
@@ -354,6 +361,8 @@ def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, 
             continue
         d = _cargar_novedad(db, periodo, e, per, existentes.get(e.id), previas.get(e.id))
         cargados.add(e.id)
+        if d["programacion"]["sin_turnos"]:
+            sin_turnos.append({"cedula": e.cedula, "nombre": e.nombre, "puestos": per.puestos[:3]})
         if d["programacion"]["conflictos"]:
             conflictos.append({"cedula": e.cedula, "nombre": e.nombre, "detalle": d["programacion"]["conflictos"]})
         resumen["vacaciones"] += d["vacaciones"]
@@ -377,7 +386,7 @@ def importar_programacion(db: Session, periodo: SpdPeriodo, personas: dict[str, 
         avisos.append(aviso_mes)
     db.flush()
     return {"hojas": info.get("hojas", []), "personas": len(personas), "cargadas": len(cargados), "quitadas": quitadas,
-            "no_encontrados": no_encontrados, "por_nombre": por_nombre_cruzados, "sin_programacion": sin_programacion,
+            "no_encontrados": no_encontrados, "sin_turnos": sin_turnos, "por_nombre": por_nombre_cruzados, "sin_programacion": sin_programacion,
             "conflictos": conflictos[:200], "resumen": resumen, "avisos": avisos}
 
 

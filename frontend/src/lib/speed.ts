@@ -45,6 +45,7 @@ export type PendienteProgramacion = {
 export type ResultadoProgramacion = {
   hojas: string[]; personas: number; cargadas: number; quitadas: number; avisos: string[]; archivo?: string; fecha?: string;
   no_encontrados: PendienteProgramacion[];
+  sin_turnos?: { cedula: string; nombre: string; puestos: string[] }[];
   por_nombre: { nombre: string; cedula: string; en_archivo: string; nombre_listado?: string; parecido?: boolean }[];
   sin_programacion: { cedula: string; nombre: string; cargo: string }[];
   conflictos: { cedula: string; nombre: string; detalle: string[] }[];

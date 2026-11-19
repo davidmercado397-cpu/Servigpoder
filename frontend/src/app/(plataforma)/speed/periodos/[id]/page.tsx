@@ -376,6 +376,8 @@ function Resultado({ r, periodoId, quincena, editable, onCerrar, onResuelto }: {
           </div>
         </details>
       )}
+      <Lista titulo={`${r.sin_turnos?.length ?? 0} personas salen en la programación sin ningún turno en la quincena: no se pagan (si están incapacitadas, prográmelas con INC)`}
+        items={(r.sin_turnos ?? []).map((x) => `${x.nombre} (${x.cedula})${x.puestos.length ? " · " + x.puestos.join(", ") : ""}`)} alerta />
       <Lista titulo={`${r.sin_programacion.length} personas del Listado que aplican a la regla no están en la programación (se liquida la quincena completa)`}
         items={r.sin_programacion.map((x) => `${x.nombre} (${x.cedula}) · ${x.cargo}`)} alerta />
       <Lista titulo={`${r.por_nombre.length} cruzadas por el nombre (el documento no coincide o falta en la programación)`}

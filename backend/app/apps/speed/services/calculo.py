@@ -219,6 +219,8 @@ def liquidar(emp: dict, nov: dict | None, p: dict, anio: int, mes: int, quincena
 
     if contrato == 0:
         alertas.append("Ingresó después de esta quincena: no tiene días")
+    if nov.get("sin_turnos"):
+        alertas.append("Sale en la programación sin ningún turno en la quincena: no se paga (si está incapacitado, prográmelo con INC)")
     dias = {"contrato": contrato, "trabajados": trabajados, "no_laborados": tnl, "incapacidad": inc, "incapacidad_100": al_100,
             "incapacidad_pct": al_pct, "programados": programados, "variables": dias_variables, "vacaciones": vacaciones,
             "remunerados": remunerados, "laborados": laborados, "turnos_tad": tad, "turnos_tan": tan}

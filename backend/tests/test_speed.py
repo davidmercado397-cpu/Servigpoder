@@ -444,3 +444,22 @@ def test_cruce_por_nombre_escrito_distinto(speed):
     assert d["no_encontrados"][0]["sugeridos"] == [{"cedula": "52112768", "nombre": "PEREZ LOPEZ CARLOS ANDRES"}]
     nov = {n["cedula"]: n for n in speed.get(f"{API}/periodos/{p['id']}/novedades").json()["data"]}
     assert nov["1018000001"]["ausencias"] == 3
+
+
+def test_en_la_programacion_sin_ningun_turno_no_se_paga(speed):
+    archivo = listado_xlsx([fila(1, 79806791, "NAVARRO INCAPACITADO"), fila(2, 52112768, "DOS GUARDA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    archivo = programacion_xlsx([["INCAPACITADO AV15", "NAVARRO INCAPACITADO", 79806791, [None] * 15],
+                                 ["TORRE", "DOS GUARDA", 52112768, [None] * 3 + ["D", "N", "X"] * 4]])
+    d = speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).json()["data"]
+    assert [x["cedula"] for x in d["sin_turnos"]] == ["79806791"]
+    liq = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]}
+    nav = liq["79806791"]
+    assert nav["devengado"] == 0 and nav["dias"]["trabajados"] == 0 and any("sin ningún turno" in a for a in nav["alertas"])
+    # Con algunos días vacíos sí se paga el salario (solo no paga variables esos días)
+    assert liq["52112768"]["dias"]["trabajados"] == 15 and liq["52112768"]["dias"]["variables"] == 12
+    # En el plano de World Office van sus 15 días como desprogramado
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
+    filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("NAVARRO")]
+    assert len(filas) == 15 and {f[1] for f in filas} == {"Licencia No remunerada"}

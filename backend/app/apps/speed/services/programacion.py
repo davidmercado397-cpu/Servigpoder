@@ -18,6 +18,8 @@ Códigos (hoja 2 del archivo y reglas acordadas con el usuario el 2026-11-18):
 - VAC: vacaciones; pagan salario pero descuentan auxilio y variables.
 - INC: incapacidad (2 días al 100 % y desde el 3.º al 66,67 %); descuenta auxilio y variables.
 - Día vacío (sin código en ninguna fila): sin programación; descuenta las variables de quien aplica a la regla.
+- Quien sale en la programación sin ningún turno en toda la quincena (p. ej. en el puesto INCAPACITADO sin días) no se
+  paga: esos días se toman como desprogramados (2026-11-19). Lo ideal es programarlo con INC.
 """
 
 import io
@@ -261,6 +263,11 @@ def novedad(p: Persona, anio: int, mes: int, quincena: int, ingreso: date | None
             break
         fin_inc += 1
     contrato = max(0, hasta - inicio + 1) if not (ingreso and (ingreso.year, ingreso.month) > (anio, mes)) else 0
+    # Sin ningún código en toda la quincena: no se paga (desprogramado), con aviso
+    sin_turnos = contrato > 0 and sin_programacion >= contrato
+    if sin_turnos:
+        conteo["desprogramados"] += sin_programacion
+        sin_programacion = 0
     return {
         **conteo,
         "dias_programados": max(0, contrato - sin_programacion),
@@ -274,5 +281,6 @@ def novedad(p: Persona, anio: int, mes: int, quincena: int, ingreso: date | None
             "incapacidad_desde_inicio": inc_desde_inicio,
             "incapacidad_al_cierre": fin_inc,
             "conflictos": [t for d, t in p.conflictos if desde <= d <= hasta][:10],
+            "sin_turnos": sin_turnos,
         },
     }

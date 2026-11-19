@@ -2,8 +2,8 @@
 
 import { UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal } from "@/components/costeo";
 import { Paginador, usePaginacion } from "@/components/paginacion";
+import { RetirarEmpleado } from "@/components/speed-retiro";
 import { Alerta, SubirArchivo, Titulo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
@@ -103,7 +103,8 @@ export default function EmpleadosSpeed() {
         <Paginador meta={lista ? { total: visibles.length, pagina, tamano: pag.tamano, paginas } : null} tamanos={TAMANOS_EMPLEADOS}
           onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
-      {retirar && <Retirar e={retirar} onCerrar={() => setRetirar(null)} onListo={async () => { setRetirar(null); await cargar(); }} />}
+      {retirar && <RetirarEmpleado empleadoId={retirar.id} nombre={retirar.nombre} onCerrar={() => setRetirar(null)}
+        onListo={async () => { setRetirar(null); await cargar(); }} />}
     </div>
   );
 }
@@ -114,32 +115,3 @@ function formato(v: unknown) {
   return String(v ?? "—");
 }
 
-/** Retiro de un empleado (renuncia ya liquidada aparte): no se liquida y el Listado no lo vuelve a activar. */
-function Retirar({ e, onCerrar, onListo }: { e: EmpleadoSpeed; onCerrar: () => void; onListo: () => Promise<void> }) {
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
-  const [motivo, setMotivo] = useState("Renuncia");
-  const [error, setError] = useState("");
-  const [guardando, setGuardando] = useState(false);
-  return (
-    <Modal titulo={`Retirar a ${e.nombre}`} onCerrar={onCerrar}>
-      <form className="space-y-3" onSubmit={async (ev) => {
-        ev.preventDefault();
-        setGuardando(true);
-        setError("");
-        try { await api(`/speed/empleados/${e.id}/retirar`, { method: "POST", json: { fecha_retiro: fecha, motivo } }); await onListo(); }
-        catch (err) { setError(mensajeError(err)); } finally { setGuardando(false); }
-      }}>
-        <p className="text-sm text-slate-600">Queda inactivo y <b>no se liquida</b> en las quincenas (su liquidación va aparte). Sale en la pestaña
-          «Vacaciones y retiros» de la quincena, y si sigue en el Excel del Listado no se vuelve a activar. Se puede reintegrar después.</p>
-        <div><label className="label">Fecha de retiro (último día)</label><input className="input" type="date" required value={fecha} onChange={(x) => setFecha(x.target.value)} /></div>
-        <div><label className="label">Motivo</label><input className="input" maxLength={200} value={motivo} onChange={(x) => setMotivo(x.target.value)}
-          placeholder="Ej. Renuncia, ya tiene liquidación" /></div>
-        {error && <Alerta>{error}</Alerta>}
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
-          <button className="btn-primario" disabled={guardando}><UserMinus className="h-4 w-4" /> {guardando ? "Retirando…" : "Retirar"}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}

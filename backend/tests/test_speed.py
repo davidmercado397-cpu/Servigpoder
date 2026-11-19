@@ -442,6 +442,8 @@ def test_vacaciones_y_retiros_de_la_quincena(speed):
     assert r["retirados_en_archivo"][0]["cedula"] == "1003000004" and r["reactivados"] == 0
     d = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]
     assert any(x["cedula"] == "1003000004" and "Renuncia, ya liquidada" in x["motivo"] for x in d["retiros"])
+    retirado = {x["cedula"]: x["retirado"] for x in d["retiros"]}
+    assert retirado["1003000004"] == "2026-11-10" and retirado["52112768"] is None  # a DOS (RUN) se le puede dar «Retirar»
     liq = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]
     assert "1003000004" not in {x["cedula"] for x in liq}
     assert speed.post(f"{API}/empleados/{cuatro['id']}/reintegrar").json()["data"]["activo"] is True

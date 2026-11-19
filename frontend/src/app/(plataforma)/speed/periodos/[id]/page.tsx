@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  AlertTriangle, ArrowLeft, Ban, Calculator, ChevronDown, ChevronRight, Download, Lock, Save, Trash2, Unlock, UserCheck, UserPlus, X,
+  AlertTriangle, ArrowLeft, Ban, Calculator, ChevronDown, ChevronRight, Download, Lock, Save, Trash2, Unlock, UserCheck, UserMinus, UserPlus, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/costeo";
 import { InputPesos } from "@/components/input-pesos";
+import { RetirarEmpleado } from "@/components/speed-retiro";
 import { Paginador, usePaginacion } from "@/components/paginacion";
 import { Alerta, Insignia, Pestanas, SubirArchivo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
@@ -30,7 +31,7 @@ type VacacionesRetiros = {
   vacaciones: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; dias: number;
     tramos: [string, string][]; desde_antes: boolean; sigue: boolean; sin_fechas: boolean }[];
   retiros: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; primer_dia_retiro: string | null;
-    ultimo_dia: string | null; dias_retiro: number; motivo: string }[];
+    ultimo_dia: string | null; dias_retiro: number; motivo: string; retirado?: string | null }[];
 };
 const fechaCorta = (iso: string | null) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "—";
 
@@ -132,7 +133,8 @@ export default function QuincenaSpeed() {
           <button className="font-medium text-marca-700 hover:underline" onClick={() => { setPestana("vacaciones"); cargarVr(); }}>Ver quiénes son</button>
         </Alerta>
       )}
-      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} nomina={nomina} />
+      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} nomina={nomina} editable={liquidar}
+        onCambio={async () => { await Promise.all([cargarVr(), cargar()]); setMsg({ tipo: "info", texto: "Retiro registrado: vuelva a liquidar la quincena." }); }} />
         : pestana === "liquidacion" ? <Liquidacion filas={liquidaciones} vr={vr} />
         : <Novedades periodoId={Number(id)} quincena={p.quincena} nomina={nomina} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
     </div>
@@ -553,7 +555,10 @@ function Lista({ titulo, items, alerta }: { titulo: string; items: string[]; ale
 }
 
 /** Quién tiene vacaciones y quién se retira en la quincena, con fechas, para cargarlo en World Office. */
-function VacacionesYRetiros({ periodoId, datos, nomina }: { periodoId: number; datos: VacacionesRetiros | null; nomina: Nomina }) {
+function VacacionesYRetiros({ periodoId, datos, nomina, editable, onCambio }: {
+  periodoId: number; datos: VacacionesRetiros | null; nomina: Nomina; editable: boolean; onCambio: () => Promise<void>;
+}) {
+  const [retirar, setRetirar] = useState<VacacionesRetiros["retiros"][number] | null>(null);
   if (!datos) return <p className="text-sm text-slate-500">Cargando…</p>;
   return (
     <div className="space-y-4">
@@ -584,9 +589,9 @@ function VacacionesYRetiros({ periodoId, datos, nomina }: { periodoId: number; d
       <div className="tarjeta overflow-x-auto">
         <p className="border-b border-slate-100 px-4 py-2 font-semibold text-red-800">Retiros ({datos.retiros.length})</p>
         <table className="tabla">
-          <thead><tr><th>Colaborador</th><th>Centro de costos</th><th>Último día con turno</th><th>Retiro desde</th><th>Motivo</th></tr></thead>
+          <thead><tr><th>Colaborador</th><th>Centro de costos</th><th>Último día con turno</th><th>Retiro desde</th><th>Motivo</th><th /></tr></thead>
           <tbody>
-            {!datos.retiros.length && <tr><td colSpan={5} className="py-4 text-center text-slate-400">Nadie se retira en esta quincena.</td></tr>}
+            {!datos.retiros.length && <tr><td colSpan={6} className="py-4 text-center text-slate-400">Nadie se retira en esta quincena.</td></tr>}
             {datos.retiros.map((r) => (
               <tr key={r.empleado_id}>
                 <td><p className="font-medium">{r.nombre}</p><p className="text-xs text-slate-500">{r.cedula} · {r.cargo} · {r.puesto}</p></td>
@@ -594,11 +599,18 @@ function VacacionesYRetiros({ periodoId, datos, nomina }: { periodoId: number; d
                 <td>{fechaCorta(r.ultimo_dia)}</td>
                 <td>{fechaCorta(r.primer_dia_retiro)}</td>
                 <td className="text-xs text-slate-600">{r.motivo}</td>
+                <td>{r.retirado
+                  ? <Insignia color="bg-slate-200 text-slate-700">Retirado el {fechaCorta(r.retirado)}</Insignia>
+                  : editable && <button className="inline-flex items-center gap-1 text-sm text-red-700 hover:underline" onClick={() => setRetirar(r)}>
+                    <UserMinus className="h-4 w-4" /> Retirar</button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {retirar && <RetirarEmpleado empleadoId={retirar.empleado_id} nombre={retirar.nombre} fecha={retirar.ultimo_dia}
+        motivo={retirar.motivo.startsWith("Renuncia") ? "Renuncia" : ""} onCerrar={() => setRetirar(null)}
+        onListo={async () => { setRetirar(null); await onCambio(); }} />}
     </div>
   );
 }

@@ -105,6 +105,12 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general
             retiros.append({"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
                             "centro": "Produccion" if e.aplica_programacion else "Administrativo", "primer_dia_retiro": None,
                             "ultimo_dia": None, "dias_retiro": 0, "motivo": "Ya no viene en el Listado (inactivo)"})
+    # Si ya se retiró en la plataforma (para no ofrecer «Retirar» otra vez)
+    ids = [r["empleado_id"] for r in retiros]
+    por_id = {e.id: e for e in db.scalars(select(SpdEmpleado).where(SpdEmpleado.id.in_(ids or [0])))}
+    for r in retiros:
+        e = por_id.get(r["empleado_id"])
+        r["retirado"] = e.fecha_retiro.isoformat() if e is not None and e.fecha_retiro else None
     vacaciones.sort(key=lambda x: x["nombre"])
     retiros.sort(key=lambda x: x["nombre"])
     return {"vacaciones": vacaciones, "retiros": retiros}

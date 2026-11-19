@@ -113,7 +113,34 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general
         r["retirado"] = e.fecha_retiro.isoformat() if e is not None and e.fecha_retiro else None
     vacaciones.sort(key=lambda x: x["nombre"])
     retiros.sort(key=lambda x: x["nombre"])
-    return {"vacaciones": vacaciones, "retiros": retiros}
+    return {"vacaciones": vacaciones, "retiros": retiros, "sin_programacion": sin_programacion(db, periodo, grupo),
+            "programacion_cargada": bool(periodo.programacion_resultado)}
+
+
+def sin_programacion(db: Session, periodo: SpdPeriodo, grupo: str = "general") -> list[dict]:
+    """Quienes dependen de la programación y no están programados en la quincena (solo si ya se subió la programación):
+    no vienen en el archivo, salen sin ningún turno o tienen días vacíos."""
+    if not periodo.programacion_resultado:
+        return []
+    novedades = {n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id))}
+    salida: list[dict] = []
+    for e in db.scalars(select(SpdEmpleado).where(SpdEmpleado.activo.is_(True), SpdEmpleado.aplica_programacion.is_(True))):
+        n = novedades.get(e.id)
+        if not en_nomina(e, grupo) or motivo_exclusion(e, n):
+            continue
+        prog = (n.programacion or {}) if n is not None else {}
+        if n is None or not prog:
+            motivo, dias = "No viene en la programación (se liquida la quincena completa)", None
+        elif prog.get("sin_turnos"):
+            motivo, dias = "Sale en la programación sin ningún turno (no se paga)", float(n.desprogramados or 0)
+        elif float(n.sin_programacion or 0):
+            motivo, dias = "Tiene días sin turno en la programación (esos días no pagan variables)", float(n.sin_programacion)
+        else:
+            continue
+        salida.append({"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
+                       "centro": "Produccion", "motivo": motivo, "dias": dias,
+                       "puestos": (prog.get("puestos") or [])[:3], "fecha_ingreso": e.fecha_ingreso.isoformat() if e.fecha_ingreso else None})
+    return sorted(salida, key=lambda x: (x["motivo"], x["nombre"]))
 
 
 def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
@@ -141,6 +168,15 @@ def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
     hoja.set_column(1, 1, 36)
     hoja.set_column(2, 6, 20)
     hoja.set_column(7, 7, 40)
+    hoja = libro.add_worksheet("Sin programación")
+    hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CARGO", "PUESTO", "FECHA DE INGRESO", "DÍAS", "MOTIVO"], negrita)
+    for i, s in enumerate(datos.get("sin_programacion") or [], start=1):
+        hoja.write_string(i, 0, s["cedula"])
+        hoja.write_row(i, 1, [s["nombre"], s["cargo"], s["puesto"], s["fecha_ingreso"] or "", "" if s["dias"] is None else s["dias"], s["motivo"]])
+    hoja.set_column(0, 0, 13)
+    hoja.set_column(1, 1, 36)
+    hoja.set_column(2, 4, 20)
+    hoja.set_column(6, 6, 60)
     libro.close()
     return buf.getvalue()
 

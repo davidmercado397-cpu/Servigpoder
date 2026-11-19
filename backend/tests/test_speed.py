@@ -427,7 +427,7 @@ def test_vacaciones_y_retiros_de_la_quincena(speed):
     assert retiros["52112768"]["ultimo_dia"] == "2026-11-05" and retiros["52112768"]["primer_dia_retiro"] == "2026-11-06"
     assert "inactivo" in retiros["80128728"]["motivo"]
     x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
-    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros"]
+    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Sin programación"]
     # Quien tiene vacaciones o retiro no se liquida en esta nómina (va en otra)
     q = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]
     assert q["liquidaciones"] == [] and q["excluidos"] == 3
@@ -495,3 +495,20 @@ def test_puestos_de_la_senora_sandra_van_aparte(speed):
     cedulas = lambda g: {load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/excel" + g).content)).active.cell(r, 1).value  # noqa: E731
                          for r in range(2, 4)} - {None}
     assert cedulas("") == {"1006306373"} and cedulas("?grupo=sandra") == {"52112768"} and len(cedulas("?grupo=todos")) == 2
+
+
+def test_quien_depende_de_la_programacion_y_no_esta_programado(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO PROGRAMADO"), fila(2, 52112768, "DOS NO VIENE"), fila(3, 80128728, "TRES ADMIN", regla="NO APLICA"),
+                            fila(4, 79806791, "CUATRO SIN TURNOS"), fila(5, 1003000005, "CINCO MEDIO")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    assert speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]["sin_programacion"] == []  # aún sin programación
+    archivo = programacion_xlsx([["T", "UNO PROGRAMADO", 1006306373, ["D", "N", "X"] * 5], ["INCAPACITADO", "CUATRO SIN TURNOS", 79806791, [None] * 15],
+                                 ["T", "CINCO MEDIO", 1003000005, [None] * 5 + ["D"] * 10]])
+    assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
+    d = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]
+    motivos = {x["cedula"]: (x["motivo"].split(" (")[0], x["dias"]) for x in d["sin_programacion"]}
+    assert motivos == {"52112768": ("No viene en la programación", None), "79806791": ("Sale en la programación sin ningún turno", 15),
+                       "1003000005": ("Tiene días sin turno en la programación", 5)}
+    x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
+    assert load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros", "Sin programación"]

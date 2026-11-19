@@ -32,6 +32,9 @@ type VacacionesRetiros = {
     tramos: [string, string][]; desde_antes: boolean; sigue: boolean; sin_fechas: boolean }[];
   retiros: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; centro: string; primer_dia_retiro: string | null;
     ultimo_dia: string | null; dias_retiro: number; motivo: string; retirado?: string | null }[];
+  sin_programacion?: { empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; motivo: string; dias: number | null;
+    puestos: string[]; fecha_ingreso: string | null }[];
+  programacion_cargada?: boolean;
 };
 const fechaCorta = (iso: string | null) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "—";
 
@@ -125,11 +128,13 @@ export default function QuincenaSpeed() {
       </div>
 
       <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"],
-        ["vacaciones", `Vacaciones y retiros${vr ? ` (${vr.vacaciones.length + vr.retiros.length})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
-      {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length) > 0 && (
+        ["vacaciones", `Vacaciones, retiros y sin programación${vr ? ` (${vr.vacaciones.length + vr.retiros.length + (vr.sin_programacion?.length ?? 0)})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
+      {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length + (vr.sin_programacion?.length ?? 0)) > 0 && (
         <Alerta tipo="info">
           <AlertTriangle className="mr-1 inline h-4 w-4 text-amber-600" />
-          <b>{vr.vacaciones.length} con vacaciones</b> y <b>{vr.retiros.length} con retiro</b> en esta quincena: no se liquidan en esta nómina porque van en otra.{" "}
+          {vr.vacaciones.length + vr.retiros.length > 0 && <><b>{vr.vacaciones.length} con vacaciones</b> y <b>{vr.retiros.length} con retiro</b> en esta
+            quincena: no se liquidan en esta nómina porque van en otra.{" "}</>}
+          {(vr.sin_programacion?.length ?? 0) > 0 && <><b>{vr.sin_programacion!.length} que dependen de la programación no están programados</b>.</>}{" "}
           <button className="font-medium text-marca-700 hover:underline" onClick={() => { setPestana("vacaciones"); cargarVr(); }}>Ver quiénes son</button>
         </Alerta>
       )}
@@ -603,6 +608,24 @@ function VacacionesYRetiros({ periodoId, datos, nomina, editable, onCambio }: {
                   ? <Insignia color="bg-slate-200 text-slate-700">Retirado el {fechaCorta(r.retirado)}</Insignia>
                   : editable && <button className="inline-flex items-center gap-1 text-sm text-red-700 hover:underline" onClick={() => setRetirar(r)}>
                     <UserMinus className="h-4 w-4" /> Retirar</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="tarjeta overflow-x-auto">
+        <p className="border-b border-slate-100 px-4 py-2 font-semibold text-amber-800">Dependen de la programación y no están programados ({datos.sin_programacion?.length ?? 0})</p>
+        <table className="tabla">
+          <thead><tr><th>Colaborador</th><th>Ingreso</th><th className="text-right">Días</th><th>Motivo</th></tr></thead>
+          <tbody>
+            {!datos.programacion_cargada && <tr><td colSpan={4} className="py-4 text-center text-slate-400">Suba la programación de la quincena (pestaña Novedades) para ver quién no está programado.</td></tr>}
+            {datos.programacion_cargada && !datos.sin_programacion?.length && <tr><td colSpan={4} className="py-4 text-center text-slate-400">Todos los que dependen de la programación están programados.</td></tr>}
+            {datos.sin_programacion?.map((s) => (
+              <tr key={s.empleado_id}>
+                <td><p className="font-medium">{s.nombre}</p><p className="text-xs text-slate-500">{s.cedula} · {s.cargo} · {s.puesto}{s.puestos.length ? ` · en la programación: ${s.puestos.join(", ")}` : ""}</p></td>
+                <td>{fechaCorta(s.fecha_ingreso)}</td>
+                <td className="text-right tabular-nums">{s.dias ?? "—"}</td>
+                <td className="text-xs text-slate-600">{s.motivo}</td>
               </tr>
             ))}
           </tbody>

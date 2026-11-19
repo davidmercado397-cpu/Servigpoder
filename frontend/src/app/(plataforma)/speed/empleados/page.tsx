@@ -1,6 +1,8 @@
 "use client";
 
+import { UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal } from "@/components/costeo";
 import { Paginador, usePaginacion } from "@/components/paginacion";
 import { Alerta, SubirArchivo, Titulo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
@@ -10,7 +12,7 @@ import { pesos, type EmpleadoSpeed } from "@/lib/speed";
 const TAMANOS_EMPLEADOS = [20, 50, 100] as const;
 
 type Importacion = { filas: number; nuevos: number; actualizados: number; sin_cambios: number; reactivados: number;
-  inactivados: { cedula: string; nombre: string }[]; cambios: { cedula: string; nombre: string; campo: string; antes: unknown; ahora: unknown }[]; advertencias: string[] };
+  inactivados: { cedula: string; nombre: string }[]; retirados_en_archivo?: { cedula: string; nombre: string; fecha_retiro: string }[]; cambios: { cedula: string; nombre: string; campo: string; antes: unknown; ahora: unknown }[]; advertencias: string[] };
 const CAMPO: Record<string, string> = { salario: "Salario", horas_extras: "Horas extras", ley_2466: "Ley 2466", bonificaciones: "Bonificaciones",
   rodamiento: "Rodamiento", aplica_programacion: "Regla de programación" };
 
@@ -21,6 +23,7 @@ export default function EmpleadosSpeed() {
   const [buscar, setBuscar] = useState("");
   const [regla, setRegla] = useState("");
   const [res, setRes] = useState<Importacion | null>(null);
+  const [retirar, setRetirar] = useState<EmpleadoSpeed | null>(null);
   const [error, setError] = useState("");
   const cargar = useCallback(() => api<EmpleadoSpeed[]>(`/speed/empleados?inactivos=${inactivos}`).then(setLista).catch((e) => setError(mensajeError(e))), [inactivos]);
   useEffect(() => { cargar(); }, [cargar]);
@@ -50,6 +53,9 @@ export default function EmpleadosSpeed() {
             <ul className="mt-1 text-xs">{res.cambios.map((c, i) => <li key={i}>{c.nombre} ({c.cedula}) · {CAMPO[c.campo] ?? c.campo}: {formato(c.antes)} → {formato(c.ahora)}</li>)}</ul></details>}
           {res.inactivados.length > 0 && <details className="mt-1"><summary className="cursor-pointer">Ver inactivos</summary>
             <ul className="mt-1 text-xs">{res.inactivados.map((x) => <li key={x.cedula}>{x.nombre} ({x.cedula})</li>)}</ul></details>}
+          {(res.retirados_en_archivo?.length ?? 0) > 0 && <p className="mt-1 text-xs text-amber-800">
+            {res.retirados_en_archivo!.length} siguen en el Excel pero están retirados en la plataforma (no se reactivaron):{" "}
+            {res.retirados_en_archivo!.map((x) => `${x.nombre} (${x.cedula})`).join(", ")}</p>}
           {res.advertencias.length > 0 && <ul className="mt-1 text-xs text-amber-800">{res.advertencias.map((a, i) => <li key={i}>• {a}</li>)}</ul>}
         </Alerta>
       )}
@@ -63,13 +69,14 @@ export default function EmpleadosSpeed() {
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead><tr><th>Colaborador</th><th>Turno / puesto</th><th className="text-right">Salario</th><th className="text-right">Horas extras</th>
-            <th className="text-right">Ley 2466</th><th className="text-right">Bonificaciones</th><th className="text-right">Rodamiento</th><th>Programación</th></tr></thead>
+            <th className="text-right">Ley 2466</th><th className="text-right">Bonificaciones</th><th className="text-right">Rodamiento</th><th>Programación</th>{liquidar && <th />}</tr></thead>
           <tbody>
-            {lista === null && <tr><td colSpan={8} className="py-6 text-center text-slate-400">Cargando…</td></tr>}
-            {lista?.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-slate-400">Aún no se ha importado el Listado.</td></tr>}
+            {lista === null && <tr><td colSpan={9} className="py-6 text-center text-slate-400">Cargando…</td></tr>}
+            {lista?.length === 0 && <tr><td colSpan={9} className="py-6 text-center text-slate-400">Aún no se ha importado el Listado.</td></tr>}
             {enPagina.map((e) => (
               <tr key={e.id} className={e.activo ? "" : "opacity-50"}>
-                <td><p className="font-medium">{e.nombre}</p><p className="text-xs text-slate-500">{e.cedula} · {e.cargo} · ingreso {e.fecha_ingreso ?? "—"}{e.activo ? "" : " · inactivo"}</p></td>
+                <td><p className="font-medium">{e.nombre}</p><p className="text-xs text-slate-500">{e.cedula} · {e.cargo} · ingreso {e.fecha_ingreso ?? "—"}
+                  {e.fecha_retiro ? <span className="text-red-700"> · retirado el {e.fecha_retiro}{e.motivo_retiro ? ` (${e.motivo_retiro})` : ""}</span> : e.activo ? "" : " · inactivo"}</p></td>
                 <td><p>{e.tipo_turno}</p><p className="text-xs text-slate-500">{e.puesto} · {e.cliente}</p></td>
                 <td className="text-right tabular-nums">{pesos(e.salario)}</td>
                 <td className="text-right tabular-nums">{pesos(e.horas_extras)}</td>
@@ -82,6 +89,13 @@ export default function EmpleadosSpeed() {
                     catch (err) { setError(mensajeError(err)); }
                   }}><option value="true">Aplica</option><option value="false">No aplica</option></select>
                 ) : e.aplica_programacion ? "Aplica" : "No aplica"}</td>
+                {liquidar && <td>{e.fecha_retiro
+                  ? <button className="inline-flex items-center gap-1 text-sm text-marca-700 hover:underline" onClick={async () => {
+                    if (!confirm(`¿Reintegrar a ${e.nombre}? Vuelve a liquidarse en las quincenas.`)) return;
+                    try { await api(`/speed/empleados/${e.id}/reintegrar`, { method: "POST" }); await cargar(); } catch (err) { setError(mensajeError(err)); }
+                  }}><UserPlus className="h-4 w-4" /> Reintegrar</button>
+                  : <button className="inline-flex items-center gap-1 text-sm text-red-700 hover:underline" onClick={() => setRetirar(e)}>
+                    <UserMinus className="h-4 w-4" /> Retirar</button>}</td>}
               </tr>
             ))}
           </tbody>
@@ -89,6 +103,7 @@ export default function EmpleadosSpeed() {
         <Paginador meta={lista ? { total: visibles.length, pagina, tamano: pag.tamano, paginas } : null} tamanos={TAMANOS_EMPLEADOS}
           onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
+      {retirar && <Retirar e={retirar} onCerrar={() => setRetirar(null)} onListo={async () => { setRetirar(null); await cargar(); }} />}
     </div>
   );
 }
@@ -97,4 +112,34 @@ function formato(v: unknown) {
   if (typeof v === "boolean") return v ? "aplica" : "no aplica";
   if (typeof v === "number") return pesos(v);
   return String(v ?? "—");
+}
+
+/** Retiro de un empleado (renuncia ya liquidada aparte): no se liquida y el Listado no lo vuelve a activar. */
+function Retirar({ e, onCerrar, onListo }: { e: EmpleadoSpeed; onCerrar: () => void; onListo: () => Promise<void> }) {
+  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [motivo, setMotivo] = useState("Renuncia");
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  return (
+    <Modal titulo={`Retirar a ${e.nombre}`} onCerrar={onCerrar}>
+      <form className="space-y-3" onSubmit={async (ev) => {
+        ev.preventDefault();
+        setGuardando(true);
+        setError("");
+        try { await api(`/speed/empleados/${e.id}/retirar`, { method: "POST", json: { fecha_retiro: fecha, motivo } }); await onListo(); }
+        catch (err) { setError(mensajeError(err)); } finally { setGuardando(false); }
+      }}>
+        <p className="text-sm text-slate-600">Queda inactivo y <b>no se liquida</b> en las quincenas (su liquidación va aparte). Sale en la pestaña
+          «Vacaciones y retiros» de la quincena, y si sigue en el Excel del Listado no se vuelve a activar. Se puede reintegrar después.</p>
+        <div><label className="label">Fecha de retiro (último día)</label><input className="input" type="date" required value={fecha} onChange={(x) => setFecha(x.target.value)} /></div>
+        <div><label className="label">Motivo</label><input className="input" maxLength={200} value={motivo} onChange={(x) => setMotivo(x.target.value)}
+          placeholder="Ej. Renuncia, ya tiene liquidación" /></div>
+        {error && <Alerta>{error}</Alerta>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button className="btn-primario" disabled={guardando}><UserMinus className="h-4 w-4" /> {guardando ? "Retirando…" : "Retirar"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
 }

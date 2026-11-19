@@ -5,19 +5,26 @@ export type EmpleadoSpeed = {
   id: number; cedula: string; nombre: string; fecha_ingreso: string | null; tipo_contrato: string; grupo: string; cargo: string; area: string;
   puesto: string; cliente: string; tipo_turno: string; salario: number; auxilio_listado: number; horas_extras: number; comisiones: number;
   ley_2466: number; bonificaciones: number; rodamiento: number; nota: string; aplica_programacion: boolean; activo: boolean;
+  fecha_retiro?: string | null; motivo_retiro?: string;
 };
 
 export type PeriodoSpeed = {
   id: number; anio: number; mes: number; quincena: number; estado: "abierto" | "cerrado"; calculado_en: string | null;
   personas: number; devengado: number; deducciones: number; neto: number; novedades: number;
+  sandra?: { personas: number; devengado: number; deducciones: number; neto: number };
 };
+
+/** La nómina general no incluye los puestos de la señora Sandra («TIPO DE NOMINA» del Listado); se ven solo si se eligen. */
+export type Nomina = "general" | "sandra" | "todos";
+export const NOMINAS: [Nomina, string][] = [["general", "Nómina general"], ["sandra", "Puestos señora Sandra"], ["todos", "Todas"]];
 
 export type Conceptos = Record<
   "salario" | "vacaciones" | "incapacidad" | "auxilio_transporte" | "horas_extras" | "comisiones" | "ley_2466" | "bonificaciones" | "rodamiento"
   | "turnos_adicionales" | "pago_adicional" | "salud" | "pension" | "embargos" | "prestamos" | "cuotas", number>;
 
 export type LiquidacionSpeed = {
-  empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; devengado: number; deducciones: number; neto: number;
+  empleado_id: number; cedula: string; nombre: string; cargo: string; puesto: string; nomina?: "general" | "sandra";
+  devengado: number; deducciones: number; neto: number;
   ibc: number; aplica_programacion: boolean; salario_mensual: number; alertas: string[];
   dias: { contrato: number; trabajados: number; no_laborados: number; incapacidad: number; incapacidad_100: number; incapacidad_pct: number;
     programados: number | null; variables: number; vacaciones?: number; remunerados?: number; laborados?: number; turnos_tad?: number;
@@ -27,6 +34,7 @@ export type LiquidacionSpeed = {
 
 export type NovedadSpeed = {
   empleado_id: number; cedula: string; nombre: string; cargo: string; aplica_programacion: boolean; fecha_ingreso: string | null;
+  nomina?: "general" | "sandra";
   dias_programados: number | null; ausencias: number; licencias: number; suspensiones: number; desprogramados: number;
   permisos_remunerados: number; vacaciones: number; incapacidad: number; incapacidad_previos: number; turnos_tad: number; turnos_tan: number;
   sin_programacion: number; programacion: ProgramacionDias | null; observacion: string; origen: string | null;

@@ -26,6 +26,10 @@ VER, LIQUIDAR, DESCUENTOS, CONFIGURAR = "speed.ver", "speed.liquidar", "speed.de
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+# Nómina que se muestra/descarga: la general (sin los puestos de la señora Sandra), la de Sandra o todas
+GRUPO = Query(default="general", pattern="^(general|sandra|todos)$")
+
+
 def _f(v) -> float | None:
     return None if v is None else float(v)
 
@@ -91,7 +95,8 @@ def _empleado_out(e: SpdEmpleado) -> dict:
             "tipo_turno": e.tipo_turno, "salario": float(e.salario or 0), "auxilio_listado": float(e.auxilio_listado or 0),
             "horas_extras": float(e.horas_extras or 0), "comisiones": float(e.comisiones or 0), "ley_2466": float(e.ley_2466 or 0),
             "bonificaciones": float(e.bonificaciones or 0), "rodamiento": float(e.rodamiento or 0), "nota": e.nota,
-            "aplica_programacion": e.aplica_programacion, "activo": e.activo}
+            "aplica_programacion": e.aplica_programacion, "activo": e.activo,
+            "fecha_retiro": e.fecha_retiro.isoformat() if e.fecha_retiro else None, "motivo_retiro": e.motivo_retiro}
 
 
 @router.get("/empleados", response_model=ApiResponse[list[dict]])
@@ -137,6 +142,34 @@ def editar_empleado(empleado_id: int, data: EmpleadoEditar, request: Request, db
     return ok(_empleado_out(e))
 
 
+class RetiroIn(BaseModel):
+    fecha_retiro: date
+    motivo: str = Field(default="", max_length=200)
+
+
+@router.post("/empleados/{empleado_id}/retirar", response_model=ApiResponse[dict])
+def retirar_empleado(empleado_id: int, data: RetiroIn, request: Request, db: DbSession, actual: Usuario = Depends(require(LIQUIDAR))):
+    """Retiro (renuncia ya liquidada aparte): queda inactivo, no se liquida en las quincenas y el Listado no lo reactiva."""
+    e = db.get(SpdEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    e.activo, e.fecha_retiro, e.motivo_retiro = False, data.fecha_retiro, data.motivo.strip()
+    auditar(db, request, "spd_empleado_retirado", actual.id, cedula=e.cedula, fecha_retiro=data.fecha_retiro.isoformat(), motivo=e.motivo_retiro)
+    db.commit()
+    return ok(_empleado_out(e))
+
+
+@router.post("/empleados/{empleado_id}/reintegrar", response_model=ApiResponse[dict])
+def reintegrar_empleado(empleado_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(LIQUIDAR))):
+    e = db.get(SpdEmpleado, empleado_id)
+    if e is None:
+        raise ApiError(404, "Empleado no encontrado")
+    e.activo, e.fecha_retiro, e.motivo_retiro = True, None, ""
+    auditar(db, request, "spd_empleado_reintegrado", actual.id, cedula=e.cedula)
+    db.commit()
+    return ok(_empleado_out(e))
+
+
 # --- Quincenas ------------------------------------------------------------------------------------------------
 
 class PeriodoIn(BaseModel):
@@ -158,11 +191,19 @@ def _abierto(p: SpdPeriodo) -> None:
 
 
 def _periodo_out(db: DbSession, p: SpdPeriodo) -> dict:
-    tot = db.execute(select(func.count(), func.coalesce(func.sum(SpdLiquidacion.devengado), 0), func.coalesce(func.sum(SpdLiquidacion.deducciones), 0),
-                            func.coalesce(func.sum(SpdLiquidacion.neto), 0)).where(SpdLiquidacion.periodo_id == p.id)).one()
+    # Los totales son de la nómina general; los puestos de la señora Sandra van aparte
+    tot = {"general": [0, 0.0, 0.0, 0.0], "sandra": [0, 0.0, 0.0, 0.0]}
+    for l in db.scalars(select(SpdLiquidacion).where(SpdLiquidacion.periodo_id == p.id)):
+        t = tot[servicio.nomina_de(l.empleado)]
+        t[0] += 1
+        t[1] += float(l.devengado)
+        t[2] += float(l.deducciones)
+        t[3] += float(l.neto)
+    g, s = tot["general"], tot["sandra"]
     return {"id": p.id, "anio": p.anio, "mes": p.mes, "quincena": p.quincena, "estado": p.estado,
             "calculado_en": p.calculado_en.isoformat() if p.calculado_en else None,
-            "personas": tot[0], "devengado": float(tot[1]), "deducciones": float(tot[2]), "neto": float(tot[3]),
+            "personas": g[0], "devengado": g[1], "deducciones": g[2], "neto": g[3],
+            "sandra": {"personas": s[0], "devengado": s[1], "deducciones": s[2], "neto": s[3]},
             "novedades": db.scalar(select(func.count()).select_from(SpdNovedad).where(SpdNovedad.periodo_id == p.id)) or 0}
 
 
@@ -189,9 +230,13 @@ def ver_periodo(periodo_id: int, db: DbSession, _=Depends(require(VER))):
     p = _periodo(db, periodo_id)
     liq = db.scalars(select(SpdLiquidacion).where(SpdLiquidacion.periodo_id == p.id))
     filas = sorted(({"empleado_id": l.empleado_id, "cedula": l.empleado.cedula, "nombre": l.empleado.nombre, "cargo": l.empleado.cargo,
-                     "puesto": l.empleado.puesto, "devengado": float(l.devengado), "deducciones": float(l.deducciones), "neto": float(l.neto),
+                     "puesto": l.empleado.puesto, "nomina": servicio.nomina_de(l.empleado), "devengado": float(l.devengado), "deducciones": float(l.deducciones), "neto": float(l.neto),
                      **(l.detalle or {})} for l in liq), key=lambda x: x["nombre"])
-    return ok({**_periodo_out(db, p), "liquidaciones": filas})
+    # Quienes no se liquidan en esta nómina (vacaciones o retiro): se muestran en «Vacaciones y retiros»
+    nov = {n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == p.id))}
+    emp = db.scalars(select(SpdEmpleado).where((SpdEmpleado.activo.is_(True)) | (SpdEmpleado.id.in_(list(nov) or [0]))))
+    excluidos = sum(1 for e in emp if servicio.motivo_exclusion(e, nov.get(e.id)))
+    return ok({**_periodo_out(db, p), "liquidaciones": filas, "excluidos": excluidos})
 
 
 @router.delete("/periodos/{periodo_id}", response_model=ApiResponse[dict])
@@ -235,9 +280,10 @@ def cambiar_estado(periodo_id: int, data: EstadoIn, request: Request, db: DbSess
 
 
 @router.get("/periodos/{periodo_id}/excel")
-def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER)), grupo: str = GRUPO):
     p = _periodo(db, periodo_id)
-    liq = sorted(db.scalars(select(SpdLiquidacion).where(SpdLiquidacion.periodo_id == p.id)), key=lambda l: l.empleado.nombre)
+    liq = sorted((l for l in db.scalars(select(SpdLiquidacion).where(SpdLiquidacion.periodo_id == p.id)) if servicio.en_nomina(l.empleado, grupo)),
+                 key=lambda l: l.empleado.nombre)
     contenido = servicio.excel(p, liq)
     auditar(db, request, "spd_excel_quincena", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}")
     db.commit()
@@ -246,10 +292,10 @@ def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = De
 
 
 @router.get("/periodos/{periodo_id}/world-office")
-def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER))):
+def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER)), grupo: str = GRUPO):
     """Archivo plano de novedades para World Office (turnos adicionales, ausencias, licencias e incapacidades por día)."""
     p = _periodo(db, periodo_id)
-    contenido, filas, avisos = servicio.plano_world_office(db, p)
+    contenido, filas, avisos = servicio.plano_world_office(db, p, grupo)
     auditar(db, request, "spd_plano_world_office", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", filas=filas)
     db.commit()
     nombre = f"NOVEDADES WO {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
@@ -260,23 +306,23 @@ def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual:
 
 
 @router.get("/periodos/{periodo_id}/vacaciones-retiros", response_model=ApiResponse[dict])
-def vacaciones_retiros(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+def vacaciones_retiros(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
     """Quién tiene vacaciones y quién se retira en la quincena (con fechas), para cargarlo en World Office."""
-    return ok(servicio.vacaciones_y_retiros(db, _periodo(db, periodo_id)))
+    return ok(servicio.vacaciones_y_retiros(db, _periodo(db, periodo_id), grupo))
 
 
 @router.get("/periodos/{periodo_id}/vacaciones-retiros/excel")
-def vacaciones_retiros_excel(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+def vacaciones_retiros_excel(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
     p = _periodo(db, periodo_id)
-    contenido = servicio.excel_vacaciones_retiros(p, servicio.vacaciones_y_retiros(db, p))
+    contenido = servicio.excel_vacaciones_retiros(p, servicio.vacaciones_y_retiros(db, p, grupo))
     nombre = f"VACACIONES Y RETIROS {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
     return StreamingResponse(io.BytesIO(contenido), media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
 @router.get("/periodos/{periodo_id}/world-office/avisos", response_model=ApiResponse[dict])
-def avisos_world_office(periodo_id: int, db: DbSession, _=Depends(require(VER))):
+def avisos_world_office(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
     """Cuántas filas tendría el plano y qué no se pudo incluir (para mostrarlo antes de descargar)."""
-    _, filas, avisos = servicio.plano_world_office(db, _periodo(db, periodo_id))
+    _, filas, avisos = servicio.plano_world_office(db, _periodo(db, periodo_id), grupo)
     return ok({"filas": filas, "avisos": avisos})
 
 
@@ -291,6 +337,7 @@ def _novedades(db: DbSession, p: SpdPeriodo) -> list[dict]:
     nov = {n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == p.id))}
     emp = db.scalars(select(SpdEmpleado).where((SpdEmpleado.activo.is_(True)) | (SpdEmpleado.id.in_(list(nov) or [0]))).order_by(SpdEmpleado.nombre))
     return [{"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "aplica_programacion": e.aplica_programacion,
+             "nomina": servicio.nomina_de(e),
                 "fecha_ingreso": e.fecha_ingreso.isoformat() if e.fecha_ingreso else None,
                 **{c: (_f(getattr(nov[e.id], c)) if e.id in nov else (None if c == "dias_programados" else 0)) for c in CAMPOS_NOVEDAD},
                 "sin_programacion": _f(nov[e.id].sin_programacion) if e.id in nov else 0,

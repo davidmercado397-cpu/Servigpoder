@@ -13,7 +13,7 @@ import { Alerta, Insignia, Pestanas, SubirArchivo } from "@/components/ui";
 import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { usePermiso } from "@/lib/sesion";
 import {
-  CODIGOS_PROGRAMACION, nombrePeriodo, pesos, type EmpleadoSpeed, type LiquidacionSpeed, type NovedadSpeed, type PendienteProgramacion,
+  CODIGOS_PROGRAMACION, NOMINAS, nombrePeriodo, pesos, type Nomina, type EmpleadoSpeed, type LiquidacionSpeed, type NovedadSpeed, type PendienteProgramacion,
   type PeriodoSpeed, type ProgramacionDias, type ResultadoProgramacion,
 } from "@/lib/speed";
 
@@ -34,7 +34,7 @@ type VacacionesRetiros = {
 };
 const fechaCorta = (iso: string | null) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "—";
 
-type Detalle = PeriodoSpeed & { liquidaciones: LiquidacionSpeed[] };
+type Detalle = PeriodoSpeed & { liquidaciones: LiquidacionSpeed[]; excluidos?: number };
 type Campo = "dias_programados" | "ausencias" | "licencias" | "suspensiones" | "desprogramados" | "permisos_remunerados" | "vacaciones"
   | "incapacidad" | "incapacidad_previos" | "turnos_tad" | "turnos_tan";
 const CAMPOS: [Campo, string, string][] = [
@@ -58,7 +58,9 @@ export default function QuincenaSpeed() {
   const [p, setP] = useState<Detalle | null>(null);
   const [pestana, setPestana] = useState<"liquidacion" | "novedades" | "vacaciones">("liquidacion");
   const [vr, setVr] = useState<VacacionesRetiros | null>(null);
-  const cargarVr = useCallback(() => api<VacacionesRetiros>(`/speed/periodos/${id}/vacaciones-retiros`).then(setVr).catch(() => {}), [id]);
+  // Por defecto, la nómina general (sin los puestos de la señora Sandra)
+  const [nomina, setNomina] = useState<Nomina>("general");
+  const cargarVr = useCallback(() => api<VacacionesRetiros>(`/speed/periodos/${id}/vacaciones-retiros?grupo=${nomina}`).then(setVr).catch(() => {}), [id, nomina]);
   useEffect(() => { cargarVr(); }, [cargarVr]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error" | "info"; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -68,6 +70,8 @@ export default function QuincenaSpeed() {
 
   if (!p) return msg ? <Alerta>{msg.texto}</Alerta> : <p className="text-sm text-slate-500">Cargando…</p>;
   const abierto = p.estado === "abierto";
+  const liquidaciones = p.liquidaciones.filter((l) => nomina === "todos" || (l.nomina ?? "general") === nomina);
+  const suma = (k: "devengado" | "deducciones" | "neto") => liquidaciones.reduce((t, l) => t + l[k], 0);
 
   async function accion(fn: () => Promise<unknown>, ok: string) {
     setMsg(null);
@@ -87,13 +91,16 @@ export default function QuincenaSpeed() {
         <div className="ml-auto flex flex-wrap gap-2">
           {liquidar && abierto && <button className="btn-primario" disabled={ocupado} onClick={() => accion(() => api(`/speed/periodos/${id}/liquidar`, { method: "POST" }), "Quincena liquidada.")}>
             <Calculator className="h-4 w-4" /> {ocupado ? "Liquidando…" : p.calculado_en ? "Volver a liquidar" : "Liquidar"}</button>}
-          {p.calculado_en && <a className="btn-secundario" href={`/api/speed/periodos/${id}/excel`}><Download className="h-4 w-4" /> Excel</a>}
+          <select className="input w-52" value={nomina} onChange={(e) => setNomina(e.target.value as Nomina)} title="Qué nómina ver y descargar">
+            {NOMINAS.map(([v, t]) => <option key={v} value={v}>{t}{v === "sandra" && p.sandra ? ` (${p.sandra.personas})` : ""}</option>)}
+          </select>
+          {p.calculado_en && <a className="btn-secundario" href={`/api/speed/periodos/${id}/excel?grupo=${nomina}`}><Download className="h-4 w-4" /> Excel</a>}
           <button className="btn-secundario" title="Archivo plano de novedades por día para World Office" onClick={async () => {
             setMsg(null);
             try {
-              const r = await api<{ filas: number; avisos: string[] }>(`/speed/periodos/${id}/world-office/avisos`);
+              const r = await api<{ filas: number; avisos: string[] }>(`/speed/periodos/${id}/world-office/avisos?grupo=${nomina}`);
               if (!r.filas) { setMsg({ tipo: "error", texto: "No hay novedades con fecha para el plano: suba primero la programación de la quincena." }); return; }
-              window.location.href = `/api/speed/periodos/${id}/world-office`;
+              window.location.href = `/api/speed/periodos/${id}/world-office?grupo=${nomina}`;
               setMsg({ tipo: r.avisos.length ? "info" : "ok", texto: `Plano de World Office con ${r.filas} filas.${r.avisos.length ? " " + r.avisos.join(" · ") : ""}` });
             } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
           }}><Download className="h-4 w-4" /> Plano World Office</button>
@@ -110,17 +117,24 @@ export default function QuincenaSpeed() {
       {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <Dato titulo="Personas" valor={String(p.personas)} />
-        <Dato titulo="Total devengado" valor={pesos(p.devengado)} />
-        <Dato titulo="Deducciones" valor={pesos(p.deducciones)} />
-        <Dato titulo="Neto a pagar" valor={pesos(p.neto)} fuerte />
+        <Dato titulo={`Personas · ${NOMINAS.find(([v]) => v === nomina)?.[1]}`} valor={String(liquidaciones.length)} />
+        <Dato titulo="Total devengado" valor={pesos(suma("devengado"))} />
+        <Dato titulo="Deducciones" valor={pesos(suma("deducciones"))} />
+        <Dato titulo="Neto a pagar" valor={pesos(suma("neto"))} fuerte />
       </div>
 
       <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"],
         ["vacaciones", `Vacaciones y retiros${vr ? ` (${vr.vacaciones.length + vr.retiros.length})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
-      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} />
-        : pestana === "liquidacion" ? <Liquidacion filas={p.liquidaciones} vr={vr} />
-        : <Novedades periodoId={Number(id)} quincena={p.quincena} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
+      {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length) > 0 && (
+        <Alerta tipo="info">
+          <AlertTriangle className="mr-1 inline h-4 w-4 text-amber-600" />
+          <b>{vr.vacaciones.length} con vacaciones</b> y <b>{vr.retiros.length} con retiro</b> en esta quincena: no se liquidan en esta nómina porque van en otra.{" "}
+          <button className="font-medium text-marca-700 hover:underline" onClick={() => { setPestana("vacaciones"); cargarVr(); }}>Ver quiénes son</button>
+        </Alerta>
+      )}
+      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} nomina={nomina} />
+        : pestana === "liquidacion" ? <Liquidacion filas={liquidaciones} vr={vr} />
+        : <Novedades periodoId={Number(id)} quincena={p.quincena} nomina={nomina} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}
     </div>
   );
 }
@@ -227,7 +241,9 @@ function Liquidacion({ filas, vr }: { filas: LiquidacionSpeed[]; vr: VacacionesR
   );
 }
 
-function Novedades({ periodoId, quincena, editable, onCambio }: { periodoId: number; quincena: number; editable: boolean; onCambio: () => void }) {
+function Novedades({ periodoId, quincena, nomina, editable, onCambio }: {
+  periodoId: number; quincena: number; nomina: Nomina; editable: boolean; onCambio: () => void;
+}) {
   const [filas, setFilas] = useState<NovedadSpeed[] | null>(null);
   const [cambiadas, setCambiadas] = useState<Record<number, NovedadSpeed>>({});
   const [buscar, setBuscar] = useState("");
@@ -244,7 +260,7 @@ function Novedades({ periodoId, quincena, editable, onCambio }: { periodoId: num
   const tiene = (n: NovedadSpeed) => (n.dias_programados !== null && n.dias_programados < 15) || n.observacion || n.sin_programacion
     || CAMPOS.some(([k]) => k !== "dias_programados" && n[k]) || (n.programacion?.conflictos.length ?? 0) > 0;
   const visibles = filas.map((f) => cambiadas[f.empleado_id] ?? f)
-    .filter((f) => (!soloCon || tiene(f)) && (!buscar || `${f.cedula} ${f.nombre}`.toLowerCase().includes(buscar.toLowerCase())));
+    .filter((f) => (nomina === "todos" || (f.nomina ?? "general") === nomina) && (!soloCon || tiene(f)) && (!buscar || `${f.cedula} ${f.nombre}`.toLowerCase().includes(buscar.toLowerCase())));
   const pagina = paginar(visibles, pag.pagina, pag.tamano);
   const cambiar = (n: NovedadSpeed, x: Partial<NovedadSpeed>) => setCambiadas({ ...cambiadas, [n.empleado_id]: { ...n, ...x } });
 
@@ -537,14 +553,14 @@ function Lista({ titulo, items, alerta }: { titulo: string; items: string[]; ale
 }
 
 /** Quién tiene vacaciones y quién se retira en la quincena, con fechas, para cargarlo en World Office. */
-function VacacionesYRetiros({ periodoId, datos }: { periodoId: number; datos: VacacionesRetiros | null }) {
+function VacacionesYRetiros({ periodoId, datos, nomina }: { periodoId: number; datos: VacacionesRetiros | null; nomina: Nomina }) {
   if (!datos) return <p className="text-sm text-slate-500">Cargando…</p>;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="flex-1 text-sm text-slate-600">Salen de los códigos de la programación (VAC y RUN). Las vacaciones y los retiros no van en el plano de novedades:
-          cárguelos en World Office con estas fechas.</p>
-        <a className="btn-secundario" href={`/api/speed/periodos/${periodoId}/vacaciones-retiros/excel`}><Download className="h-4 w-4" /> Excel</a>
+        <p className="flex-1 text-sm text-slate-600">Salen de los códigos de la programación (VAC y RUN) y de los retiros registrados en Empleados.
+          Estas personas <b>no se liquidan en esta nómina</b> ni van en su plano de novedades: van en otra nómina. Cárguelas en World Office con estas fechas.</p>
+        <a className="btn-secundario" href={`/api/speed/periodos/${periodoId}/vacaciones-retiros/excel?grupo=${nomina}`}><Download className="h-4 w-4" /> Excel</a>
       </div>
       <div className="tarjeta overflow-x-auto">
         <p className="border-b border-slate-100 px-4 py-2 font-semibold text-violet-800">Vacaciones ({datos.vacaciones.length})</p>

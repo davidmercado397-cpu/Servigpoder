@@ -370,7 +370,7 @@ def test_plano_de_novedades_para_world_office(speed):
     assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
     assert speed.put(f"{API}/parametros", json={"valor_tad": 75000, "valor_tan": 82000}).status_code == 200
     p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
-    uno = ["X", "TAD", "AUS", "N", "INC", "INC", "INC", "X", "LUT", "TAN", "D", "VAC", "PR", "D", "N"]
+    uno = ["X", "TAD", "AUS", "N", "INC", "INC", "INC", "X", "LUT", "TAN", "D", "X", "PR", "D", "N"]
     dos = ["D", "D", "INC", "INC", "INC", "D", "D", "D", "D", "D", "D", "D", "D", "D", "D"]
     archivo = programacion_xlsx([["TORRE", "UNO GUARDA", 1006306373, uno], ["OFICINA", "DOS ADMIN", 52112768, dos]])
     assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
@@ -388,7 +388,7 @@ def test_plano_de_novedades_para_world_office(speed):
                      (5, "incapacidades Empresa 100%"): round(diario, 2), (6, "incapacidades Empresa 100%"): round(diario, 2),
                      (7, "Incapacidades EPS 100%"): round(diario, 2),  # el 66,67 % del mínimo sube al mínimo
                      (9, "LICENCIA POR LUTO"): round(diario, 2), (10, "Auxilio de compensacion por descanso Nocturno"): 82000,
-                     (13, "Licencia Remunerada"): round(diario, 2)}  # VAC no va (se liquida en World Office)
+                     (13, "Licencia Remunerada"): round(diario, 2)}
     f = next(x for x in uno_f if x[2].day == 3)
     assert f[2] == datetime(2026, 11, 3) and f[3] == 1 and f[5] == "Día" and f[6] == "Produccion"
     assert f[7] == "NOVEDADES 1RA QUINCENA DE NOVIEMBRE 2026-03 NOV: Ausencia" and f[8] in ("", None) and f[9:] == [-1, -1, -1]
@@ -396,15 +396,14 @@ def test_plano_de_novedades_para_world_office(speed):
     dos_f = {x[2].day: x for x in filas if x[0] == "DOS ADMIN - 52112768"}
     assert dos_f[3][6] == "Administrativo" and dos_f[5][1] == "Incapacidades EPS 66.67%" and dos_f[5][4] == round(100000 * 0.6667, 2)
 
-    # El concepto se cambia en Parámetros y se puede incluir VAC
+    # El concepto se cambia en Parámetros
     conceptos = speed.get(f"{API}/conceptos-wo").json()["data"]
-    cambio = [{**c, "incluir": True} if c["codigo"] == "VAC" else c for c in conceptos]
-    cambio = [{**c, "concepto": "Ausencia injustificada"} if c["codigo"] == "AUS" else c for c in cambio]
+    cambio = [{**c, "concepto": "Ausencia injustificada"} if c["codigo"] == "AUS" else c for c in conceptos]
     assert speed.put(f"{API}/conceptos-wo", json=cambio).status_code == 200
     hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
     tipos = {(f[2].value.day, f[1].value) for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("UNO")}
-    assert (12, "Vacaciones") in tipos and (3, "Ausencia injustificada") in tipos
-    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 12
+    assert (3, "Ausencia injustificada") in tipos
+    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 11
 
 
 def test_vacaciones_y_retiros_de_la_quincena(speed):
@@ -429,6 +428,23 @@ def test_vacaciones_y_retiros_de_la_quincena(speed):
     assert "inactivo" in retiros["80128728"]["motivo"]
     x = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros/excel")
     assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Vacaciones", "Retiros"]
+    # Quien tiene vacaciones o retiro no se liquida en esta nómina (va en otra)
+    q = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]
+    assert q["liquidaciones"] == [] and q["excluidos"] == 3
+
+    # Retiro registrado en la plataforma: no se liquida y el Listado no lo reactiva
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GUARDA"), fila(2, 52112768, "DOS RENUNCIA"), fila(4, 1003000004, "CUATRO RETIRADA")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    cuatro = next(e for e in speed.get(f"{API}/empleados").json()["data"] if e["cedula"] == "1003000004")
+    r = speed.post(f"{API}/empleados/{cuatro['id']}/retirar", json={"fecha_retiro": "2026-11-10", "motivo": "Renuncia, ya liquidada"})
+    assert r.status_code == 200 and r.json()["data"]["activo"] is False
+    r = speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).json()["data"]
+    assert r["retirados_en_archivo"][0]["cedula"] == "1003000004" and r["reactivados"] == 0
+    d = speed.get(f"{API}/periodos/{p['id']}/vacaciones-retiros").json()["data"]
+    assert any(x["cedula"] == "1003000004" and "Renuncia, ya liquidada" in x["motivo"] for x in d["retiros"])
+    liq = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]
+    assert "1003000004" not in {x["cedula"] for x in liq}
+    assert speed.post(f"{API}/empleados/{cuatro['id']}/reintegrar").json()["data"]["activo"] is True
 
 
 def test_cruce_por_nombre_escrito_distinto(speed):
@@ -463,3 +479,17 @@ def test_en_la_programacion_sin_ningun_turno_no_se_paga(speed):
     hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
     filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("NAVARRO")]
     assert len(filas) == 15 and {f[1] for f in filas} == {"Licencia No remunerada"}
+
+
+def test_puestos_de_la_senora_sandra_van_aparte(speed):
+    sandra = fila(2, 52112768, "DOS SANDRA")
+    sandra[7] = "SANDRA"
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO GENERAL"), sandra])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    d = speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]
+    assert {x["cedula"]: x["nomina"] for x in d["liquidaciones"]} == {"1006306373": "general", "52112768": "sandra"}
+    assert d["personas"] == 1 and d["sandra"]["personas"] == 1  # los totales son de la nómina general
+    cedulas = lambda g: {load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/excel" + g).content)).active.cell(r, 1).value  # noqa: E731
+                         for r in range(2, 4)} - {None}
+    assert cedulas("") == {"1006306373"} and cedulas("?grupo=sandra") == {"52112768"} and len(cedulas("?grupo=todos")) == 2

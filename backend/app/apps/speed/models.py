@@ -45,6 +45,9 @@ class SpdEmpleado(BaseEmpresa):
     # Columna V: los variables se pagan ÷ 30 × días con programación
     aplica_programacion: Mapped[bool] = mapped_column(Boolean, default=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Retiro registrado en la plataforma (renuncia ya liquidada aparte): no se liquida ni lo reactiva el Listado
+    fecha_retiro: Mapped[date | None] = mapped_column(Date, nullable=True)
+    motivo_retiro: Mapped[str] = mapped_column(String(200), default="")
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

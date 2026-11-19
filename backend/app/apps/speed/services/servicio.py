@@ -1,6 +1,7 @@
 """Servicios de la nómina de Speed: parámetros, importación del Listado y de la programación, liquidación y Excel."""
 
 import copy
+from calendar import monthrange
 import io
 from difflib import SequenceMatcher
 import re
@@ -19,6 +20,20 @@ from app.apps.speed.services import calculo, programacion, world_office
 
 CAMPOS_EMPLEADO = ("nombre", "fecha_ingreso", "tipo_contrato", "grupo", "cargo", "area", "puesto", "cliente", "tipo_turno", "salario",
                    "auxilio_listado", "horas_extras", "comisiones", "ley_2466", "bonificaciones", "rodamiento", "nota", "aplica_programacion")
+
+
+# --- Nóminas: la general y la de los puestos de la señora Sandra («TIPO DE NOMINA» del Listado) -----------------
+
+GRUPOS = ("general", "sandra", "todos")
+
+
+def nomina_de(e: SpdEmpleado) -> str:
+    return "sandra" if "sandra" in (e.grupo or "").lower() else "general"
+
+
+def en_nomina(e: SpdEmpleado, grupo: str) -> bool:
+    """La general no incluye los puestos de la señora Sandra; esos se ven solo si se eligen (o «todos»)."""
+    return grupo == "todos" or nomina_de(e) == grupo
 
 
 def sembrar(db: Session) -> None:
@@ -49,13 +64,13 @@ def _tramos(dias: dict[int, str], codigo: str) -> list[tuple[int, int]]:
     return salida
 
 
-def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo) -> dict:
+def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo, grupo: str = "general") -> dict:
     """Quién tiene vacaciones y quién se retira en la quincena, con las fechas (para cargarlo en World Office)."""
     desde, hasta = (1, 15) if periodo.quincena == 1 else (16, 30)
     fecha = lambda d: date(periodo.anio, periodo.mes, d).isoformat()  # noqa: E731
     vacaciones: list[dict] = []
     retiros: list[dict] = []
-    novedades = list(db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)))
+    novedades = [n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)) if en_nomina(n.empleado, grupo)]
     for n in novedades:
         e = n.empleado
         base = {"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
@@ -72,6 +87,17 @@ def vacaciones_y_retiros(db: Session, periodo: SpdPeriodo) -> dict:
             retiros.append({**base, "primer_dia_retiro": fecha(run[0][0]), "ultimo_dia": fecha(max(trabajados)) if trabajados else None,
                             "dias_retiro": sum(b - a + 1 for a, b in run), "motivo": "Renuncia (RUN en la programación)"})
     con_retiro = {r["empleado_id"] for r in retiros}
+    # Retirados en la plataforma: con novedad en la quincena o con la fecha de retiro dentro de ella
+    inicio, fin = date(periodo.anio, periodo.mes, desde), date(periodo.anio, periodo.mes, min(hasta, monthrange(periodo.anio, periodo.mes)[1]))
+    con_novedad = {n.empleado_id for n in novedades}
+    for e in db.scalars(select(SpdEmpleado).where(SpdEmpleado.fecha_retiro.is_not(None))):
+        if e.id in con_retiro or not en_nomina(e, grupo) or not (e.id in con_novedad or inicio <= e.fecha_retiro <= fin):
+            continue
+        con_retiro.add(e.id)
+        retiros.append({"empleado_id": e.id, "cedula": e.cedula, "nombre": e.nombre, "cargo": e.cargo, "puesto": e.puesto,
+                        "centro": "Produccion" if e.aplica_programacion else "Administrativo", "primer_dia_retiro": None,
+                        "ultimo_dia": e.fecha_retiro.isoformat(), "dias_retiro": 0,
+                        "motivo": "Retirado en la plataforma" + (f": {e.motivo_retiro}" if e.motivo_retiro else "")})
     # Quien tiene novedad en la quincena pero ya no viene en el Listado (inactivo): posible retiro
     for n in novedades:
         e = n.empleado
@@ -113,7 +139,7 @@ def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
     return buf.getvalue()
 
 
-def plano_world_office(db: Session, periodo: SpdPeriodo) -> tuple[bytes, int, list[str]]:
+def plano_world_office(db: Session, periodo: SpdPeriodo, grupo: str = "general") -> tuple[bytes, int, list[str]]:
     """Archivo plano de novedades de la quincena para World Office (desde los códigos de la programación)."""
     p = periodo.parametros if periodo.estado != ABIERTO and periodo.parametros else parametros(db)
     conceptos = conceptos_wo(db)
@@ -121,6 +147,8 @@ def plano_world_office(db: Session, periodo: SpdPeriodo) -> tuple[bytes, int, li
     avisos: list[str] = []
     for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id)):
         e = n.empleado
+        if not en_nomina(e, grupo) or motivo_exclusion(e, n):
+            continue
         dias = {int(k): v for k, v in ((n.programacion or {}).get("dias") or {}).items()}
         if (n.programacion or {}).get("sin_turnos") and n.origen == "programacion":
             # Sin ningún turno en la quincena: cada día de contrato va como desprogramado (no se paga)
@@ -160,8 +188,12 @@ def importar_listado(db: Session, empleados: list[dict]) -> dict:
     actuales = {e.cedula: e for e in db.scalars(select(SpdEmpleado))}
     nuevos = actualizados = sin_cambios = reactivados = 0
     cambios: list[dict] = []
+    retirados: list[dict] = []
     for d in empleados:
         e = actuales.get(d["cedula"])
+        if e is not None and e.fecha_retiro:
+            retirados.append({"cedula": e.cedula, "nombre": e.nombre, "fecha_retiro": e.fecha_retiro.isoformat()})
+            continue
         if e is None:
             db.add(SpdEmpleado(cedula=d["cedula"], **{c: d[c] for c in CAMPOS_EMPLEADO}, activo=True))
             nuevos += 1
@@ -185,7 +217,8 @@ def importar_listado(db: Session, empleados: list[dict]) -> dict:
         e.activo = False
     db.flush()
     return {"nuevos": nuevos, "actualizados": actualizados, "sin_cambios": sin_cambios, "reactivados": reactivados,
-            "inactivados": [{"cedula": e.cedula, "nombre": e.nombre} for e in inactivados], "cambios": cambios[:300]}
+            "inactivados": [{"cedula": e.cedula, "nombre": e.nombre} for e in inactivados], "cambios": cambios[:300],
+            "retirados_en_archivo": retirados}
 
 
 def _valor(v):
@@ -408,8 +441,23 @@ def descuentos_para(db: Session, periodo: SpdPeriodo, empleado_id: int | None = 
     return salida
 
 
+def motivo_exclusion(e: SpdEmpleado, n: SpdNovedad | None) -> str | None:
+    """Quién no se liquida en esta nómina porque va en otra (2026-11-19): vacaciones, retiro o inactivo."""
+    if e.fecha_retiro:
+        return "retiro"
+    if not e.activo:
+        return "inactivo"
+    if n is not None:
+        if float(n.vacaciones or 0):
+            return "vacaciones"
+        if "RUN" in ((n.programacion or {}).get("dias") or {}).values():
+            return "retiro"
+    return None
+
+
 def liquidar_periodo(db: Session, periodo: SpdPeriodo) -> dict:
-    """Liquida a todos los empleados activos (y a quienes tengan novedad en la quincena). Rehace lo de la quincena."""
+    """Liquida a los empleados activos. Quien tiene vacaciones o retiro en la quincena no se liquida: va en otra nómina
+    y se muestra en «Vacaciones y retiros». Rehace lo de la quincena."""
     p = parametros(db)
     db.query(SpdLiquidacion).filter(SpdLiquidacion.periodo_id == periodo.id).delete()
     db.query(SpdDescuentoAplicado).filter(SpdDescuentoAplicado.periodo_id == periodo.id).delete()
@@ -418,8 +466,11 @@ def liquidar_periodo(db: Session, periodo: SpdPeriodo) -> dict:
     empleados = list(db.scalars(select(SpdEmpleado).where((SpdEmpleado.activo.is_(True)) | (SpdEmpleado.id.in_(list(novedades) or [0])))
                                 .order_by(SpdEmpleado.nombre)))
     descuentos = descuentos_para(db, periodo)
-    totales = {"personas": 0, "devengado": 0.0, "deducciones": 0.0, "neto": 0.0, "alertas": 0}
+    totales = {"personas": 0, "devengado": 0.0, "deducciones": 0.0, "neto": 0.0, "alertas": 0, "excluidos": 0}
     for e in empleados:
+        if motivo_exclusion(e, novedades.get(e.id)):
+            totales["excluidos"] += 1
+            continue
         r = calculo.liquidar(_empleado_dict(e), _novedad_dict(novedades.get(e.id)), p, periodo.anio, periodo.mes, periodo.quincena,
                              descuentos.get(e.id, []))
         if r.dias["contrato"] == 0 and e.id not in novedades:

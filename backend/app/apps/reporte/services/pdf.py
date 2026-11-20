@@ -5,7 +5,7 @@
 - Por ubicación: encabezado con código, nombre, ciudad y totales; por puesto: tabla con un día por
   columna. Un puesto no se parte entre páginas salvo que no quepa en una (entonces repite el encabezado).
 - Domingos y festivos sombreados; novedades en color; descansos (Z, L) en gris; leyenda al final.
-- Las columnas se ajustan al rango del archivo: quincena (15-16 días) o mes completo (28-31 días).
+- Las columnas se ajustan al rango elegido: una semana, una quincena, el mes o del 15 al 15 (hasta 35 días).
 """
 
 import re
@@ -110,7 +110,11 @@ def _n(valor: int) -> str:
 
 
 def _rango_texto(desde: date, hasta: date) -> str:
-    return f"Del {desde.day} al {hasta.day} de {MESES[desde.month]} de {desde.year}"
+    if (desde.year, desde.month) == (hasta.year, hasta.month):
+        return f"Del {desde.day} al {hasta.day} de {MESES[desde.month]} de {desde.year}"
+    if desde.year == hasta.year:
+        return f"Del {desde.day} de {MESES[desde.month]} al {hasta.day} de {MESES[hasta.month]} de {desde.year}"
+    return f"Del {desde.day} de {MESES[desde.month]} de {desde.year} al {hasta.day} de {MESES[hasta.month]} de {hasta.year}"
 
 
 class _Encabezado(Paragraph):
@@ -342,7 +346,7 @@ def generar(prog: Programacion, filtros: str = "") -> bytes:
 def construir(prog: Programacion, filtros: str = "") -> tuple[bytes, dict[str, int], int]:
     """PDF, página donde empieza cada ubicación (por clave) y total de páginas."""
     generado = datetime.now(ZONA)
-    festivos = {d: n for d, n in holidays.Colombia(years=prog.desde.year).items() if prog.desde <= d <= prog.hasta}
+    festivos = {d: n for d, n in holidays.Colombia(years=sorted({prog.desde.year, prog.hasta.year})).items() if prog.desde <= d <= prog.hasta}
     ubicaciones = ordenada(prog)
 
     paginas: dict[str, int] = {}

@@ -73,8 +73,8 @@ def test_celdas_y_festivos():
 
 
 def test_validaciones_del_archivo():
-    with pytest.raises(lector.ErrorReporte, match="mismo mes"):
-        lector.leer(_siesa(date(2026, 9, 20), date(2026, 10, 5), FILAS))
+    with pytest.raises(lector.ErrorReporte, match="repite días"):
+        lector.leer(_siesa(date(2026, 10, 15), date(2026, 11, 15), FILAS))
     with pytest.raises(lector.ErrorReporte, match="Desde"):
         lector.leer(xlsx([["Compañia", "X"], ["Hasta", "2026-10-31"], [], [], ["C.C. Empleado"]]))
     with pytest.raises(lector.ErrorReporte, match="filas de empleados"):
@@ -114,3 +114,51 @@ def test_permiso_del_reporte(admin):
     contenido = _siesa(date(2026, 10, 1), date(2026, 10, 15), FILAS)
     assert admin.post(f"{API}/analizar", files=archivo(contenido)).status_code == 403
     assert admin.post(f"{API}/pdf", files=archivo(contenido)).status_code == 403
+
+
+def test_rango_que_cruza_de_mes_en_un_archivo():
+    # SIESA con columnas 1 … 31: del 20 de septiembre al 5 de octubre cada día va en la columna de su número
+    prog = lector.leer(_siesa(date(2026, 9, 20), date(2026, 10, 5), [("9", "PEREZ", "7", "UBI", "7-1", "P", {20: "A", 30: "B", 1: "C", 5: "D"}, "CALI")]))
+    e = prog.ubicaciones["7"].puestos["7-1"].empleados[0]
+    assert e.dias == {date(2026, 9, 20): "A", date(2026, 9, 30): "B", date(2026, 10, 1): "C", date(2026, 10, 5): "D"}
+    assert len(prog.fechas) == 16
+    assert pdf._rango_texto(prog.desde, prog.hasta) == "Del 20 de septiembre al 5 de octubre de 2026"
+    assert pdf._rango_texto(date(2026, 12, 15), date(2027, 1, 14)) == "Del 15 de diciembre de 2026 al 14 de enero de 2027"
+
+
+def test_dos_meses_del_15_al_15_y_semanas():
+    octubre = lector.leer(_siesa(date(2026, 10, 1), date(2026, 10, 31), [("1", "ANA", "5", "U", "5-1", "P", _todos("A", 1, 31), "CALI")]))
+    noviembre = lector.leer(_siesa(date(2026, 11, 1), date(2026, 11, 30), [
+        ("1", "ANA", "5", "U", "5-1", "P", _todos("B", 1, 30), "CALI"), ("2", "LUIS", "5", "U", "5-1", "P", {20: "N"}, "CALI")]))
+    junto = lector.unir([noviembre, octubre])
+    assert (junto.desde, junto.hasta) == (date(2026, 10, 1), date(2026, 11, 30))
+    ana = junto.ubicaciones["5"].puestos["5-1"].empleados[0]
+    assert ana.dias[date(2026, 10, 31)] == "A" and ana.dias[date(2026, 11, 1)] == "B"  # una sola fila con los dos meses
+    # Del 15 de octubre al 15 de noviembre (32 días): Luis solo trabaja el 20 de noviembre, no sale
+    r = lector.recortar(junto, date(2026, 10, 15), date(2026, 11, 15))
+    assert len(r.fechas) == 32 and [e.nombre for e in r.ubicaciones["5"].puestos["5-1"].empleados] == ["ANA"]
+    assert min(r.ubicaciones["5"].puestos["5-1"].empleados[0].dias) == date(2026, 10, 15)
+    contenido, _, _ = pdf.construir(r)
+    assert contenido.startswith(b"%PDF")
+    # Una semana y tres semanas
+    assert len(lector.recortar(junto, date(2026, 11, 2), date(2026, 11, 8)).fechas) == 7
+    assert len(lector.recortar(junto, date(2026, 11, 2), date(2026, 11, 22)).fechas) == 21
+    with pytest.raises(lector.ErrorReporte, match="35 días"):
+        lector.recortar(junto, date(2026, 10, 1), date(2026, 11, 30))
+    with pytest.raises(lector.ErrorReporte, match="entre el"):
+        lector.recortar(junto, date(2026, 9, 25), date(2026, 10, 10))
+    with pytest.raises(lector.ErrorReporte, match="faltan días"):
+        lector.unir([octubre, lector.leer(_siesa(date(2026, 11, 5), date(2026, 11, 30), FILAS))])
+
+
+def test_api_varios_archivos_y_rango(admin):
+    tipo = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    archivos = [("archivos", ("oct.xlsx", _siesa(date(2026, 10, 1), date(2026, 10, 31), FILAS), tipo)),
+                ("archivos", ("nov.xlsx", _siesa(date(2026, 11, 1), date(2026, 11, 30), FILAS), tipo))]
+    d = admin.post(f"{API}/analizar", files=archivos).json()["data"]
+    assert (d["desde"], d["hasta"], d["dias"]) == ("2026-10-01", "2026-11-30", 61)
+    r = admin.post(f"{API}/pdf", files=archivos, data={"desde": "2026-10-15", "hasta": "2026-11-14"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-disposition"] == 'attachment; filename="programacion_2026-10-15_a_2026-11-14.pdf"'
+    r = admin.post(f"{API}/pdf", files=archivos)  # sin rango: los 61 días no caben en un PDF
+    assert r.status_code == 422 and "35 días" in r.json()["error"]["message"]

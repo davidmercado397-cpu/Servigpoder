@@ -377,7 +377,7 @@ def test_plano_de_novedades_para_world_office(speed):
 
     assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["documento"] == 75
     r = speed.get(f"{API}/periodos/{p['id']}/world-office?documento=80")
-    assert r.status_code == 200 and r.headers["x-filas"] == "11"
+    assert r.status_code == 200 and r.headers["x-filas"] == "9"
     libro = load_workbook(io.BytesIO(r.content))
     assert libro.sheetnames == ["GENERAL"]
     hoja = libro["GENERAL"]
@@ -393,16 +393,19 @@ def test_plano_de_novedades_para_world_office(speed):
     tipos = {(f[2].day, f[1]): f[4] for f in uno_f}
     diario = 1750905 / 30
     assert tipos == {(2, "Auxilio de Compensacion por descanso Diurno"): 75000, (3, "Ausencias"): round(diario, 2),
-                     (5, "incapacidades Empresa 100%"): round(diario, 2), (6, "incapacidades Empresa 100%"): round(diario, 2),
+                     (5, "incapacidades Empresa 100%"): round(diario, 2),  # 5 y 6 en una fila
                      (7, "Incapacidades EPS 100%"): round(diario, 2),  # el 66,67 % del mínimo sube al mínimo
                      (9, "LICENCIA POR LUTO"): round(diario, 2), (10, "Auxilio de compensacion por descanso Nocturno"): 82000,
                      (13, "Licencia Remunerada"): round(diario, 2)}
+    inc = next(x for x in uno_f if x[2].day == 5)
+    assert inc[3] == 2 and inc[7] == "NOVEDADES 1RA QUINCENA NOVIEMBRE2026-5 al 6 NOV: Incapacidad 2 días"
     f = next(x for x in uno_f if x[2].day == 3)
     assert f[2] == datetime(2026, 11, 3) and f[3] == 1 and f[5] == "D" and f[6] == "Produccion"
     assert f[7] == "NOVEDADES 1RA QUINCENA NOVIEMBRE2026-3 NOV: Ausencia" and f[8] is None and f[9:] == [-1, -1, None, None]
     # Administrativo, salario alto: desde el 3.er día de incapacidad, al 66,67 %
     dos_f = {x[2].day: x for x in filas if x[0] == 52112768}
-    assert dos_f[3][6] == "Administrativo" and dos_f[5][1] == "Incapacidades EPS 66.67%" and dos_f[5][4] == round(100000 * 0.6667, 2)
+    assert dos_f[3][6] == "Administrativo" and dos_f[3][3] == 2 and dos_f[5][1] == "Incapacidades EPS 66.67%"
+    assert dos_f[5][4] == round(100000 * 0.6667, 2) and dos_f[5][3] == 1
 
     # El concepto se cambia en Parámetros
     conceptos = speed.get(f"{API}/conceptos-wo").json()["data"]
@@ -411,7 +414,7 @@ def test_plano_de_novedades_para_world_office(speed):
     hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["GENERAL"]
     tipos = {(f[6].value.day, f[5].value) for f in hoja.iter_rows(min_row=2) if f[4].value == 1006306373}
     assert (3, "Ausencia injustificada") in tipos
-    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 11
+    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 9
 
 
 def test_vacaciones_y_retiros_de_la_quincena(speed):

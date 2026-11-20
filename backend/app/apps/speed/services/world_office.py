@@ -6,7 +6,8 @@ novedades (turnos adicionales, ausencias, licencias, incapacidades…), no el sa
 Columnas del modelo de cargue de World Office que usa Speed (Cargue_Novedades_2QOCTUBRE_2026, hoja GENERAL; 2026-11-20):
 Encab: Empresa («SPEED SECURITY LTDA»), Encab: Tipo Documento (NNO), Encab: Prefijo (NOVNO), Encab: Documento Número (el
 consecutivo que se pide al descargar), Detalle: Empleado (la cédula, como número), Concepto, Fecha (el día, mm-dd-yy),
-Cantidad (1: una fila por día), Valor (el día de salario; en los turnos adicionales, el valor del turno), Unidad Medida (D),
+Cantidad (1: una fila por día; las incapacidades van en una fila por tramo y concepto, con la fecha del primer
+día y la cantidad de días, 2026-11-20), Valor (el día de salario; en los turnos adicionales, el valor del turno), Unidad Medida (D),
 Centro Costos (Produccion si se liquida por programación; Administrativo si no), Nota («NOVEDADES 1RA QUINCENA
 NOVIEMBRE2026-3 NOV: …»), Proceso (vacío), Pasa a Nómina y Aprobado (-1), Usuario Aprueba y Código Centro Costos (vacíos).
 """
@@ -62,6 +63,9 @@ class Fila:
     valor: float
     centro: str
     nota: str
+    cantidad: int = 1
+    clave: str = ""
+    hasta: int = 0  # último día (para juntar los días seguidos de una incapacidad)
 
 
 def filas_persona(nombre: str, cedula: str, salario: float, produccion: bool, dias: dict[int, str], incapacidad_previos: float,
@@ -108,8 +112,15 @@ def filas_persona(nombre: str, cedula: str, salario: float, produccion: bool, di
         if not incluir:
             continue
         texto = NOMBRE_NOTA.get(clave) or NOMBRES.get(c, c)
-        nota = f"{encabezado}-{dia} {MESES_CORTOS[mes - 1]}: {texto}"
-        salida.append(Fila(nombre, cedula, concepto, fecha, round(valor, 2), centro, nota))
+        previa = salida[-1] if salida else None
+        if c == "INC" and previa is not None and previa.clave == clave and previa.hasta == dia - 1:
+            # Incapacidad: los días seguidos del mismo concepto van en una sola fila
+            previa.cantidad += 1
+            previa.hasta = dia
+            previa.nota = (f"{encabezado}-{previa.fecha.day} al {dia} {MESES_CORTOS[mes - 1]}: {texto} {previa.cantidad} días")
+            continue
+        nota = f"{encabezado}-{dia} {MESES_CORTOS[mes - 1]}: {texto}" + (" 1 día" if c == "INC" else "")
+        salida.append(Fila(nombre, cedula, concepto, fecha, round(valor, 2), centro, nota, 1, clave, dia))
     return salida
 
 
@@ -131,7 +142,7 @@ def excel(filas: list[Fila], documento: int) -> bytes:
             hoja.write_string(i, 4, f.cedula)
         hoja.write_string(i, 5, f.concepto)
         hoja.write_datetime(i, 6, datetime(f.fecha.year, f.fecha.month, f.fecha.day), fecha)
-        hoja.write_number(i, 7, 1)
+        hoja.write_number(i, 7, f.cantidad)
         hoja.write_number(i, 8, f.valor, plata)
         hoja.write_string(i, 9, "D")
         hoja.write_string(i, 10, f.centro)

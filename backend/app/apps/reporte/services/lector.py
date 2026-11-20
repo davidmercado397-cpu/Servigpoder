@@ -165,7 +165,13 @@ def _columnas_dias(encabezado: list[object], fechas: list[date]) -> dict[date, i
         # Formato de siempre: 1 … 31. Si el rango cruza de mes, cada día va en la columna de su número
         # (sin ambigüedad mientras ningún número de día se repita en el rango)
         if len({d.day for d in fechas}) != len(fechas):
-            raise ErrorReporte("El rango del archivo repite días del mes (p. ej. del 15 al 15): cargue un archivo por mes")
+            repetidos = sorted({d.day for d in fechas if sum(1 for x in fechas if x.day == d.day) > 1})
+            dias = ", ".join(str(x) for x in repetidos)
+            raise ErrorReporte(
+                f"El Excel de SIESA tiene una sola columna por número de día y este archivo trae dos veces el día {dias} "
+                f"({fechas[0]:%d/%m} a {fechas[-1]:%d/%m}), así que no se sabe de qué mes es. Expórtelo de SIESA en dos archivos "
+                f"(p. ej. del {fechas[0]:%d/%m} al fin de mes y del 1 al {fechas[-1]:%d/%m}) y cárguelos juntos, o expórtelo hasta "
+                f"el {(fechas[-1] - timedelta(days=len(repetidos))):%d/%m}.")
         por_dia = {n: i for i, n in numeros}
         return {d: por_dia[d.day] for d in fechas if d.day in por_dia}
     j = 0

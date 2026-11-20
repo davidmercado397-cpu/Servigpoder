@@ -73,7 +73,7 @@ def test_celdas_y_festivos():
 
 
 def test_validaciones_del_archivo():
-    with pytest.raises(lector.ErrorReporte, match="repite días"):
+    with pytest.raises(lector.ErrorReporte, match="dos veces el día 15"):
         lector.leer(_siesa(date(2026, 10, 15), date(2026, 11, 15), FILAS))
     with pytest.raises(lector.ErrorReporte, match="Desde"):
         lector.leer(xlsx([["Compañia", "X"], ["Hasta", "2026-10-31"], [], [], ["C.C. Empleado"]]))

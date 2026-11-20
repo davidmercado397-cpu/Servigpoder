@@ -33,6 +33,8 @@ PARAMETROS: dict[str, tuple[float, str, str]] = {
     "pct_incapacidad": (66.67, "Incapacidad desde el día siguiente (%)", "Sin bajar del salario mínimo diario"),
     "valor_tad": (0, "Valor del turno adicional diurno (TAD)", "Se paga por cada TAD de la programación; no entra a salud y pensión"),
     "valor_tan": (0, "Valor del turno adicional nocturno (TAN)", "Se paga por cada TAN de la programación; no entra a salud y pensión"),
+    "wo_documento": (75, "Siguiente número de documento del plano World Office",
+                     "«Encab: Documento Número» (NNO NOVNO) que se propone al descargar el plano; sube solo al usarlo"),
 }
 
 

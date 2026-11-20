@@ -104,10 +104,13 @@ export default function QuincenaSpeed() {
           <button className="btn-secundario" title="Archivo plano de novedades por día para World Office" onClick={async () => {
             setMsg(null);
             try {
-              const r = await api<{ filas: number; avisos: string[] }>(`/speed/periodos/${id}/world-office/avisos?grupo=${nomina}`);
+              const r = await api<{ filas: number; avisos: string[]; documento: number }>(`/speed/periodos/${id}/world-office/avisos?grupo=${nomina}`);
               if (!r.filas) { setMsg({ tipo: "error", texto: "No hay novedades con fecha para el plano: suba primero la programación de la quincena." }); return; }
-              window.location.href = `/api/speed/periodos/${id}/world-office?grupo=${nomina}`;
-              setMsg({ tipo: r.avisos.length ? "info" : "ok", texto: `Plano de World Office con ${r.filas} filas.${r.avisos.length ? " " + r.avisos.join(" · ") : ""}` });
+              const documento = prompt("Número de documento de World Office (Encab: Documento Número, NNO NOVNO):", String(r.documento));
+              if (documento === null) return;
+              if (!/^\d{1,8}$/.test(documento.trim()) || Number(documento) < 1) { setMsg({ tipo: "error", texto: "El número de documento debe ser un número." }); return; }
+              window.location.href = `/api/speed/periodos/${id}/world-office?grupo=${nomina}&documento=${Number(documento)}`;
+              setMsg({ tipo: r.avisos.length ? "info" : "ok", texto: `Plano de World Office (documento ${Number(documento)}) con ${r.filas} filas.${r.avisos.length ? " " + r.avisos.join(" · ") : ""}` });
             } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); }
           }}><Download className="h-4 w-4" /> Plano World Office</button>
           {liquidar && abierto && p.calculado_en && <button className="btn-secundario" onClick={() => confirm("¿Cerrar la quincena? Ya no se podrá cambiar ni volver a liquidar hasta reabrirla.")

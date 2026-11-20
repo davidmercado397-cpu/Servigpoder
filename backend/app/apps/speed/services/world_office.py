@@ -3,10 +3,12 @@
 Una fila por persona, por día y por novedad, sacada de los códigos de la programación de la quincena. Solo van las
 novedades (turnos adicionales, ausencias, licencias, incapacidades…), no el salario, las horas extras ni los auxilios.
 
-Columnas (como la plantilla que usa Speed): Empleado («APELLIDOS NOMBRES - CÉDULA»), Tipo (concepto de World Office),
-Fecha (el día, a las 0:00), Cantidad (1), Valor (el día de salario; en los turnos adicionales, el valor del turno),
-Unidad de medida («Día»), Centro de Costos (Produccion si se liquida por programación; Administrativo si no), Nota,
-Proceso (vacío) y Pasa a Nómina / Aprobado / Procesado (-1).
+Columnas del modelo de cargue de World Office que usa Speed (Cargue_Novedades_2QOCTUBRE_2026, hoja GENERAL; 2026-11-20):
+Encab: Empresa («SPEED SECURITY LTDA»), Encab: Tipo Documento (NNO), Encab: Prefijo (NOVNO), Encab: Documento Número (el
+consecutivo que se pide al descargar), Detalle: Empleado (la cédula, como número), Concepto, Fecha (el día, mm-dd-yy),
+Cantidad (1: una fila por día), Valor (el día de salario; en los turnos adicionales, el valor del turno), Unidad Medida (D),
+Centro Costos (Produccion si se liquida por programación; Administrativo si no), Nota («NOVEDADES 1RA QUINCENA
+NOVIEMBRE2026-3 NOV: …»), Proceso (vacío), Pasa a Nómina y Aprobado (-1), Usuario Aprueba y Código Centro Costos (vacíos).
 """
 
 import io
@@ -24,7 +26,7 @@ CONCEPTOS: dict[str, tuple[str, bool, str]] = {
     "TAN": ("Auxilio de compensacion por descanso Nocturno", True, "Turno adicional nocturno (valor del turno en Parámetros)"),
     "AUS": ("Ausencias", True, "Ausencia"),
     "PNR": ("Licencia No remunerada", True, "Permiso no remunerado"),
-    "SUS": ("Suspension", True, "Suspensión"),
+    "SUS": ("SUSPENSIÓN", True, "Suspensión"),
     "DESPR": ("Licencia No remunerada", True, "Desprogramado"),
     "RUN": ("Licencia No remunerada", False, "Renuncia (normalmente se retira en World Office)"),
     "PR": ("Licencia Remunerada", True, "Permiso remunerado"),
@@ -39,8 +41,13 @@ CONCEPTOS: dict[str, tuple[str, bool, str]] = {
     "INC_EPS_MINIMO": ("Incapacidades EPS 100%", True, "Incapacidad desde el 3.er día cuando el 66,67 % no llega al mínimo (se paga el día completo)"),
 }
 
-ENCABEZADO = ["Empleado", "Tipo", "Fecha", "Cantidad", "Valor", "Unidad de medida", "Centro de Costos", "Nota", "Proceso",
-              "Pasa a Nómina", "Aprobado", "Procesado"]
+ENCABEZADO = ["Encab: Empresa", "Encab: Tipo Documento", "Encab: Prefijo", "Encab: Documento Número", "Detalle: Empleado",
+              "Detalle: Concepto", "Detalle: Fecha", "Detalle: Cantidad", "Detalle: Valor", "Detalle: Unidad Medida",
+              "Detalle: Centro Costos", "Detalle: Nota", "Detalle: Proceso ", "Detalle: Pasa a Nómina", "Detalle: Aprobado",
+              "Detalle: Usuario Aprueba", "Detalle: Código Centro Costos"]
+EMPRESA = "SPEED SECURITY LTDA"
+TIPO_DOCUMENTO = "NNO"
+PREFIJO = "NOVNO"
 MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 MESES_CORTOS = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
 NOMBRE_NOTA = {"INC_EMPRESA": "Incapacidad", "INC_EPS": "Incapacidad", "INC_EPS_MINIMO": "Incapacidad"}
@@ -66,7 +73,7 @@ def filas_persona(nombre: str, cedula: str, salario: float, produccion: bool, di
     al_pct = diario * float(p.get("pct_incapacidad") or 0) / 100
     dias_100 = float(p.get("dias_incapacidad_100") or 0)
     centro = "Produccion" if produccion else "Administrativo"
-    encabezado = f"NOVEDADES {'1RA' if quincena == 1 else '2DA'} QUINCENA DE {MESES[mes - 1]} {anio}"
+    encabezado = f"NOVEDADES {'1RA' if quincena == 1 else '2DA'} QUINCENA {MESES[mes - 1]}{anio}"
     salida: list[Fila] = []
     racha = 0  # días seguidos de la incapacidad actual (la primera puede venir de la quincena anterior)
     previos = incapacidad_previos if dias.get(desde) == "INC" else 0
@@ -101,33 +108,36 @@ def filas_persona(nombre: str, cedula: str, salario: float, produccion: bool, di
         if not incluir:
             continue
         texto = NOMBRE_NOTA.get(clave) or NOMBRES.get(c, c)
-        nota = f"{encabezado}-{dia:02d} {MESES_CORTOS[mes - 1]}: {texto}"
+        nota = f"{encabezado}-{dia} {MESES_CORTOS[mes - 1]}: {texto}"
         salida.append(Fila(nombre, cedula, concepto, fecha, round(valor, 2), centro, nota))
     return salida
 
 
-def excel(filas: list[Fila]) -> bytes:
+def excel(filas: list[Fila], documento: int) -> bytes:
+    """El plano con el modelo de cargue de World Office (hoja GENERAL)."""
     buf = io.BytesIO()
     libro = xlsxwriter.Workbook(buf, {"in_memory": True})
-    hoja = libro.add_worksheet("Hoja1")
-    fecha = libro.add_format({"num_format": "m/d/yy h:mm"})
-    plata = libro.add_format({"num_format": "#,##0.00"})
-    hoja.write_row(0, 0, ENCABEZADO)
+    hoja = libro.add_worksheet("GENERAL")
+    titulo = libro.add_format({"bold": True, "bg_color": "#FFFF00"})
+    fecha = libro.add_format({"num_format": "mm-dd-yy"})
+    numero = libro.add_format({"num_format": "0"})
+    plata = libro.add_format({"num_format": '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'})
+    hoja.write_row(0, 0, ENCABEZADO, titulo)
     for i, f in enumerate(sorted(filas, key=lambda x: (x.nombre, x.fecha, x.concepto)), start=1):
-        hoja.write_string(i, 0, f"{f.nombre} - {f.cedula}")
-        hoja.write_string(i, 1, f.concepto)
-        hoja.write_datetime(i, 2, datetime(f.fecha.year, f.fecha.month, f.fecha.day), fecha)
-        hoja.write_number(i, 3, 1)
-        hoja.write_number(i, 4, f.valor, plata)
-        hoja.write_string(i, 5, "Día")
-        hoja.write_string(i, 6, f.centro)
-        hoja.write_string(i, 7, f.nota)
-        hoja.write_string(i, 8, "")
-        hoja.write_row(i, 9, [-1, -1, -1])
-    hoja.set_column(0, 0, 45)
-    hoja.set_column(1, 1, 44)
-    hoja.set_column(2, 2, 14)
-    hoja.set_column(3, 6, 12)
-    hoja.set_column(7, 7, 70)
+        hoja.write_row(i, 0, [EMPRESA, TIPO_DOCUMENTO, PREFIJO, documento])
+        if f.cedula.isdigit():
+            hoja.write_number(i, 4, int(f.cedula), numero)
+        else:
+            hoja.write_string(i, 4, f.cedula)
+        hoja.write_string(i, 5, f.concepto)
+        hoja.write_datetime(i, 6, datetime(f.fecha.year, f.fecha.month, f.fecha.day), fecha)
+        hoja.write_number(i, 7, 1)
+        hoja.write_number(i, 8, f.valor, plata)
+        hoja.write_string(i, 9, "D")
+        hoja.write_string(i, 10, f.centro)
+        hoja.write_string(i, 11, f.nota)
+        hoja.write_row(i, 13, [-1, -1])
+    for col, ancho in enumerate((22.6, 22, 13.1, 25.4, 17.4, 41.1, 13.6, 16.4, 13.1, 22.4, 20.9, 70, 15.9, 21.6, 17.3, 23.6, 27.9)):
+        hoja.set_column(col, col, ancho)
     libro.close()
     return buf.getvalue()

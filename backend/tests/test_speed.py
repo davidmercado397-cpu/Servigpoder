@@ -375,13 +375,21 @@ def test_plano_de_novedades_para_world_office(speed):
     archivo = programacion_xlsx([["TORRE", "UNO GUARDA", 1006306373, uno], ["OFICINA", "DOS ADMIN", 52112768, dos]])
     assert speed.post(f"{API}/periodos/{p['id']}/programacion/importar", files={"archivo": ("p.xlsx", archivo, XLSX)}).status_code == 200
 
-    r = speed.get(f"{API}/periodos/{p['id']}/world-office")
+    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["documento"] == 75
+    r = speed.get(f"{API}/periodos/{p['id']}/world-office?documento=80")
     assert r.status_code == 200 and r.headers["x-filas"] == "11"
-    hoja = load_workbook(io.BytesIO(r.content))["Hoja1"]
-    assert [c.value for c in hoja[1]] == ["Empleado", "Tipo", "Fecha", "Cantidad", "Valor", "Unidad de medida", "Centro de Costos", "Nota",
-                                          "Proceso", "Pasa a Nómina", "Aprobado", "Procesado"]
-    filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2)]
-    uno_f = [f for f in filas if f[0] == "UNO GUARDA - 1006306373"]
+    libro = load_workbook(io.BytesIO(r.content))
+    assert libro.sheetnames == ["GENERAL"]
+    hoja = libro["GENERAL"]
+    assert [c.value for c in hoja[1]] == [
+        "Encab: Empresa", "Encab: Tipo Documento", "Encab: Prefijo", "Encab: Documento Número", "Detalle: Empleado", "Detalle: Concepto",
+        "Detalle: Fecha", "Detalle: Cantidad", "Detalle: Valor", "Detalle: Unidad Medida", "Detalle: Centro Costos", "Detalle: Nota",
+        "Detalle: Proceso ", "Detalle: Pasa a Nómina", "Detalle: Aprobado", "Detalle: Usuario Aprueba", "Detalle: Código Centro Costos"]
+    # Se propone el siguiente número de documento
+    assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["documento"] == 81
+    filas = [[c.value for c in f][4:] for f in hoja.iter_rows(min_row=2)]
+    assert {tuple(c.value for c in f[:4]) for f in hoja.iter_rows(min_row=2)} == {("SPEED SECURITY LTDA", "NNO", "NOVNO", 80)}
+    uno_f = [f for f in filas if f[0] == 1006306373]
     tipos = {(f[2].day, f[1]): f[4] for f in uno_f}
     diario = 1750905 / 30
     assert tipos == {(2, "Auxilio de Compensacion por descanso Diurno"): 75000, (3, "Ausencias"): round(diario, 2),
@@ -390,18 +398,18 @@ def test_plano_de_novedades_para_world_office(speed):
                      (9, "LICENCIA POR LUTO"): round(diario, 2), (10, "Auxilio de compensacion por descanso Nocturno"): 82000,
                      (13, "Licencia Remunerada"): round(diario, 2)}
     f = next(x for x in uno_f if x[2].day == 3)
-    assert f[2] == datetime(2026, 11, 3) and f[3] == 1 and f[5] == "Día" and f[6] == "Produccion"
-    assert f[7] == "NOVEDADES 1RA QUINCENA DE NOVIEMBRE 2026-03 NOV: Ausencia" and f[8] in ("", None) and f[9:] == [-1, -1, -1]
+    assert f[2] == datetime(2026, 11, 3) and f[3] == 1 and f[5] == "D" and f[6] == "Produccion"
+    assert f[7] == "NOVEDADES 1RA QUINCENA NOVIEMBRE2026-3 NOV: Ausencia" and f[8] is None and f[9:] == [-1, -1, None, None]
     # Administrativo, salario alto: desde el 3.er día de incapacidad, al 66,67 %
-    dos_f = {x[2].day: x for x in filas if x[0] == "DOS ADMIN - 52112768"}
+    dos_f = {x[2].day: x for x in filas if x[0] == 52112768}
     assert dos_f[3][6] == "Administrativo" and dos_f[5][1] == "Incapacidades EPS 66.67%" and dos_f[5][4] == round(100000 * 0.6667, 2)
 
     # El concepto se cambia en Parámetros
     conceptos = speed.get(f"{API}/conceptos-wo").json()["data"]
     cambio = [{**c, "concepto": "Ausencia injustificada"} if c["codigo"] == "AUS" else c for c in conceptos]
     assert speed.put(f"{API}/conceptos-wo", json=cambio).status_code == 200
-    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
-    tipos = {(f[2].value.day, f[1].value) for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("UNO")}
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["GENERAL"]
+    tipos = {(f[6].value.day, f[5].value) for f in hoja.iter_rows(min_row=2) if f[4].value == 1006306373}
     assert (3, "Ausencia injustificada") in tipos
     assert speed.get(f"{API}/periodos/{p['id']}/world-office/avisos").json()["data"]["filas"] == 11
 
@@ -478,9 +486,9 @@ def test_en_la_programacion_sin_ningun_turno_no_se_paga(speed):
     # Con algunos días vacíos sí se paga el salario (solo no paga variables esos días)
     assert liq["52112768"]["dias"]["trabajados"] == 15 and liq["52112768"]["dias"]["variables"] == 12
     # En el plano de World Office van sus 15 días como desprogramado
-    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
-    filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2) if f[0].value.startswith("NAVARRO")]
-    assert len(filas) == 15 and {f[1] for f in filas} == {"Licencia No remunerada"}
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["GENERAL"]
+    filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2) if f[4].value == 79806791]
+    assert len(filas) == 15 and {f[5] for f in filas} == {"Licencia No remunerada"}
 
 
 def test_puestos_de_la_senora_sandra_van_aparte(speed):
@@ -532,5 +540,5 @@ def test_incapacidad_de_mas_de_180_dias_no_se_paga(speed):
     inc = {x["cedula"]: (x["dias"], x["toda"]) for x in d["incapacidad_180"]}
     assert inc == {"1006306373": (15, True), "52112768": (9, False)}
     assert d["sin_programacion"] == []
-    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["Hoja1"]
-    assert not [f for f in hoja.iter_rows(min_row=2) if f[0].value.startswith(("UNO", "DOS"))]
+    hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["GENERAL"]
+    assert not [f for f in hoja.iter_rows(min_row=2) if f[4].value in (1006306373, 52112768)]

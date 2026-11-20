@@ -42,6 +42,10 @@ def sembrar(db: Session) -> None:
         if clave not in existentes:
             db.add(SpdParametro(clave=clave, valor=valor, nombre=nombre, ayuda=ayuda, orden=orden))
     conceptos = {c.codigo for c in db.scalars(select(SpdConceptoWO))}
+    # Nombre corregido según el modelo de cargue de World Office (2026-11-20), solo si no lo cambiaron a mano
+    sus = db.get(SpdConceptoWO, "SUS")
+    if sus is not None and sus.concepto == "Suspension":
+        sus.concepto = "SUSPENSIÓN"
     for orden, (codigo, (concepto, incluir, descripcion)) in enumerate(world_office.CONCEPTOS.items()):
         if codigo not in conceptos:
             db.add(SpdConceptoWO(codigo=codigo, concepto=concepto, incluir=incluir, descripcion=descripcion, orden=orden))
@@ -197,7 +201,7 @@ def excel_vacaciones_retiros(periodo: SpdPeriodo, datos: dict) -> bytes:
     return buf.getvalue()
 
 
-def plano_world_office(db: Session, periodo: SpdPeriodo, grupo: str = "general") -> tuple[bytes, int, list[str]]:
+def plano_world_office(db: Session, periodo: SpdPeriodo, grupo: str = "general", documento: int = 0) -> tuple[bytes, int, list[str]]:
     """Archivo plano de novedades de la quincena para World Office (desde los códigos de la programación)."""
     p = periodo.parametros if periodo.estado != ABIERTO and periodo.parametros else parametros(db)
     conceptos = conceptos_wo(db)
@@ -223,7 +227,21 @@ def plano_world_office(db: Session, periodo: SpdPeriodo, grupo: str = "general")
         avisos.append("Hay turnos TAD pero su valor está en 0 (Parámetros)")
     if any(f.concepto == conceptos["TAN"][0] for f in filas) and not float(p.get("valor_tan") or 0):
         avisos.append("Hay turnos TAN pero su valor está en 0 (Parámetros)")
-    return world_office.excel(filas), len(filas), avisos
+    return world_office.excel(filas, documento), len(filas), avisos
+
+
+def documento_world_office(db: Session, usado: int | None = None) -> int:
+    """El número de documento que se propone para el plano (Encab: Documento Número); al usar uno, se propone el siguiente."""
+    fila = db.scalar(select(SpdParametro).where(SpdParametro.clave == "wo_documento"))
+    if usado is not None:
+        if fila is None:
+            orden = list(calculo.PARAMETROS).index("wo_documento")
+            valor, nombre, ayuda = calculo.PARAMETROS["wo_documento"]
+            fila = SpdParametro(clave="wo_documento", valor=valor, nombre=nombre, ayuda=ayuda, orden=orden)
+            db.add(fila)
+        fila.valor = max(float(fila.valor or 0), usado + 1)
+        return usado
+    return int(float(fila.valor)) if fila is not None else int(calculo.PARAMETROS["wo_documento"][0])
 
 
 def parametros(db: Session) -> dict[str, float]:

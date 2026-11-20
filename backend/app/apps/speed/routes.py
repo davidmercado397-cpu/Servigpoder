@@ -292,11 +292,13 @@ def excel(periodo_id: int, request: Request, db: DbSession, actual: Usuario = De
 
 
 @router.get("/periodos/{periodo_id}/world-office")
-def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER)), grupo: str = GRUPO):
+def plano_world_office(periodo_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(VER)), grupo: str = GRUPO,
+                       documento: int | None = Query(default=None, ge=1, le=99999999)):
     """Archivo plano de novedades para World Office (turnos adicionales, ausencias, licencias e incapacidades por día)."""
     p = _periodo(db, periodo_id)
-    contenido, filas, avisos = servicio.plano_world_office(db, p, grupo)
-    auditar(db, request, "spd_plano_world_office", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", filas=filas)
+    documento = servicio.documento_world_office(db, documento if documento is not None else servicio.documento_world_office(db))
+    contenido, filas, avisos = servicio.plano_world_office(db, p, grupo, documento)
+    auditar(db, request, "spd_plano_world_office", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", filas=filas, documento=documento)
     db.commit()
     nombre = f"NOVEDADES WO {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
     encabezados = {"Content-Disposition": f'attachment; filename="{nombre}"', "X-Filas": str(filas)}
@@ -323,7 +325,7 @@ def vacaciones_retiros_excel(periodo_id: int, db: DbSession, _=Depends(require(V
 def avisos_world_office(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
     """Cuántas filas tendría el plano y qué no se pudo incluir (para mostrarlo antes de descargar)."""
     _, filas, avisos = servicio.plano_world_office(db, _periodo(db, periodo_id), grupo)
-    return ok({"filas": filas, "avisos": avisos})
+    return ok({"filas": filas, "avisos": avisos, "documento": servicio.documento_world_office(db)})
 
 
 # --- Novedades de la quincena ------------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/costeo";
 import { InputPesos } from "@/components/input-pesos";
+import { CruceWorldOffice } from "@/components/speed-cruce-wo";
 import { RetirarEmpleado } from "@/components/speed-retiro";
 import { Paginador, usePaginacion } from "@/components/paginacion";
 import { Alerta, Insignia, Pestanas, SubirArchivo } from "@/components/ui";
@@ -62,7 +63,7 @@ export default function QuincenaSpeed() {
   const router = useRouter();
   const liquidar = usePermiso("speed.liquidar");
   const [p, setP] = useState<Detalle | null>(null);
-  const [pestana, setPestana] = useState<"liquidacion" | "novedades" | "vacaciones">("liquidacion");
+  const [pestana, setPestana] = useState<"liquidacion" | "novedades" | "vacaciones" | "cruce">("liquidacion");
   const [vr, setVr] = useState<VacacionesRetiros | null>(null);
   // Por defecto, la nómina general (sin los puestos de la señora Sandra)
   const [nomina, setNomina] = useState<Nomina>("general");
@@ -133,7 +134,8 @@ export default function QuincenaSpeed() {
       </div>
 
       <Pestanas opciones={[["liquidacion", "Liquidación"], ["novedades", "Novedades de la quincena"],
-        ["vacaciones", `Vacaciones, retiros y sin programación${vr ? ` (${vr.vacaciones.length + vr.retiros.length + (vr.incapacidad_180?.length ?? 0) + (vr.sin_programacion?.length ?? 0)})` : ""}`]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
+        ["vacaciones", `Vacaciones, retiros y sin programación${vr ? ` (${vr.vacaciones.length + vr.retiros.length + (vr.incapacidad_180?.length ?? 0) + (vr.sin_programacion?.length ?? 0)})` : ""}`],
+        ["cruce", "Cruce con World Office"]]} valor={pestana} onChange={(v) => { setPestana(v); cargarVr(); }} />
       {pestana !== "vacaciones" && vr && (vr.vacaciones.length + vr.retiros.length + (vr.incapacidad_180?.length ?? 0) + (vr.sin_programacion?.length ?? 0)) > 0 && (
         <Alerta tipo="info">
           <AlertTriangle className="mr-1 inline h-4 w-4 text-amber-600" />
@@ -144,7 +146,8 @@ export default function QuincenaSpeed() {
           <button className="font-medium text-marca-700 hover:underline" onClick={() => { setPestana("vacaciones"); cargarVr(); }}>Ver quiénes son</button>
         </Alerta>
       )}
-      {pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} nomina={nomina} editable={liquidar}
+      {pestana === "cruce" ? <CruceWorldOffice periodoId={Number(id)} nomina={nomina} editable={liquidar} />
+        : pestana === "vacaciones" ? <VacacionesYRetiros periodoId={Number(id)} datos={vr} nomina={nomina} editable={liquidar}
         onCambio={async () => { await Promise.all([cargarVr(), cargar()]); setMsg({ tipo: "info", texto: "Retiro registrado: vuelva a liquidar la quincena." }); }} />
         : pestana === "liquidacion" ? <Liquidacion filas={liquidaciones} vr={vr} />
         : <Novedades periodoId={Number(id)} quincena={p.quincena} nomina={nomina} editable={liquidar && abierto} onCambio={() => setMsg({ tipo: "info", texto: "Novedades actualizadas: vuelva a liquidar la quincena." })} />}

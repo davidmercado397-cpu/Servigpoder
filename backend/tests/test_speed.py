@@ -545,3 +545,96 @@ def test_incapacidad_de_mas_de_180_dias_no_se_paga(speed):
     assert d["sin_programacion"] == []
     hoja = load_workbook(io.BytesIO(speed.get(f"{API}/periodos/{p['id']}/world-office").content))["GENERAL"]
     assert not [f for f in hoja.iter_rows(min_row=2) if f[4].value in (1006306373, 52112768)]
+
+
+def nomina_wo_xlsx(filas: list[list]) -> bytes:
+    """Excel como el que exporta World Office (ExportarAExcel)."""
+    buf = io.BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    hoja = libro.add_worksheet("ExportarAExcel")
+    hoja.write(0, 0, "SPEED SECURITY LTDA")
+    hoja.write(1, 0, "900259118-")
+    hoja.write(2, 0, "Nómina # NOVNO 139 correspondiente al periodo del  01/11/2026 al  15/11/2026")
+    hoja.write_row(3, 0, ["Puesto Trabajo", "Cuenta No", "Nombre  del  Trabajador", "Sueldo Básico", "Dias Trab", "Sueldo Devengado",
+                          "Valor Incapac", "Horas Extras", "Auxilio Transporte y Conectividad", "Recargo Nocturno", "Otros Devengados",
+                          "Total Devengado", "Aporte Salud", "Aporte Pensión", "Retención en la Fuente", "Fondo Solidar", "Valor Prestamos",
+                          "OtrosDeducidos", "Total Descuento", "Neto a Pagar"])
+    for i, f in enumerate(filas, start=4):
+        hoja.write_row(i, 0, f)
+    hoja.write_row(4 + len(filas), 0, ["Total Produccion", None, None, 1])
+    libro.close()
+    return buf.getvalue()
+
+
+def fila_wo(liq: dict, nombre: str, cedula: str, **cambios) -> list:
+    c = liq["conceptos"]
+    v = {"dias": liq["dias"]["trabajados"], "sueldo": c["salario"] - 1, "incap": c["incapacidad"], "he": c["horas_extras"],
+         "aux": c["auxilio_transporte"], "otros": c["ley_2466"] + c["bonificaciones"] + c["turnos_adicionales"],
+         "salud": c["salud"], "pension": c["pension"]}
+    v.update(cambios)
+    dev = v["sueldo"] + v["incap"] + v["he"] + v["aux"] + v["otros"]
+    desc = v["salud"] + v["pension"]
+    return ["Produccion", "0123", f"{nombre} CC {cedula}", 1750905, v["dias"], v["sueldo"], v["incap"], v["he"], v["aux"], 0, v["otros"],
+            dev, v["salud"], v["pension"], 0, 0, 0, 0, desc, dev - desc]
+
+
+def test_cruce_con_la_nomina_de_world_office(speed):
+    archivo = listado_xlsx([fila(1, 1006306373, "UNO CUADRA BIEN"), fila(2, 52112768, "DOS PAGA DE MAS"), fila(3, 80128728, "TRES SOLO NUESTRA"),
+                            fila(4, 805547339, "CUATRO CEDULA MAL ESCRITA"), fila(5, 1003000005, "CINCO CENTAVOS")])
+    assert speed.post(f"{API}/empleados/importar", files={"archivo": ("l.xlsx", archivo, XLSX)}).status_code == 200
+    p = speed.post(f"{API}/periodos", json={"anio": 2026, "mes": 11, "quincena": 1}).json()["data"]
+    assert speed.get(f"{API}/periodos/{p['id']}/cruce-wo").json()["data"] == {"cargado": False}
+    liq = {x["cedula"]: x for x in speed.post(f"{API}/periodos/{p['id']}/liquidar").json()["data"]["liquidaciones"]}
+    uno, dos, cuatro, cinco = liq["1006306373"], liq["52112768"], liq["805547339"], liq["1003000005"]
+    archivo = nomina_wo_xlsx([
+        fila_wo(uno, "UNO CUADRA BIEN", "1006306373"),
+        fila_wo(dos, "DOS PAGA DE MAS", "52112768", otros=dos["conceptos"]["ley_2466"] + 80000),  # 80.000 más
+        fila_wo(cuatro, "CUATRO CEDULA MAL ESCRITA", "80547339"),  # en el Listado quedó con un 5 de más
+        fila_wo(cinco, "CINCO CENTAVOS", "1003000005", otros=cinco["conceptos"]["ley_2466"] - 998),  # −999 en el neto: dentro de la tolerancia
+        ["Produccion", "0999", "SEIS NO ESTA EN EL LISTADO CC 1012345678", 1750905, 15, 875452, 0, 0, 124548, 0, 0, 1000000, 35018, 35018,
+         0, 0, 0, 0, 70036, 929964],
+    ])
+    r = speed.post(f"{API}/periodos/{p['id']}/cruce-wo/importar", files={"archivo": ("borrador 1q nov.xlsx", archivo, XLSX)})
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["cargado"] and d["info"]["archivo"] == "borrador 1q nov.xlsx" and d["info"]["desde"] == "2026-11-01" and d["tolerancia"] == 1000
+    filas = {f["cedula"]: f for f in d["filas"]}
+    assert filas["1006306373"]["estado"] == "cuadra"  # 1 peso de redondeo en el salario no es diferencia
+    assert filas["1003000005"]["estado"] == "cuadra"  # −999 no es diferencia
+    difs = {x["concepto"]: x["diferencia"] for x in filas["52112768"]["diferencias"]}
+    assert difs == {"otros_devengados": 80000, "total_devengado": 79999, "neto": 79999}  # 1 peso del redondeo del salario
+    assert filas["805547339"]["cruce"] == "ambos" and filas["805547339"]["diferencias"][0]["concepto"] == "cedula"
+    assert filas["80128728"]["cruce"] == "solo_nuestra" and filas["1012345678"]["cruce"] == "solo_wo"
+    assert "No está en el Listado" in filas["1012345678"]["diferencias"][0]["detalle"]
+    assert d["resumen"] | {} == {**d["resumen"], "personas_wo": 5, "personas_nuestras": 5, "cuadran": 2, "pendientes": 4, "justificadas": 0,
+                                 "solo_wo": 1, "solo_nuestra": 1}
+
+    # −1.100 sí es diferencia
+    archivo = nomina_wo_xlsx([fila_wo(cinco, "CINCO CENTAVOS", "1003000005", otros=cinco["conceptos"]["ley_2466"] - 1099),
+                              fila_wo(dos, "DOS PAGA DE MAS", "52112768", otros=dos["conceptos"]["ley_2466"] + 80000)])
+    d = speed.post(f"{API}/periodos/{p['id']}/cruce-wo/importar", files={"archivo": ("b.xlsx", archivo, XLSX)}).json()["data"]
+    filas = {f["cedula"]: f for f in d["filas"]}
+    assert filas["1003000005"]["estado"] == "pendiente" and filas["1003000005"]["diferencias"][-1] == {
+        "concepto": "neto", "nombre": "Neto a pagar", "nuestro": cinco["neto"], "wo": cinco["neto"] - 1100, "diferencia": -1100}
+
+    # Justificar: World Office está bien (menor valor pagado de otra quincena)
+    for concepto in ("otros_devengados", "total_devengado", "neto"):
+        r = speed.post(f"{API}/periodos/{p['id']}/cruce-wo/justificar",
+                       json={"cedula": "52112768", "concepto": concepto, "correcto": "wo", "motivo": "Menor valor pagado en la 2da quincena de octubre"})
+        assert r.status_code == 200, r.text
+    f = next(x for x in r.json()["data"]["filas"] if x["cedula"] == "52112768")
+    assert f["estado"] == "justificada" and f["diferencias"][0]["justificacion"]["correcto"] == "wo"
+    assert speed.post(f"{API}/periodos/{p['id']}/cruce-wo/justificar",
+                      json={"cedula": "52112768", "concepto": "salud", "correcto": "wo", "motivo": "No existe"}).status_code == 404
+    # Si la diferencia cambia, la justificación deja de aplicar
+    archivo = nomina_wo_xlsx([fila_wo(dos, "DOS PAGA DE MAS", "52112768", otros=dos["conceptos"]["ley_2466"] + 95000)])
+    d = speed.post(f"{API}/periodos/{p['id']}/cruce-wo/importar", files={"archivo": ("b.xlsx", archivo, XLSX)}).json()["data"]
+    f = next(x for x in d["filas"] if x["cedula"] == "52112768")
+    assert f["estado"] == "pendiente" and f["diferencias"][0]["justificacion"]["vigente"] is False
+    r = speed.delete(f"{API}/periodos/{p['id']}/cruce-wo/justificar", params={"cedula": "52112768", "concepto": "neto"})
+    assert r.status_code == 200
+    x = speed.get(f"{API}/periodos/{p['id']}/cruce-wo/excel")
+    assert x.status_code == 200 and load_workbook(io.BytesIO(x.content)).sheetnames == ["Diferencias", "Resumen"]
+    # Un archivo que no es la nómina de World Office
+    malo = speed.post(f"{API}/periodos/{p['id']}/cruce-wo/importar", files={"archivo": ("l.xlsx", listado_xlsx([]), XLSX)})
+    assert malo.status_code == 422

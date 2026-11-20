@@ -175,3 +175,32 @@ class SpdDescuentoAplicado(BaseEmpresa):
     periodo_id: Mapped[int] = mapped_column(ForeignKey("spd_periodo.id", ondelete="CASCADE"), index=True)
     valor: Mapped[float] = mapped_column(Numeric(16, 2))
     nota: Mapped[str] = mapped_column(Text, default="")
+
+
+class SpdCruceWO(BaseEmpresa):
+    """Nómina de la quincena según World Office (se sube el Excel, se guardan solo los valores por persona) para cruzarla."""
+
+    __tablename__ = "spd_cruce_wo"
+
+    periodo_id: Mapped[int] = mapped_column(ForeignKey("spd_periodo.id", ondelete="CASCADE"), primary_key=True)
+    personas: Mapped[list] = mapped_column(JSON, default=list)
+    info: Mapped[dict] = mapped_column(JSON, default=dict)  # archivo, título, periodo del archivo, hoja
+    cargado_por: Mapped[str] = mapped_column(String(120), default="")
+    cargado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SpdJustificacionWO(BaseEmpresa):
+    """Por qué una diferencia del cruce con World Office está bien (y cuál valor es el correcto)."""
+
+    __tablename__ = "spd_justificacion_wo"
+    __table_args__ = (UniqueConstraint("periodo_id", "cedula", "concepto", name="uq_spd_justificacion_wo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    periodo_id: Mapped[int] = mapped_column(ForeignKey("spd_periodo.id", ondelete="CASCADE"), index=True)
+    cedula: Mapped[str] = mapped_column(String(20))
+    concepto: Mapped[str] = mapped_column(String(40))  # dias, sueldo, …, neto, o «persona» (solo en uno de los dos lados)
+    diferencia: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # World Office − plataforma al justificar
+    correcto: Mapped[str] = mapped_column(String(10))  # wo | nuestro
+    motivo: Mapped[str] = mapped_column(String(300))
+    usuario: Mapped[str] = mapped_column(String(120), default="")
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

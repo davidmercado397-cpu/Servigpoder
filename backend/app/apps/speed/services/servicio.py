@@ -13,10 +13,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.apps.speed.models import (
-    ABIERTO, ADICIONAL, TIPOS_DESCUENTO, SpdConceptoWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad, SpdParametro,
-    SpdPeriodo,
+    ABIERTO, ADICIONAL, TIPOS_DESCUENTO, SpdConceptoWO, SpdCruceWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdJustificacionWO,
+    SpdLiquidacion, SpdNovedad, SpdParametro, SpdPeriodo,
 )
-from app.apps.speed.services import calculo, programacion, world_office
+from app.apps.speed.services import calculo, cruce_wo, programacion, world_office
 
 CAMPOS_EMPLEADO = ("nombre", "fecha_ingreso", "tipo_contrato", "grupo", "cargo", "area", "puesto", "cliente", "tipo_turno", "salario",
                    "auxilio_listado", "horas_extras", "comisiones", "ley_2466", "bonificaciones", "rodamiento", "nota", "aplica_programacion")
@@ -628,3 +628,139 @@ def periodo_abierto(p: SpdPeriodo) -> bool:
 
 
 __all__ = ["ADICIONAL", "excel", "importar_listado", "liquidar_periodo", "parametros", "sembrar"]
+
+
+# --- Cruce con la nómina de World Office ----------------------------------------------------------------------
+
+MOTIVOS_EXCLUSION = {"retiro": "tiene retiro (va en otra nómina)", "inactivo": "está inactivo en el Listado",
+                     "vacaciones": "tiene vacaciones (va en otra nómina)", "incapacidad_180": "está toda la quincena en INC 180"}
+
+
+def cruce_world_office(db: Session, periodo: SpdPeriodo, grupo: str = "general") -> dict:
+    """Cruza la nómina de World Office subida para la quincena con la liquidación de la plataforma, persona por persona y
+    concepto por concepto (tolerancia de 1.000 pesos), con las justificaciones de cada diferencia."""
+    cargado = db.get(SpdCruceWO, periodo.id)
+    if cargado is None:
+        return {"cargado": False}
+    justificaciones = {(j.cedula, j.concepto): j for j in db.scalars(select(SpdJustificacionWO).where(SpdJustificacionWO.periodo_id == periodo.id))}
+    liquidaciones = [x for x in db.scalars(select(SpdLiquidacion).where(SpdLiquidacion.periodo_id == periodo.id)) if en_nomina(x.empleado, grupo)]
+    nuestras = {x.empleado.cedula: x for x in liquidaciones}
+    personas_wo = list(cargado.personas or [])
+    # Cruce por cédula; si no está, por el nombre (cédula escrita distinto en uno de los dos)
+    pares: list[tuple[dict, SpdLiquidacion | None]] = []
+    usadas: set[str] = set()
+    sin_cedula: list[dict] = []
+    for w in personas_wo:
+        liq = nuestras.get(w["cedula"])
+        if liq is not None and w["cedula"] not in usadas:
+            usadas.add(w["cedula"])
+            pares.append((w, liq))
+        else:
+            sin_cedula.append(w)
+    for w in sin_cedula:
+        candidatas = [x for c, x in nuestras.items() if c not in usadas and _mismo_nombre(w["nombre"], x.empleado.nombre)]
+        if len(candidatas) == 1:
+            usadas.add(candidatas[0].empleado.cedula)
+            pares.append((w, candidatas[0]))
+        else:
+            pares.append((w, None))
+    faltan = [w["cedula"] for w, x in pares if x is None and w["cedula"]]
+    empleados = {e.cedula: e for e in db.scalars(select(SpdEmpleado).where(SpdEmpleado.cedula.in_(faltan or ["-"])))}
+    novedades = {n.empleado_id: n for n in db.scalars(select(SpdNovedad).where(SpdNovedad.periodo_id == periodo.id))}
+
+    def con_justificacion(cedula: str, d: dict) -> dict:
+        j = justificaciones.get((cedula, d["concepto"]))
+        if j is not None:
+            vigente = d["concepto"] == "cedula" or cruce_wo.misma_diferencia(d["concepto"], float(j.diferencia), d["diferencia"])
+            d["justificacion"] = {"correcto": j.correcto, "motivo": j.motivo, "usuario": j.usuario,
+                                  "fecha": j.creado_en.isoformat() if j.creado_en else None, "diferencia": float(j.diferencia), "vigente": vigente}
+        return d
+
+    filas: list[dict] = []
+    for w, liq in pares:
+        if liq is None:
+            e = empleados.get(w["cedula"])
+            if e is None:
+                motivo = "No está en el Listado de empleados de la plataforma"
+            elif not en_nomina(e, grupo):
+                motivo = "En la plataforma es de la nómina de la señora Sandra" if nomina_de(e) == "sandra" else "En la plataforma es de la nómina general"
+            elif m := motivo_exclusion(e, novedades.get(e.id)):
+                motivo = f"No se liquidó en la plataforma: {MOTIVOS_EXCLUSION.get(m, m)}"
+            else:
+                motivo = "No se liquidó en la plataforma (vuelva a liquidar la quincena)"
+            neto = float(w["neto"])
+            difs = [{"concepto": "persona", "nombre": "Solo está en World Office", "nuestro": 0.0, "wo": neto, "diferencia": neto, "detalle": motivo}]
+            filas.append({"cedula": w["cedula"], "nombre": w["nombre"], "area": w.get("area", ""), "cruce": "solo_wo", "diferencias": difs})
+            continue
+        e = liq.empleado
+        detalle = {"devengado": float(liq.devengado), "deducciones": float(liq.deducciones), "neto": float(liq.neto), **(liq.detalle or {})}
+        difs = cruce_wo.comparar(cruce_wo.valores_nuestros(detalle), cruce_wo.valores_wo(w))
+        if w["cedula"] != e.cedula:
+            difs.insert(0, {"concepto": "cedula", "nombre": "Cédula distinta (se cruzó por el nombre)", "nuestro": e.cedula,
+                            "wo": w["cedula"] or "sin cédula", "diferencia": 0.0})
+        filas.append({"cedula": e.cedula, "nombre": e.nombre, "area": w.get("area", ""), "cruce": "ambos", "cedula_wo": w["cedula"], "diferencias": difs})
+    for c, liq in nuestras.items():
+        if c not in usadas:
+            neto = float(liq.neto)
+            filas.append({"cedula": c, "nombre": liq.empleado.nombre, "area": "", "cruce": "solo_nuestra",
+                          "diferencias": [{"concepto": "persona", "nombre": "Solo está en la plataforma", "nuestro": neto, "wo": 0.0,
+                                           "diferencia": -neto, "detalle": "No está en la nómina de World Office"}]})
+    resumen = {"personas_wo": len(personas_wo), "personas_nuestras": len(nuestras), "cuadran": 0, "pendientes": 0, "justificadas": 0,
+               "solo_wo": 0, "solo_nuestra": 0, "diferencias_pendientes": 0,
+               "neto_wo": round(sum(float(w["neto"]) for w in personas_wo), 2), "neto_nuestro": round(sum(float(x.neto) for x in liquidaciones), 2)}
+    for f in filas:
+        f["diferencias"] = [con_justificacion(f["cedula"], d) for d in f["diferencias"]]
+        pendientes = [d for d in f["diferencias"] if not (d.get("justificacion") or {}).get("vigente")]
+        f["estado"] = "cuadra" if not f["diferencias"] else "pendiente" if pendientes else "justificada"
+        resumen["cuadran" if f["estado"] == "cuadra" else "pendientes" if pendientes else "justificadas"] += 1
+        resumen["diferencias_pendientes"] += len(pendientes)
+        resumen["solo_wo"] += f["cruce"] == "solo_wo"
+        resumen["solo_nuestra"] += f["cruce"] == "solo_nuestra"
+    orden = {"pendiente": 0, "justificada": 1, "cuadra": 2}
+    filas.sort(key=lambda f: (orden[f["estado"]], f["nombre"]))
+    info = {**(cargado.info or {}), "cargado_por": cargado.cargado_por, "cargado_en": cargado.cargado_en.isoformat() if cargado.cargado_en else None}
+    return {"cargado": True, "info": info, "tolerancia": cruce_wo.TOLERANCIA, "resumen": resumen, "filas": filas}
+
+
+def excel_cruce_world_office(datos: dict) -> bytes:
+    buf = io.BytesIO()
+    libro = xlsxwriter.Workbook(buf, {"in_memory": True})
+    negrita = libro.add_format({"bold": True, "bg_color": "#e2e8f0", "border": 1})
+    plata = libro.add_format({"num_format": "#,##0"})
+    hoja = libro.add_worksheet("Diferencias")
+    hoja.write_row(0, 0, ["CÉDULA", "NOMBRE", "CONCEPTO", "PLATAFORMA", "WORLD OFFICE", "DIFERENCIA (WO − PLATAFORMA)", "ESTADO",
+                          "CORRECTO", "MOTIVO", "JUSTIFICÓ", "DETALLE"], negrita)
+    i = 1
+    for f in datos.get("filas") or []:
+        for d in f["diferencias"]:
+            j = d.get("justificacion") or {}
+            hoja.write_string(i, 0, f["cedula"])
+            hoja.write_string(i, 1, f["nombre"])
+            hoja.write_string(i, 2, d["nombre"])
+            for col, v in ((3, d["nuestro"]), (4, d["wo"]), (5, d["diferencia"])):
+                if isinstance(v, (int, float)):
+                    hoja.write_number(i, col, v, plata)
+                else:
+                    hoja.write_string(i, col, str(v))
+            estado = "Justificada" if j.get("vigente") else "Pendiente" + (" (la diferencia cambió)" if j else "")
+            hoja.write_row(i, 6, [estado, {"wo": "World Office", "nuestro": "Plataforma"}.get(j.get("correcto"), ""), j.get("motivo", ""),
+                                  j.get("usuario", ""), d.get("detalle", "")])
+            i += 1
+    hoja.set_column(0, 0, 13)
+    hoja.set_column(1, 2, 38)
+    hoja.set_column(3, 7, 16)
+    hoja.set_column(8, 8, 50)
+    hoja.set_column(9, 10, 30)
+    r = datos.get("resumen") or {}
+    hoja = libro.add_worksheet("Resumen")
+    for k, (t, v) in enumerate((("Personas en World Office", r.get("personas_wo")), ("Personas en la plataforma", r.get("personas_nuestras")),
+                                ("Cuadran", r.get("cuadran")), ("Con diferencias pendientes", r.get("pendientes")),
+                                ("Con diferencias justificadas", r.get("justificadas")), ("Solo en World Office", r.get("solo_wo")),
+                                ("Solo en la plataforma", r.get("solo_nuestra")), ("Neto World Office", r.get("neto_wo")),
+                                ("Neto plataforma", r.get("neto_nuestro")))):
+        hoja.write_string(k, 0, t, negrita)
+        hoja.write_number(k, 1, v or 0, plata)
+    hoja.set_column(0, 0, 32)
+    hoja.set_column(1, 1, 18)
+    libro.close()
+    return buf.getvalue()

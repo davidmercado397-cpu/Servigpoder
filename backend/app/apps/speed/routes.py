@@ -11,10 +11,10 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession, require
 from app.apps.speed.models import (
-    ABIERTO, ADICIONAL, CERRADO, TIPOS_DESCUENTO, SpdConceptoWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado, SpdLiquidacion, SpdNovedad,
-    SpdParametro, SpdPeriodo,
+    ABIERTO, ADICIONAL, CERRADO, TIPOS_DESCUENTO, SpdConceptoWO, SpdCruceWO, SpdDescuento, SpdDescuentoAplicado, SpdEmpleado,
+    SpdJustificacionWO, SpdLiquidacion, SpdNovedad, SpdParametro, SpdPeriodo,
 )
-from app.apps.speed.services import listado, programacion, servicio
+from app.apps.speed.services import cruce_wo, listado, programacion, servicio
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.rate_limit import limitar
@@ -246,6 +246,8 @@ def eliminar_periodo(periodo_id: int, request: Request, db: DbSession, actual: U
     db.query(SpdDescuentoAplicado).filter(SpdDescuentoAplicado.periodo_id == p.id).delete()
     db.query(SpdLiquidacion).filter(SpdLiquidacion.periodo_id == p.id).delete()
     db.query(SpdNovedad).filter(SpdNovedad.periodo_id == p.id).delete()
+    db.query(SpdJustificacionWO).filter(SpdJustificacionWO.periodo_id == p.id).delete()
+    db.query(SpdCruceWO).filter(SpdCruceWO.periodo_id == p.id).delete()
     auditar(db, request, "spd_periodo_eliminado", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}")
     db.delete(p)
     db.commit()
@@ -319,6 +321,101 @@ def vacaciones_retiros_excel(periodo_id: int, db: DbSession, _=Depends(require(V
     contenido = servicio.excel_vacaciones_retiros(p, servicio.vacaciones_y_retiros(db, p, grupo))
     nombre = f"VACACIONES Y RETIROS {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
     return StreamingResponse(io.BytesIO(contenido), media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+@router.get("/periodos/{periodo_id}/cruce-wo", response_model=ApiResponse[dict])
+def ver_cruce_wo(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
+    """Cruce de la nómina de World Office (la que se subió) contra la liquidación de la plataforma."""
+    return ok(servicio.cruce_world_office(db, _periodo(db, periodo_id), grupo))
+
+
+@router.post("/periodos/{periodo_id}/cruce-wo/importar", response_model=ApiResponse[dict],
+             dependencies=[Depends(limitar("spd_importar", 10, 60))])
+async def importar_cruce_wo(periodo_id: int, request: Request, db: DbSession, archivo: UploadFile = File(...),
+                            actual: Usuario = Depends(require(LIQUIDAR)), grupo: str = GRUPO):
+    """Excel de la nómina que liquidó World Office. Se lee y se descarta: solo se guardan los valores por persona.
+    Las justificaciones ya hechas se conservan mientras la diferencia no cambie."""
+    p = _periodo(db, periodo_id)
+    nombre = (archivo.filename or "")[:200]
+    contenido = await leer_xlsx(archivo)
+    try:
+        personas, info = cruce_wo.leer(contenido)
+    except cruce_wo.ArchivoInvalido as e:
+        raise ApiError(422, str(e), "ARCHIVO_INVALIDO") from e
+    del contenido
+    avisos: list[str] = []
+    desde = date(p.anio, p.mes, 1 if p.quincena == 1 else 16).isoformat()
+    if info.get("desde") and info["desde"] != desde:
+        avisos.append(f"El archivo dice «{info.get('titulo', '')}»: revise que sea de esta quincena")
+    sin_cedula = [x["nombre"] for x in personas if not x["cedula"]]
+    if sin_cedula:
+        avisos.append(f"{len(sin_cedula)} sin cédula en el nombre (se cruzan por el nombre): {', '.join(sin_cedula[:5])}")
+    fila = db.get(SpdCruceWO, p.id)
+    if fila is None:
+        fila = SpdCruceWO(periodo_id=p.id)
+        db.add(fila)
+    fila.personas = personas
+    fila.info = {**info, "archivo": nombre, "avisos": avisos}
+    fila.cargado_por = actual.nombre or actual.username
+    fila.cargado_en = datetime.now(timezone.utc)
+    auditar(db, request, "spd_cruce_wo_importado", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", archivo=nombre, personas=len(personas))
+    db.commit()
+    return ok(servicio.cruce_world_office(db, p, grupo))
+
+
+class JustificacionIn(BaseModel):
+    cedula: str = Field(min_length=1, max_length=20)
+    concepto: str = Field(min_length=1, max_length=40)
+    correcto: str = Field(pattern="^(wo|nuestro)$")
+    motivo: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/periodos/{periodo_id}/cruce-wo/justificar", response_model=ApiResponse[dict])
+def justificar_cruce_wo(periodo_id: int, data: JustificacionIn, request: Request, db: DbSession, actual: Usuario = Depends(require(LIQUIDAR)),
+                        grupo: str = GRUPO):
+    """Justifica una diferencia del cruce: cuál valor está bien (World Office o la plataforma) y por qué."""
+    p = _periodo(db, periodo_id)
+    cruce = servicio.cruce_world_office(db, p, "todos")
+    dif = next((d for f in cruce.get("filas") or [] if f["cedula"] == data.cedula for d in f["diferencias"] if d["concepto"] == data.concepto), None)
+    if dif is None:
+        raise ApiError(404, "Esa diferencia ya no está en el cruce: vuelva a cargarlo")
+    j = db.scalar(select(SpdJustificacionWO).where(SpdJustificacionWO.periodo_id == p.id, SpdJustificacionWO.cedula == data.cedula,
+                                                   SpdJustificacionWO.concepto == data.concepto))
+    if j is None:
+        j = SpdJustificacionWO(periodo_id=p.id, cedula=data.cedula, concepto=data.concepto)
+        db.add(j)
+    j.diferencia = dif["diferencia"]
+    j.correcto = data.correcto
+    j.motivo = data.motivo.strip()
+    j.usuario = actual.nombre or actual.username
+    j.creado_en = datetime.now(timezone.utc)
+    auditar(db, request, "spd_cruce_wo_justificado", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", cedula=data.cedula,
+            concepto=data.concepto, diferencia=dif["diferencia"], correcto=data.correcto)
+    db.commit()
+    return ok(servicio.cruce_world_office(db, p, grupo))
+
+
+@router.delete("/periodos/{periodo_id}/cruce-wo/justificar", response_model=ApiResponse[dict])
+def quitar_justificacion_wo(periodo_id: int, request: Request, db: DbSession, cedula: str = Query(max_length=20),
+                            concepto: str = Query(max_length=40), actual: Usuario = Depends(require(LIQUIDAR)), grupo: str = GRUPO):
+    p = _periodo(db, periodo_id)
+    db.query(SpdJustificacionWO).filter(SpdJustificacionWO.periodo_id == p.id, SpdJustificacionWO.cedula == cedula,
+                                        SpdJustificacionWO.concepto == concepto).delete()
+    auditar(db, request, "spd_cruce_wo_justificacion_quitada", actual.id, periodo=f"Q{p.quincena} {p.mes:02d}/{p.anio}", cedula=cedula,
+            concepto=concepto)
+    db.commit()
+    return ok(servicio.cruce_world_office(db, p, grupo))
+
+
+@router.get("/periodos/{periodo_id}/cruce-wo/excel")
+def excel_cruce_wo(periodo_id: int, db: DbSession, _=Depends(require(VER)), grupo: str = GRUPO):
+    p = _periodo(db, periodo_id)
+    datos = servicio.cruce_world_office(db, p, grupo)
+    if not datos.get("cargado"):
+        raise ApiError(404, "Aún no se ha subido la nómina de World Office de esta quincena")
+    nombre = f"CRUCE WORLD OFFICE {'1RA' if p.quincena == 1 else '2DA'} QUINCENA {p.mes:02d}-{p.anio}.xlsx"
+    return StreamingResponse(io.BytesIO(servicio.excel_cruce_world_office(datos)), media_type=XLSX,
+                             headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
 @router.get("/periodos/{periodo_id}/world-office/avisos", response_model=ApiResponse[dict])

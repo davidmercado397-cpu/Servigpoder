@@ -28,7 +28,7 @@ PATRON_CODIGO = re.compile(r"^[a-z][a-z0-9]{1,19}$")
 EMPRESAS_INICIALES = (
     ("servigpoder", "Servigpoder", ("capacidad", "nomina", "reporte", "siesa", "planos", "costeo")),
     ("sera", "SERA", ("liquidador",)),
-    ("speed", "Speed", ("speed",)),
+    ("speed", "Speed", ("speed", "contabilidad")),
 )
 
 

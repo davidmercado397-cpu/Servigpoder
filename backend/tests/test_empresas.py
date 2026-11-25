@@ -13,8 +13,8 @@ def test_empresas_iniciales(admin):
     empresas = {e["codigo"]: e for e in r["data"]}
     assert empresas["servigpoder"]["apps"] == ["capacidad", "costeo", "nomina", "planos", "reporte", "siesa"] and empresas["servigpoder"]["esquema"] == "emp_servigpoder"
     assert empresas["sera"]["apps"] == ["liquidador"] and empresas["sera"]["usuarios"] == 1
-    assert empresas["speed"]["apps"] == ["speed"] and empresas["speed"]["esquema"] == "emp_speed"
-    assert [a["codigo"] for a in r["meta"]["extra"]["apps"]] == ["capacidad", "liquidador", "reporte", "nomina", "siesa", "planos", "costeo", "speed"]
+    assert empresas["speed"]["apps"] == ["contabilidad", "speed"] and empresas["speed"]["esquema"] == "emp_speed"
+    assert [a["codigo"] for a in r["meta"]["extra"]["apps"]] == ["capacidad", "liquidador", "reporte", "nomina", "siesa", "planos", "costeo", "speed", "contabilidad"]
 
 
 def test_los_datos_de_una_empresa_no_se_ven_en_otra(admin):

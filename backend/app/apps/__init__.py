@@ -10,6 +10,7 @@ Para agregar un desarrollo nuevo:
 """
 
 from app.apps.capacidad.manifest import APP as CAPACIDAD
+from app.apps.contabilidad.manifest import APP as CONTABILIDAD
 from app.apps.costeo.manifest import APP as COSTEO
 from app.apps.liquidador.manifest import APP as LIQUIDADOR
 from app.apps.nomina.manifest import APP as NOMINA
@@ -19,7 +20,7 @@ from app.apps.siesa.manifest import APP as SIESA
 from app.apps.speed.manifest import APP as SPEED
 from app.core.plataforma import App
 
-APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA, PLANOS, COSTEO, SPEED]
+APPS: list[App] = [CAPACIDAD, LIQUIDADOR, REPORTE, NOMINA, SIESA, PLANOS, COSTEO, SPEED, CONTABILIDAD]
 
 
 def por_codigo(codigo: str) -> App | None:

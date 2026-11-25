@@ -44,9 +44,6 @@ class Puesto(Base):
     # Corregidos a mano en capacidad operativa: mandan sobre lo que llega al importar (la matriz no los pisa)
     ciudad_manual: Mapped[str | None] = mapped_column(String(80), nullable=True)  # vacío = la ciudad de la ubicación
     descripcion_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    # El día de descanso de un titular se cubre con un relevo. Si no (False), ese día nadie se programa: el hueco
-    # no cuenta y un relevo programado ese día queda para revisión
-    cubre_descansos: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     ubicacion: Mapped[Ubicacion] = relationship(back_populates="puestos", lazy="joined")
 

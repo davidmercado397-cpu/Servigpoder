@@ -73,15 +73,15 @@ export default function MatrizPage() {
     }, "Matriz proyectada al mes siguiente. Corrija solo los puestos que cambian.");
   }
 
-  async function cambiarFestivos(mp: MatrizPuesto, incluye: boolean) {
+  async function cambiarCasilla(mp: MatrizPuesto, campo: "incluye_festivos" | "cubre_descansos", valor: boolean) {
     setMsg(null);
     // Cambio optimista: la casilla responde de inmediato y se revierte si falla
-    setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, incluye_festivos: incluye } : p)));
+    setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, [campo]: valor } : p)));
     try {
-      const r = await api<MatrizPuesto>(`/capacidad/matriz/puestos/${mp.id}`, { method: "PATCH", json: { incluye_festivos: incluye } });
+      const r = await api<MatrizPuesto>(`/capacidad/matriz/puestos/${mp.id}`, { method: "PATCH", json: { [campo]: valor } });
       if (seleccion?.id === mp.id) setSeleccion(r);
     } catch (e) {
-      setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, incluye_festivos: !incluye } : p)));
+      setPuestos((lista) => lista.map((p) => (p.id === mp.id ? { ...p, [campo]: !valor } : p)));
       setMsg({ tipo: "error", texto: mensajeError(e) });
     }
   }
@@ -161,6 +161,7 @@ export default function MatrizPage() {
                   <tr>
                     <th>Puesto</th><th>Ubicación</th><th>Hombres</th><th>Secuencia</th><th>Cobertura vendida</th>
                     <th className="text-center" title="Marque si el servicio vendido se presta también los días festivos">¿Incluye festivos?</th>
+                    <th className="text-center" title="Marcado: el día de descanso de un titular se cubre con un relevo. Sin marcar: ese día nadie se programa (no cuenta como hueco)">¿Descansos se cubren?</th>
                     <th />
                   </tr>
                 </thead>
@@ -184,9 +185,21 @@ export default function MatrizPage() {
                             className="h-4 w-4 accent-marca-600"
                             checked={mp.incluye_festivos}
                             disabled={!editable || mp.puesto.excluido}
-                            onChange={(e) => cambiarFestivos(mp, e.target.checked)}
+                            onChange={(e) => cambiarCasilla(mp, "incluye_festivos", e.target.checked)}
                           />
                           <span className="text-xs">{mp.incluye_festivos ? "Sí" : "No"}</span>
+                        </label>
+                      </td>
+                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <label className="inline-flex cursor-pointer items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-marca-600"
+                            checked={mp.cubre_descansos ?? true}
+                            disabled={!editable || mp.puesto.excluido}
+                            onChange={(e) => cambiarCasilla(mp, "cubre_descansos", e.target.checked)}
+                          />
+                          <span className="text-xs">{mp.cubre_descansos ?? true ? "Sí" : "No"}</span>
                         </label>
                       </td>
                       <td>{mp.requiere_revision && <Insignia color="bg-amber-100 text-amber-800">Revisar</Insignia>}</td>
@@ -199,7 +212,7 @@ export default function MatrizPage() {
           </div>
           {seleccion && (
             <Editor
-              key={`${seleccion.id}-${seleccion.incluye_festivos}`}
+              key={`${seleccion.id}-${seleccion.incluye_festivos}-${seleccion.cubre_descansos}`}
               mp={seleccion}
               editable={!!editable}
               onGuardado={(mp) => { setSeleccion(mp); cargarPuestos(); cargarPeriodos(); }}
@@ -262,6 +275,7 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
   const [secuencia, setSecuencia] = useState(mp.secuencia);
   const [festivos, setFestivos] = useState(mp.incluye_festivos);
   const [flexible, setFlexible] = useState(!!mp.horario_flexible);
+  const [descansos, setDescansos] = useState(mp.cubre_descansos ?? true);
   const [nota, setNota] = useState(mp.nota);
   const [franjas, setFranjas] = useState<Franja[]>(mp.franjas.map((f) => ({ ...f, inicio: hora(f.inicio), fin: hora(f.fin) })));
   const [dias, setDias] = useState<DiaRequerido[]>([]);
@@ -278,7 +292,7 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
     try {
       const r = await api<MatrizPuesto>(`/capacidad/matriz/puestos/${mp.id}`, {
         method: "PATCH",
-        json: { hombres, secuencia, incluye_festivos: festivos, horario_flexible: flexible, nota, franjas, ...extra },
+        json: { hombres, secuencia, incluye_festivos: festivos, cubre_descansos: descansos, horario_flexible: flexible, nota, franjas, ...extra },
       });
       onGuardado(r);
       cargarDias();
@@ -336,6 +350,13 @@ function Editor({ mp, editable, onGuardado }: { mp: MatrizPuesto; editable: bool
             </label>
           </div>
         </div>
+
+        <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm">
+          <input type="checkbox" className="mt-0.5" checked={descansos} onChange={(e) => setDescansos(e.target.checked)} />
+          <span><span className="font-semibold text-slate-800">Los descansos se cubren</span>
+            <span className="block text-xs text-slate-500">Marcado: el día de descanso de un titular se cubre con un relevo. Sin marcar: ese día nadie se programa;
+              no cuenta como hueco y, si alguien queda programado como relevo, el cubrimiento queda para revisión.</span></span>
+        </label>
 
         <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm">
           <input type="checkbox" className="mt-0.5" checked={flexible} onChange={(e) => setFlexible(e.target.checked)} />

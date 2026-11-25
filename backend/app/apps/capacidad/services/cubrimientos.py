@@ -22,7 +22,9 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.apps.capacidad.models import Analisis, AnalisisDia, AnalisisPuesto, Cubrimiento, Novedad, ProgramacionDia, ProgramacionFila, Puesto
+from app.apps.capacidad.models import (
+    Analisis, AnalisisDia, AnalisisPuesto, Cubrimiento, MatrizPuesto, Novedad, ProgramacionDia, ProgramacionFila, Puesto,
+)
 from app.apps.capacidad.models.analisis import EXCESO, MIXTO
 from app.apps.capacidad.models.cubrimientos import (
     JUSTIFICADO, MOTIVO_DESCANSO, MOTIVO_DESCANSO_NO_CUBRE, MOTIVO_NOVEDAD, MOTIVO_SIN, PENDIENTE,
@@ -69,6 +71,9 @@ def detectar(db: Session, analisis: Analisis, registros: list[Registro], puestos
              titular: dict[str, int], franjas_turno: dict[str, list]) -> Counter:
     horas_turno = horas_por_turno(franjas_turno)
     novedades_cubrir = set(db.scalars(select(Novedad.codigo).where(Novedad.requiere_cubrimiento.is_(True))))
+    # Puestos donde, según la matriz del mes, el descanso de los titulares no se cubre
+    no_cubren = set(db.scalars(select(MatrizPuesto.puesto_id).where(MatrizPuesto.periodo_id == analisis.periodo_id,
+                                                                    MatrizPuesto.cubre_descansos.is_(False))))
 
     # Qué hace cada persona cada día (en cualquier fila)
     por_persona_dia: dict[tuple[str, date], list[Registro]] = defaultdict(list)
@@ -110,7 +115,7 @@ def detectar(db: Session, analisis: Analisis, registros: list[Registro], puestos
             motivo, referencia = MOTIVO_NOVEDAD, ref_novedad
         elif ref_descanso:
             # En un puesto donde los descansos no se cubren, nadie debería estar programado ese día: queda para revisión
-            motivo = MOTIVO_DESCANSO if p.cubre_descansos else MOTIVO_DESCANSO_NO_CUBRE
+            motivo = MOTIVO_DESCANSO_NO_CUBRE if r.puesto_id in no_cubren else MOTIVO_DESCANSO
             referencia = ref_descanso
         else:
             motivo, referencia = MOTIVO_SIN, []

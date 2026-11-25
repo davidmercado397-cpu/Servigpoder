@@ -226,7 +226,7 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
             continue
         mp = matriz.get(pid)
         dias = (evaluar_flexible if mp and mp.horario_flexible else evaluar)(lineas[pid], desde, hasta)
-        if not p.cubre_descansos:
+        if mp and not mp.cubre_descansos:
             excusar_descansos(dias, descansos.get(pid, set()))
         dh = sum(1 for d in dias.values() if d.descubiertas)
         de = sum(1 for d in dias.values() if d.exceso)

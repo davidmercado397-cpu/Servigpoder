@@ -44,6 +44,9 @@ class MatrizPuesto(Base):
     secuencia: Mapped[str] = mapped_column(String(80), default="")
     jornada: Mapped[str] = mapped_column(String(300), default="")  # texto original de la matriz
     incluye_festivos: Mapped[bool] = mapped_column(Boolean, default=True)
+    # El día de descanso de un titular se cubre con un relevo. Si no (False), ese día nadie se programa: el hueco
+    # no cuenta y un relevo programado ese día queda para revisión
+    cubre_descansos: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Horario flexible: se vendieron horas por día (p. ej. 8 h) sin hora fija; se cumple con las horas programadas
     # en el día, en el turno que sea
     horario_flexible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

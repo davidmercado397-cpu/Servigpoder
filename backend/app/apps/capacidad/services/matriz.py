@@ -179,6 +179,7 @@ def proyectar(db: Session, periodo: MatrizPeriodo, copiar_excepciones: bool = Fa
             secuencia=mp.secuencia,
             jornada=mp.jornada,
             incluye_festivos=mp.incluye_festivos,
+            cubre_descansos=mp.cubre_descansos,
             horario_flexible=mp.horario_flexible,
             requiere_revision=mp.requiere_revision,
             nota=mp.nota,

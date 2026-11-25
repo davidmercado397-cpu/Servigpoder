@@ -98,8 +98,6 @@ export type Puesto = {
   id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion;
   /** Ciudad (centro de operación) del puesto: la corregida a mano o la de la ubicación */
   ciudad?: string | null; ciudad_manual?: string | null; descripcion_manual?: boolean;
-  /** El descanso de un titular se cubre con un relevo (si no, ese día nadie se programa) */
-  cubre_descansos?: boolean;
 };
 export type Turno = { codigo: string; descripcion: string; clase: string; franjas: { inicio: string; fin: string }[] };
 export type Novedad = { codigo: string; descripcion: string; requiere_cubrimiento: boolean };
@@ -120,6 +118,8 @@ export type MatrizPuesto = {
   id: number; puesto: Puesto; hombres: string; secuencia: string; jornada: string; incluye_festivos: boolean;
   /** Horas por día sin hora fija (se cumple con las horas programadas en el día) */
   horario_flexible?: boolean;
+  /** El descanso de un titular se cubre con un relevo (si no, ese día nadie se programa) */
+  cubre_descansos?: boolean;
   requiere_revision: boolean; nota: string; franjas: Franja[]; excepciones: Excepcion[];
 };
 export type DiaRequerido = { fecha: string; festivo: string | null; franjas: { inicio: string; fin: string }[]; horas: number };

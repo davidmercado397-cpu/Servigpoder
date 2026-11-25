@@ -56,7 +56,6 @@ class PuestoOut(Orm):
     ciudad: str | None = None
     ciudad_manual: str | None = None
     descripcion_manual: bool = False
-    cubre_descansos: bool = True
 
 
 class PuestoEditar(BaseModel):
@@ -66,7 +65,6 @@ class PuestoEditar(BaseModel):
     ciudad: str | None = Field(default=None, max_length=80)
     excluido: bool | None = None
     activo: bool | None = None
-    cubre_descansos: bool | None = None
 
 
 class PuestoCrear(BaseModel):
@@ -185,6 +183,7 @@ class MatrizPuestoOut(Orm):
     secuencia: str
     jornada: str
     incluye_festivos: bool
+    cubre_descansos: bool = True
     horario_flexible: bool = False
     requiere_revision: bool
     nota: str
@@ -196,6 +195,7 @@ class MatrizPuestoEditar(BaseModel):
     hombres: Decimal | None = Field(default=None, ge=0, le=500)
     secuencia: str | None = Field(default=None, max_length=80)
     incluye_festivos: bool | None = None
+    cubre_descansos: bool | None = None
     horario_flexible: bool | None = None
     requiere_revision: bool | None = None
     nota: str | None = Field(default=None, max_length=2000)

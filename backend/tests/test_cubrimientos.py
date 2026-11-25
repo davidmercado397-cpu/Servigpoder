@@ -117,10 +117,13 @@ def test_personas_en_bolsa(admin):
 def test_puesto_que_no_cubre_descansos(admin):
     importar_matriz(admin)
     admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
-    p25 = next(p for p in admin.get("/api/capacidad/maestros/puestos?q=25").json()["data"] if p["codigo"] == "25")
-    assert p25["cubre_descansos"] is True  # todos los puestos, de entrada
-    r = admin.patch(f"/api/capacidad/maestros/puestos/{p25['id']}", json={"cubre_descansos": False})
+    # Se marca en la matriz comercial del mes (todos los puestos se cubren, de entrada)
+    periodo = admin.get("/api/capacidad/matriz/periodos").json()["data"][0]["id"]
+    mp25 = next(m for m in admin.get(f"/api/capacidad/matriz/periodos/{periodo}/puestos?q=25").json()["data"] if m["puesto"]["codigo"] == "25")
+    assert mp25["cubre_descansos"] is True
+    r = admin.patch(f"/api/capacidad/matriz/puestos/{mp25['id']}", json={"cubre_descansos": False})
     assert r.status_code == 200 and r.json()["data"]["cubre_descansos"] is False
+    p25 = mp25["puesto"]
     analisis_id = admin.post("/api/capacidad/programacion/cargas", files=archivo(reporte(ESCENARIO))).json()["meta"]["extra"]["analisis_id"]
     # S releva el 19 el descanso de A: en un puesto que no cubre descansos queda para revisión
     rs = _por_persona(admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()["data"])[("RELEVO S", "19")]

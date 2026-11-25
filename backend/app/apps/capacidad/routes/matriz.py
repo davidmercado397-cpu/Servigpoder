@@ -131,7 +131,7 @@ def editar_puesto(mp_id: int, data: MatrizPuestoEditar, request: Request, db: Db
     mp = _matriz_puesto(db, mp_id)
     _editable(mp.periodo)
     cambios = data.model_dump(exclude_unset=True)
-    for campo in ("hombres", "secuencia", "incluye_festivos", "horario_flexible", "requiere_revision", "nota"):
+    for campo in ("hombres", "secuencia", "incluye_festivos", "cubre_descansos", "horario_flexible", "requiere_revision", "nota"):
         if campo in cambios and cambios[campo] is not None:
             setattr(mp, campo, cambios[campo])
     if data.franjas is not None:

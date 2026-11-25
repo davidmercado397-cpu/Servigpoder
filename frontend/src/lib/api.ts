@@ -98,6 +98,8 @@ export type Puesto = {
   id: number; codigo: string; descripcion: string; tipo: string; excluido: boolean; activo: boolean; ubicacion: Ubicacion;
   /** Ciudad (centro de operación) del puesto: la corregida a mano o la de la ubicación */
   ciudad?: string | null; ciudad_manual?: string | null; descripcion_manual?: boolean;
+  /** El descanso de un titular se cubre con un relevo (si no, ese día nadie se programa) */
+  cubre_descansos?: boolean;
 };
 export type Turno = { codigo: string; descripcion: string; clase: string; franjas: { inicio: string; fin: string }[] };
 export type Novedad = { codigo: string; descripcion: string; requiere_cubrimiento: boolean };
@@ -145,14 +147,14 @@ export type PuestoAnalisis = {
   puesto: Puesto; hombres: string; fijos: number; personas: number; horas_requeridas: string; horas_programadas: string;
   horas_descubiertas: string; horas_exceso: string; dias_hueco: number; dias_exceso: number; estado: string;
 };
-export type Tramo = { tipo: "hueco" | "exceso"; inicio: string; fin: string; personas: number; /** horario flexible: horas del día que faltan o sobran */ horas?: number; flexible?: boolean };
+export type Tramo = { tipo: "hueco" | "exceso" | "descanso"; inicio: string; fin: string; personas: number; /** horario flexible: horas del día que faltan o sobran */ horas?: number; flexible?: boolean };
 export type DiaAnalisis = { fecha: string; horas_requeridas: string; horas_programadas: string; horas_descubiertas: string; horas_exceso: string; estado: string; detalle: Tramo[] };
 export type PersonaPuesto = { cedula: string; nombre: string; titular: boolean; puesto_titular: string | null; dias: Record<string, string>; clases: Record<string, string> };
 export type DetallePuesto = { resumen: PuestoAnalisis; franjas: Franja[]; incluye_festivos: boolean | null; festivos: Record<string, string>; dias: DiaAnalisis[]; personas: PersonaPuesto[] };
 
 export type Cubrimiento = {
   id: number; puesto: Puesto; fecha: string; cedula: string; nombre: string; codigo_turno: string; horas: string;
-  puesto_titular: string | null; motivo: "novedad" | "descanso" | "sin_motivo"; referencia: { cedula: string; nombre: string; codigo: string }[];
+  puesto_titular: string | null; motivo: "novedad" | "descanso" | "descanso_no_cubre" | "sin_motivo"; referencia: { cedula: string; nombre: string; codigo: string }[];
   genera_exceso: boolean; doble_turno: boolean; estado_auto: string; estado: string;
   comentario: string | null; decidido_por: string | null; decidido_en: string | null;
 };

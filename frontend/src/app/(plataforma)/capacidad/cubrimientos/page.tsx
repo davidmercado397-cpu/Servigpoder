@@ -31,6 +31,7 @@ function motivoTexto(c: Cubrimiento) {
   const nombres = c.referencia.map((r) => `${r.nombre} (${r.codigo})`).join(", ");
   if (c.motivo === "novedad") return `Cubre novedad de ${nombres}`;
   if (c.motivo === "descanso") return `Relevo del descanso de ${nombres}`;
+  if (c.motivo === "descanso_no_cubre") return `Relevo del descanso de ${nombres}, pero en este puesto los descansos no se cubren`;
   return "Sin motivo encontrado";
 }
 
@@ -153,7 +154,7 @@ export default function CubrimientosPage() {
                     </td>
                     <td className="whitespace-nowrap">{c.codigo_turno}<div className="text-xs text-slate-500">{Number(c.horas)} h</div></td>
                     <td>
-                      <div className={c.motivo === "sin_motivo" ? "font-medium text-[#9a3f1a]" : ""}>{motivoTexto(c)}</div>
+                      <div className={c.motivo === "sin_motivo" || c.motivo === "descanso_no_cubre" ? "font-medium text-[#9a3f1a]" : ""}>{motivoTexto(c)}</div>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {c.genera_exceso && <Insignia color="bg-[#fab219]/20 text-[#8a5a00]">▲ Genera exceso</Insignia>}
                         {c.doble_turno && <Insignia color="bg-[#ec835a]/20 text-[#9a3f1a]">◆ Doble turno ese día</Insignia>}

@@ -23,7 +23,7 @@ from app.apps.capacidad.models import (
     ProgramacionFila, Puesto, Turno,
 )
 from app.apps.capacidad.models.analisis import EXCESO, HUECO, MIXTO, OK, SIN_SERVICIO
-from app.apps.capacidad.models.maestros import BOLSA, TRABAJO
+from app.apps.capacidad.models.maestros import BOLSA, DESCANSO, TRABAJO
 from app.apps.capacidad.services import cubrimientos
 from app.apps.capacidad.services.bloques import BLOQUE_MIN, BLOQUES_DIA
 from app.apps.capacidad.services.bloques import bloques as _bloques
@@ -134,6 +134,19 @@ def evaluar_flexible(linea: Linea, desde: date, hasta: date) -> dict[date, Resul
     return dias
 
 
+def excusar_descansos(dias: dict[date, ResultadoDia], fechas: set[date]) -> None:
+    """Puesto donde los descansos no se cubren: el día en que un titular descansa, el hueco no cuenta (nadie se programa)."""
+    for fecha in fechas:
+        d = dias.get(fecha)
+        if d is None or not d.descubiertas:
+            continue
+        d.requeridas -= d.descubiertas
+        d.descubiertas = 0
+        for t in d.detalle:
+            if t["tipo"] == HUECO:
+                t["tipo"] = DESCANSO  # se muestra como descanso sin cubrir, no como hueco
+
+
 def _estado_puesto(dias_hueco: int, dias_exceso: int) -> str:
     if dias_hueco and dias_exceso:
         return MIXTO
@@ -173,6 +186,11 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
     registros = cubrimientos.registros_carga(db, carga.id)
     en_puesto = [(r.cedula, r.puesto_id, r.fecha, r.codigo) for r in registros if r.clase == TRABAJO and r.puesto_id]
     titular = cubrimientos.titulares(registros, puestos)
+    # Días en que un titular descansa en su puesto (para los puestos donde los descansos no se cubren)
+    descansos: dict[int, set[date]] = defaultdict(set)
+    for r in registros:
+        if r.clase == DESCANSO and r.puesto_id and titular.get(r.cedula) == r.puesto_id:
+            descansos[r.puesto_id].add(r.fecha)
 
     lineas: dict[int, Linea] = defaultdict(Linea)
     personas: dict[int, set[str]] = defaultdict(set)
@@ -208,6 +226,8 @@ def analizar(db: Session, carga: ProgramacionCarga, usuario_id: int | None = Non
             continue
         mp = matriz.get(pid)
         dias = (evaluar_flexible if mp and mp.horario_flexible else evaluar)(lineas[pid], desde, hasta)
+        if not p.cubre_descansos:
+            excusar_descansos(dias, descansos.get(pid, set()))
         dh = sum(1 for d in dias.values() if d.descubiertas)
         de = sum(1 for d in dias.values() if d.exceso)
         ap = AnalisisPuesto(

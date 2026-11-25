@@ -24,7 +24,9 @@ from sqlalchemy.orm import Session
 
 from app.apps.capacidad.models import Analisis, AnalisisDia, AnalisisPuesto, Cubrimiento, Novedad, ProgramacionDia, ProgramacionFila, Puesto
 from app.apps.capacidad.models.analisis import EXCESO, MIXTO
-from app.apps.capacidad.models.cubrimientos import JUSTIFICADO, MOTIVO_DESCANSO, MOTIVO_NOVEDAD, MOTIVO_SIN, PENDIENTE
+from app.apps.capacidad.models.cubrimientos import (
+    JUSTIFICADO, MOTIVO_DESCANSO, MOTIVO_DESCANSO_NO_CUBRE, MOTIVO_NOVEDAD, MOTIVO_SIN, PENDIENTE,
+)
 from app.apps.capacidad.models.maestros import BOLSA, DESCANSO, TRABAJO
 from app.apps.capacidad.models.programacion import NOVEDAD
 from app.apps.capacidad.services.bloques import bloques as _bloques
@@ -107,7 +109,9 @@ def detectar(db: Session, analisis: Analisis, registros: list[Registro], puestos
         if ref_novedad:
             motivo, referencia = MOTIVO_NOVEDAD, ref_novedad
         elif ref_descanso:
-            motivo, referencia = MOTIVO_DESCANSO, ref_descanso
+            # En un puesto donde los descansos no se cubren, nadie debería estar programado ese día: queda para revisión
+            motivo = MOTIVO_DESCANSO if p.cubre_descansos else MOTIVO_DESCANSO_NO_CUBRE
+            referencia = ref_descanso
         else:
             motivo, referencia = MOTIVO_SIN, []
 
@@ -118,7 +122,7 @@ def detectar(db: Session, analisis: Analisis, registros: list[Registro], puestos
             x.clase == TRABAJO and x.puesto_id not in (None, r.puesto_id) and puestos[x.puesto_id].tipo != BOLSA
             for x in por_persona_dia[(r.cedula, r.fecha)]
         )
-        estado = JUSTIFICADO if motivo != MOTIVO_SIN and not genera_exceso else PENDIENTE
+        estado = JUSTIFICADO if motivo not in (MOTIVO_SIN, MOTIVO_DESCANSO_NO_CUBRE) and not genera_exceso else PENDIENTE
         tit = titular.get(r.cedula)
         db.add(Cubrimiento(
             analisis_id=analisis.id, puesto_id=r.puesto_id, fecha=r.fecha, cedula=r.cedula, nombre=r.nombre,

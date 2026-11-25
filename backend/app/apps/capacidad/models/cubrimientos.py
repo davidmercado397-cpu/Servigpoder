@@ -12,6 +12,7 @@ from app.apps.capacidad.models.maestros import Puesto
 MOTIVO_NOVEDAD = "novedad"  # un titular del puesto tiene novedad ese día (VAC, IEG, IND…)
 MOTIVO_DESCANSO = "descanso"  # relevo del día de descanso de un titular
 MOTIVO_SIN = "sin_motivo"  # no se encontró razón: nómina debe revisar
+MOTIVO_DESCANSO_NO_CUBRE = "descanso_no_cubre"  # relevo del descanso en un puesto donde los descansos no se cubren
 
 # Estado del cubrimiento
 JUSTIFICADO = "justificado"  # justificado automáticamente

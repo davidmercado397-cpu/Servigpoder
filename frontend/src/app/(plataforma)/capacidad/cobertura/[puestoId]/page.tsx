@@ -185,6 +185,7 @@ export default function Page() {
 
 // Un tramo del detalle: con hora (falta o sobra gente en un horario) o, en horario flexible, horas del día
 function tramoTexto(t: { tipo: string; personas: number; inicio: string; fin: string; horas?: number; flexible?: boolean }) {
+  if (t.tipo === "descanso") return `Descanso sin cubrir de ${t.inicio} a ${t.fin} (en este puesto los descansos no se cubren)`;
   if (t.flexible) return `${t.tipo === "hueco" ? "Faltan" : "Sobran"} ${t.horas} h del día (horario flexible)`;
   return `${t.tipo === "hueco" ? "Falta" : "Sobra"} ${t.personas} ${t.personas === 1 ? "persona" : "personas"} de ${t.inicio} a ${t.fin}`;
 }

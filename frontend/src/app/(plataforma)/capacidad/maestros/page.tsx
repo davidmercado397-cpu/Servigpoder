@@ -209,7 +209,7 @@ function PuestosTab() {
     api<string[]>("/capacidad/maestros/ciudades").then(setCiudades).catch(() => {});
   }, []);
 
-  async function cambiar(p: Puesto, campo: "excluido" | "activo", valor: boolean) {
+  async function cambiar(p: Puesto, campo: "excluido" | "activo" | "cubre_descansos", valor: boolean) {
     await api(`/capacidad/maestros/puestos/${p.id}`, { method: "PATCH", json: { [campo]: valor } });
     cargar();
   }
@@ -270,7 +270,7 @@ function PuestosTab() {
                   onChange={(e) => marcar(puestos, e.target.checked)} /></th>
               )}
               {([["poder", "PODER"], ["ubicacion", "Ubicación"], ["puesto", "Puesto"], ["descripcion", "Descripción"], ["ciudad", "Ciudad"],
-                ["tipo", "Tipo"], ["excluido", "Excluido"], ["activo", "Activo"]] as const).map(([campo, titulo]) => (
+                ["tipo", "Tipo"], ["excluido", "Excluido"], ["activo", "Activo"], ["descansos", "Descansos se cubren"]] as const).map(([campo, titulo]) => (
                 <th key={campo}>
                   <button type="button" className="inline-flex items-center gap-1 hover:text-marca-700" onClick={() => ordenar(campo)}
                     title={`Ordenar por ${titulo.toLowerCase()}`}>
@@ -294,7 +294,7 @@ function PuestosTab() {
                 <td><input className="input min-w-48" value={edicion.descripcion} onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })} /></td>
                 <td><input className="input w-40" list="ciudades-puesto" placeholder={p.ubicacion.ciudad ?? "Ciudad"} value={edicion.ciudad}
                   onChange={(e) => setEdicion({ ...edicion, ciudad: e.target.value })} title="Vacía = la ciudad de la ubicación" /></td>
-                <td colSpan={3} className="text-xs text-slate-500">El código anterior se sigue reconociendo al importar.</td>
+                <td colSpan={4} className="text-xs text-slate-500">El código anterior se sigue reconociendo al importar.</td>
                 <td className="whitespace-nowrap">
                   <button className="btn-primario px-2 py-1 text-xs" onClick={guardarEdicion}>Guardar</button>
                   <button className="ml-1 btn-secundario px-2 py-1 text-xs" onClick={() => { setEdicion(null); setError(""); }}>Cancelar</button>
@@ -311,6 +311,8 @@ function PuestosTab() {
                 <td>{p.tipo === "bolsa" ? <Insignia color="bg-purple-100 text-purple-800">Bolsa</Insignia> : "Operativo"}</td>
                 <td><input type="checkbox" checked={p.excluido} disabled={!puedeEditar} onChange={(e) => cambiar(p, "excluido", e.target.checked)} /></td>
                 <td><input type="checkbox" checked={p.activo} disabled={!puedeEditar} onChange={(e) => cambiar(p, "activo", e.target.checked)} /></td>
+                <td><input type="checkbox" checked={p.cubre_descansos ?? true} disabled={!puedeEditar} onChange={(e) => cambiar(p, "cubre_descansos", e.target.checked)}
+                  title="Marcado: el día de descanso de un titular se cubre con un relevo. Sin marcar: ese día nadie se programa (no cuenta como hueco)" /></td>
                 <td>{puedeEditar && <button className="text-sm text-marca-600 hover:underline" onClick={() => {
                   setError(""); setEdicion({ id: p.id, codigo: p.codigo, descripcion: p.descripcion, ciudad: p.ciudad_manual ?? "" });
                 }}>Editar</button>}</td>
@@ -321,7 +323,8 @@ function PuestosTab() {
         <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} />
       </div>
       <p className="text-xs text-slate-500">{(meta?.total ?? 0).toLocaleString("es-CO")} puestos. Un puesto inactivo no se proyecta al mes siguiente; uno excluido no entra al control.
-        Lo corregido con «Editar» (código, descripción y ciudad, marcado con ✎) manda sobre lo que llega al importar la matriz o la programación de SIESA.</p>
+        Lo corregido con «Editar» (código, descripción y ciudad, marcado con ✎) manda sobre lo que llega al importar la matriz o la programación de SIESA.
+        «Descansos se cubren» sin marcar: el día que un titular descansa nadie se programa; ese día no cuenta como hueco y un relevo programado queda para revisión.</p>
     </div>
   );
 }

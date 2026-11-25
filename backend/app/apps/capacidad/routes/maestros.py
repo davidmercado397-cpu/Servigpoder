@@ -27,13 +27,13 @@ router = APIRouter(prefix="/maestros", tags=["maestros"])
 ORDENES_PUESTO = {
     "poder": lambda: Ubicacion.codigo, "ubicacion": lambda: Ubicacion.nombre, "puesto": lambda: Puesto.codigo,
     "descripcion": lambda: Puesto.descripcion, "ciudad": ciudad_puesto, "tipo": lambda: Puesto.tipo,
-    "excluido": lambda: Puesto.excluido, "activo": lambda: Puesto.activo,
+    "excluido": lambda: Puesto.excluido, "activo": lambda: Puesto.activo, "descansos": lambda: Puesto.cubre_descansos,
 }
 
 
 @router.get("/puestos", response_model=ApiResponse[list[PuestoOut]])
 def listar_puestos(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
-                   orden: str = Query("poder", pattern="^(poder|ubicacion|puesto|descripcion|ciudad|tipo|excluido|activo)$"),
+                   orden: str = Query("poder", pattern="^(poder|ubicacion|puesto|descripcion|ciudad|tipo|excluido|activo|descansos)$"),
                    direccion: str = Query("asc", pattern="^(asc|desc)$"), _=Depends(require("capacidad.maestros.ver"))):
     columna = ORDENES_PUESTO[orden]()
     columna = columna.desc().nulls_last() if direccion == "desc" else columna.asc().nulls_last()

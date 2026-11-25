@@ -56,6 +56,7 @@ class PuestoOut(Orm):
     ciudad: str | None = None
     ciudad_manual: str | None = None
     descripcion_manual: bool = False
+    cubre_descansos: bool = True
 
 
 class PuestoEditar(BaseModel):
@@ -65,6 +66,7 @@ class PuestoEditar(BaseModel):
     ciudad: str | None = Field(default=None, max_length=80)
     excluido: bool | None = None
     activo: bool | None = None
+    cubre_descansos: bool | None = None
 
 
 class PuestoCrear(BaseModel):

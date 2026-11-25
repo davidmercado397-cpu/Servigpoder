@@ -40,7 +40,7 @@ def exportar(db: Session) -> dict:
         "ubicaciones": [{"codigo": u.codigo, "nombre": u.nombre, "nit": u.nit, "ciudad": u.ciudad} for u in ubicaciones],
         "puestos": [{"codigo": p.codigo, "ubicacion": p.ubicacion.codigo, "descripcion": p.descripcion, "tipo": p.tipo,
                      "excluido": p.excluido, "activo": p.activo, "ciudad_manual": p.ciudad_manual,
-                     "descripcion_manual": p.descripcion_manual} for p in puestos],
+                     "descripcion_manual": p.descripcion_manual, "cubre_descansos": p.cubre_descansos} for p in puestos],
         "equivalencias": [{"codigo_siesa": e.codigo_siesa, "puesto": e.puesto.codigo, "origen": e.origen}
                           for e in db.scalars(select(PuestoEquivalencia).order_by(PuestoEquivalencia.codigo_siesa))],
         "turnos": [{"codigo": t.codigo, "descripcion": t.descripcion, "clase": t.clase,

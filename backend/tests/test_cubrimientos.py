@@ -112,3 +112,32 @@ def test_personas_en_bolsa(admin):
     assert [p["nombre"] for p in r["data"]] == ["DISPONIBLE P"]
     p = r["data"][0]
     assert p["dias_sin_puesto"] == ["2026-09-15"] and p["horas_sin_puesto"] == 12 and p["dias_en_puesto"] == 1
+
+
+def test_puesto_que_no_cubre_descansos(admin):
+    importar_matriz(admin)
+    admin.post("/api/capacidad/catalogos/turnos/importar", files=archivo(xlsx(HORARIOS)))
+    p25 = next(p for p in admin.get("/api/capacidad/maestros/puestos?q=25").json()["data"] if p["codigo"] == "25")
+    assert p25["cubre_descansos"] is True  # todos los puestos, de entrada
+    r = admin.patch(f"/api/capacidad/maestros/puestos/{p25['id']}", json={"cubre_descansos": False})
+    assert r.status_code == 200 and r.json()["data"]["cubre_descansos"] is False
+    analisis_id = admin.post("/api/capacidad/programacion/cargas", files=archivo(reporte(ESCENARIO))).json()["meta"]["extra"]["analisis_id"]
+    # S releva el 19 el descanso de A: en un puesto que no cubre descansos queda para revisión
+    rs = _por_persona(admin.get(f"/api/capacidad/cubrimientos/{analisis_id}").json()["data"])[("RELEVO S", "19")]
+    assert (rs["motivo"], rs["estado"]) == ("descanso_no_cubre", "pendiente")
+    # El 20 A descansa (L) y solo B trabaja de noche: el día sin cubrir no cuenta como hueco
+    det = admin.get(f"/api/capacidad/analisis/{analisis_id}/puestos/{p25['id']}").json()["data"]
+    d20 = next(d for d in det["dias"] if d["fecha"] == "2026-09-20")
+    assert float(d20["horas_descubiertas"]) == 0 and {t["tipo"] for t in d20["detalle"]} == {"descanso"}
+
+
+def test_excusar_descansos():
+    from datetime import date
+
+    from app.apps.capacidad.services.cobertura import ResultadoDia, excusar_descansos
+    d1, d2 = date(2026, 9, 19), date(2026, 9, 20)
+    dias = {d1: ResultadoDia(requeridas=24, programadas=12, descubiertas=12, detalle=[{"tipo": "hueco", "personas": 1, "inicio": "06:00", "fin": "18:00"}]),
+            d2: ResultadoDia(requeridas=24, programadas=12, descubiertas=12, detalle=[{"tipo": "hueco", "personas": 1, "inicio": "06:00", "fin": "18:00"}])}
+    excusar_descansos(dias, {d1})
+    assert (dias[d1].requeridas, dias[d1].descubiertas, dias[d1].estado, dias[d1].detalle[0]["tipo"]) == (12, 0, "ok", "descanso")
+    assert (dias[d2].descubiertas, dias[d2].estado) == (12, "hueco")

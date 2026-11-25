@@ -37,7 +37,7 @@ def _linea(x) -> dict:
 
 
 def _factura(f: CtbFactura, completa: bool = False) -> dict:
-    out = {"id": f.id, "estado": f.estado, "tipo": f.tipo, "motivo_aparte": f.motivo_aparte, "leida_con": f.leida_con,
+    out = {"id": f.id, "estado": f.estado, "tipo": f.tipo, "cuenta_cobro": f.cuenta_cobro, "motivo_aparte": f.motivo_aparte, "leida_con": f.leida_con,
            "origen": f.origen, "prefijo": f.prefijo, "numero": f.numero,
            "fecha_emision": f.fecha_emision.isoformat() if f.fecha_emision else None,
            "fecha_vencimiento": f.fecha_vencimiento.isoformat() if f.fecha_vencimiento else None,
@@ -98,6 +98,7 @@ class FacturaIn(BaseModel):
     nota: str = Field(default="", max_length=300)
     lineas: list[LineaIn] = Field(default_factory=list, max_length=500)
     lista: bool = False  # revisada: sale en el próximo plano
+    cuenta_cobro: bool | None = None  # None = no cambia
 
 
 @router.put("/facturas/{factura_id}", response_model=ApiResponse[dict])
@@ -111,6 +112,8 @@ def guardar(factura_id: int, data: FacturaIn, request: Request, db: DbSession, a
         if x is not None:
             x.producto, x.centro_costos, x.nota = ln.producto.strip(), ln.centro_costos.strip(), ln.nota.strip()
     f.nota = data.nota.strip()
+    if data.cuenta_cobro is not None:
+        f.cuenta_cobro = data.cuenta_cobro
     if data.lista:
         falta = servicio.faltantes(f)
         if falta:
@@ -223,7 +226,7 @@ def planos(db: DbSession, _=Depends(require(VER))):
         ids = [x["factura_id"] for x in p.items]
         facs = {f.id: f for f in db.scalars(select(CtbFactura).where(CtbFactura.id.in_(ids)))} if ids else {}
         out.append({"id": p.id, "fecha": p.fecha.isoformat(), "creado_en": p.creado_en.isoformat() if p.creado_en else None,
-                    "facturas": [{"documento": x["documento"], **(_factura(facs[x["factura_id"]]) if x["factura_id"] in facs else
+                    "facturas": [{"documento": x["documento"], "serie": x.get("serie", "FC"), **(_factura(facs[x["factura_id"]]) if x["factura_id"] in facs else
                                                                  {"id": x["factura_id"], "estado": "eliminada"})} for x in p.items]})
     return ok(out)
 
@@ -277,7 +280,8 @@ def _config_out(db: DbSession) -> dict:
             "modelo": c.modelo, "modelo_general": ia.ajustes().modelo, "ia": ia.configurada(),
             "ultima_lectura": c.ultima_lectura.isoformat() if c.ultima_lectura else None, "ultimo_error": c.ultimo_error,
             "empresa_nombre": c.empresa_nombre, "empresa_nit": c.empresa_nit, "tipo_documento": c.tipo_documento,
-            "prefijo": c.prefijo, "bodega": c.bodega, "unidad": c.unidad}
+            "prefijo": c.prefijo, "tipo_documento_ds": c.tipo_documento_ds, "prefijo_ds": c.prefijo_ds,
+            "ultimo_fc": c.ultimo_fc, "ultimo_ds": c.ultimo_ds, "bodega": c.bodega, "unidad": c.unidad}
 
 
 @router.get("/config", response_model=ApiResponse[dict])
@@ -295,6 +299,11 @@ class ConfigIn(BaseModel):
     empresa_nit: str = Field(min_length=5, max_length=20, pattern=r"^[\d.\-\s]+$")
     tipo_documento: str = Field(default="FC", min_length=1, max_length=10)
     prefijo: str = Field(default="FC", min_length=1, max_length=10)
+    tipo_documento_ds: str = Field(default="DS", min_length=1, max_length=10)
+    prefijo_ds: str = Field(default="DSS", min_length=1, max_length=10)
+    # Último número usado en World Office (AAMM + consecutivo); vacío = ninguno
+    ultimo_fc: int | None = Field(default=None, ge=0, le=99999999)
+    ultimo_ds: int | None = Field(default=None, ge=0, le=99999999)
     bodega: str = Field(default="Principal", min_length=1, max_length=60)
     unidad: str = Field(default="Und.", min_length=1, max_length=20)
 
@@ -302,7 +311,8 @@ class ConfigIn(BaseModel):
 @router.put("/config", response_model=ApiResponse[dict])
 def guardar_config(data: ConfigIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
     c = servicio.config(db)
-    for k in ("correo", "carpeta", "modelo", "empresa_nombre", "tipo_documento", "prefijo", "bodega", "unidad"):
+    for k in ("correo", "carpeta", "modelo", "empresa_nombre", "tipo_documento", "prefijo", "tipo_documento_ds", "prefijo_ds",
+              "ultimo_fc", "ultimo_ds", "bodega", "unidad"):
         v = getattr(data, k)
         setattr(c, k, v.strip() if isinstance(v, str) else v)
     c.empresa_nit = servicio.dian.solo_nit(data.empresa_nit)

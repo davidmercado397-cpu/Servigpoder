@@ -3,6 +3,7 @@
 Una fila por producto de la factura; el encabezado se repite en cada fila (así lo pide la plantilla de World Office).
 Modelo: DocumentosComprasEncabezadosMovimientoInventarioWO.xls (Speed, 2026-11-25). Reglas del usuario:
 - Documento Número = AAMM + consecutivo de 3 cifras de las facturas que se van contabilizando en ese mes (2608001).
+  Las cuentas de cobro van como Tipo DS y Prefijo DSS, con su propio consecutivo (2026-11-25).
 - Fecha = la fecha de cargue en World Office (la digita contabilidad antes de descargar).
 - Tercero interno y externo = NIT del proveedor sin dígito de verificación.
 - Una línea por producto.
@@ -63,9 +64,11 @@ class Fila:
     nota_detalle: str
     centro_costos: str
     codigo_centro: str = ""
+    tipo: str = "FC"  # facturas FC / FC; cuentas de cobro DS / DSS
+    prefijo: str = "FC"
 
 
-def excel(filas: list[Fila], fecha: date, empresa: str, tipo: str, prefijo: str, bodega: str, unidad: str) -> bytes:
+def excel(filas: list[Fila], fecha: date, empresa: str, bodega: str, unidad: str) -> bytes:
     libro = xlwt.Workbook(encoding="utf-8")
     hoja = libro.add_sheet(HOJA)
     negrita = xlwt.easyxf("font: bold on")
@@ -75,7 +78,7 @@ def excel(filas: list[Fila], fecha: date, empresa: str, tipo: str, prefijo: str,
     col = {c: j for j, c in enumerate(COLUMNAS)}
     for i, f in enumerate(filas, start=1):
         valores = {
-            "Encab: Empresa": empresa, "Encab: Tipo Documento": tipo, "Encab: Prefijo": prefijo,
+            "Encab: Empresa": empresa, "Encab: Tipo Documento": f.tipo, "Encab: Prefijo": f.prefijo,
             "Encab: Documento Número": f.documento, "Encab: Tercero Interno": _numero(f.nit), "Encab: Tercero Externo": _numero(f.nit),
             "Encab: Pref Dto Ext": f.prefijo_ext, "Encab: No. Dto Ext": _numero(f.numero_ext), "Encab: Nota": f.nota,
             "Encab: FormaPago": f.forma_pago, "Encab: Verificado": -1, "Encab: Anulado": 0,

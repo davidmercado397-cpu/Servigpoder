@@ -74,7 +74,7 @@ def registrar(db: Session, f: dian.Factura, *, leida_con: str = "xml", origen: s
     if hay_terceros and not db.scalar(select(CtbTercero.id).where(CtbTercero.nit == f.emisor_nit)):
         avisos.append(f"El proveedor NIT {f.emisor_nit} no está en el listado de terceros de World Office: créelo antes de cargar el plano")
     fac = CtbFactura(
-        cufe=f.cufe[:120], tipo=f.tipo, estado=estado, motivo_aparte=motivo[:300], leida_con=leida_con, origen=origen,
+        cufe=f.cufe[:120], tipo=f.tipo, cuenta_cobro=f.cuenta_cobro, estado=estado, motivo_aparte=motivo[:300], leida_con=leida_con, origen=origen,
         correo_de=correo_de[:200], correo_asunto=correo_asunto[:300], correo_fecha=correo_fecha,
         prefijo=f.prefijo, numero=f.numero, fecha_emision=f.fecha_emision, fecha_vencimiento=f.fecha_vencimiento,
         forma_pago=f.forma_pago, moneda=f.moneda, emisor_nit=f.emisor_nit, emisor_dv=f.emisor_dv, emisor_nombre=f.emisor_nombre,
@@ -189,11 +189,12 @@ def faltantes(fac: CtbFactura) -> list[str]:
 
 # --- Plano y contabilización ------------------------------------------------------------------------
 
-def _base_consecutivo(db: Session, fecha: date) -> int:
-    """El último consecutivo usado en el mes de `fecha` por facturas ya contabilizadas."""
-    nums = db.scalars(select(CtbFactura.documento_numero).where(CtbFactura.estado == CONTABILIZADA,
-                                                                CtbFactura.documento_numero.is_not(None)))
-    return max((plano.consecutivo(n, fecha) for n in nums), default=0)
+def _base_consecutivo(db: Session, fecha: date, cuenta_cobro: bool, ultimo_wo: int | None) -> int:
+    """El último consecutivo usado en el mes de `fecha` en esa serie (FC o DS): por las ya contabilizadas aquí o el
+    último número que se registró en World Office (Configuración)."""
+    nums = db.scalars(select(CtbFactura.documento_numero).where(
+        CtbFactura.estado == CONTABILIZADA, CtbFactura.documento_numero.is_not(None), CtbFactura.cuenta_cobro.is_(cuenta_cobro)))
+    return max([plano.consecutivo(n, fecha) for n in nums] + [plano.consecutivo(ultimo_wo, fecha)])
 
 
 def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int | None) -> tuple[bytes, CtbPlano, list[CtbFactura]]:
@@ -204,19 +205,23 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     if not facturas:
         raise ValueError("No hay facturas listas para el plano")
     c = config(db)
-    base = _base_consecutivo(db, fecha)
+    # Cada serie lleva su consecutivo: facturas (FC) y cuentas de cobro (DS)
+    siguiente = {False: _base_consecutivo(db, fecha, False, c.ultimo_fc), True: _base_consecutivo(db, fecha, True, c.ultimo_ds)}
     filas, items = [], []
-    for i, fac in enumerate(facturas, start=1):
-        numero = plano.documento(fecha, base + i)
-        items.append({"factura_id": fac.id, "documento": numero})
+    for fac in facturas:
+        siguiente[fac.cuenta_cobro] += 1
+        numero = plano.documento(fecha, siguiente[fac.cuenta_cobro])
+        tipo, prefijo = (c.tipo_documento_ds, c.prefijo_ds) if fac.cuenta_cobro else (c.tipo_documento, c.prefijo)
+        items.append({"factura_id": fac.id, "documento": numero, "serie": tipo})
         for x in fac.lineas:
             filas.append(plano.Fila(
                 documento=numero, nit=fac.emisor_nit, prefijo_ext=fac.prefijo, numero_ext=fac.numero, nota=fac.nota,
                 forma_pago=fac.forma_pago, fecha_emision=fac.fecha_emision, producto=x.producto, cantidad=float(x.cantidad),
                 iva=round(float(x.iva_pct) / 100, 4), valor_unitario=float(x.valor_unitario), vencimiento=fac.fecha_vencimiento,
                 nota_detalle=x.nota, centro_costos=x.centro_costos,
-                codigo_centro=db.scalar(select(CtbCentroCostos.codigo).where(CtbCentroCostos.nombre == x.centro_costos)) or ""))
-    contenido = plano.excel(filas, fecha, c.empresa_nombre, c.tipo_documento, c.prefijo, c.bodega, c.unidad)
+                codigo_centro=db.scalar(select(CtbCentroCostos.codigo).where(CtbCentroCostos.nombre == x.centro_costos)) or "",
+                tipo=tipo, prefijo=prefijo))
+    contenido = plano.excel(filas, fecha, c.empresa_nombre, c.bodega, c.unidad)
     p = CtbPlano(fecha=fecha, items=items, usuario_id=usuario_id)
     db.add(p)
     db.flush()
@@ -229,8 +234,9 @@ def contabilizar(db: Session, p: CtbPlano, ids: list[int], usuario_id: int | Non
     elegidas = [i for i in ids if i in por_id]
     if not elegidas:
         raise ValueError("Elija las facturas del plano que quedaron contabilizadas")
-    usados = set(db.scalars(select(CtbFactura.documento_numero).where(CtbFactura.estado == CONTABILIZADA)))
-    choque = [por_id[i] for i in elegidas if por_id[i] in usados]
+    usados = set(db.execute(select(CtbFactura.cuenta_cobro, CtbFactura.documento_numero).where(CtbFactura.estado == CONTABILIZADA)).all())
+    serie = {f.id: f.cuenta_cobro for f in db.scalars(select(CtbFactura).where(CtbFactura.id.in_(elegidas)))}
+    choque = [por_id[i] for i in elegidas if (serie.get(i, False), por_id[i]) in usados]
     if choque:
         raise ValueError(f"El documento {choque[0]} ya está usado por otra factura contabilizada: descargue un plano nuevo")
     ahora = datetime.now(timezone.utc)

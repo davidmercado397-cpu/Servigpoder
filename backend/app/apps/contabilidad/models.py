@@ -40,6 +40,12 @@ class CtbConfig(BaseEmpresa):
     empresa_nit: Mapped[str] = mapped_column(String(20), default="900259118")
     tipo_documento: Mapped[str] = mapped_column(String(10), default="FC")
     prefijo: Mapped[str] = mapped_column(String(10), default="FC")
+    # Cuentas de cobro: otro tipo de documento y prefijo, con su propio consecutivo
+    tipo_documento_ds: Mapped[str] = mapped_column(String(10), default="DS", server_default="DS")
+    prefijo_ds: Mapped[str] = mapped_column(String(10), default="DSS", server_default="DSS")
+    # Último número ya usado en World Office por serie (para seguir el consecutivo del mes). Vacío = ninguno
+    ultimo_fc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ultimo_ds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bodega: Mapped[str] = mapped_column(String(60), default="Principal")
     unidad: Mapped[str] = mapped_column(String(20), default="Und.")
 
@@ -50,6 +56,8 @@ class CtbFactura(BaseEmpresa):
     id: Mapped[int] = mapped_column(primary_key=True)
     cufe: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     tipo: Mapped[str] = mapped_column(String(20), default="factura")  # factura | nota_credito | nota_debito
+    # Cuenta de cobro (el documento viene titulado así): en el plano va como DS / DSS, con su propio consecutivo
+    cuenta_cobro: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     estado: Mapped[str] = mapped_column(String(20), default=PENDIENTE, index=True)
     motivo_aparte: Mapped[str] = mapped_column(String(300), default="")
     # Cómo se leyó: xml (exacto) | ia (PDF o imagen leídos por la IA: verificar)

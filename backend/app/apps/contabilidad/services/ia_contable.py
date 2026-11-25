@@ -23,8 +23,9 @@ Si dudas, escoge lo más probable y explícalo en "dudas". Responde SOLO un JSON
 
 INSTRUCCIONES_LEER = """Lees una factura electrónica colombiana (PDF o imagen) y devuelves sus datos EXACTOS como aparecen.
 No inventes: si un dato no aparece, null. Valores como números (sin $ ni puntos de miles; decimales con punto).
+"es_cuenta_de_cobro": true si el documento está titulado «Cuenta de cobro» (no factura electrónica); si no, false.
 Responde SOLO un JSON:
-{"cufe": "…", "tipo": "factura|nota_credito|nota_debito", "prefijo": "…", "numero": "…", "fecha_emision": "AAAA-MM-DD",
+{"es_cuenta_de_cobro": false, "cufe": "…", "tipo": "factura|nota_credito|nota_debito", "prefijo": "…", "numero": "…", "fecha_emision": "AAAA-MM-DD",
  "fecha_vencimiento": "AAAA-MM-DD", "forma_pago": "Contado|Credito", "emisor_nit": "sin DV", "emisor_dv": "…",
  "emisor_nombre": "…", "comprador_nit": "sin DV", "comprador_nombre": "…", "subtotal": 0, "iva": 0, "total": 0,
  "lineas": [{"codigo": "…", "descripcion": "…", "cantidad": 1, "valor_unitario": 0, "subtotal": 0, "iva_pct": 19, "iva_valor": 0}]}"""
@@ -93,5 +94,5 @@ def leer_pdf(nombre: str, contenido: bytes, modelo: str = "") -> Factura:
         emisor_nit=solo_nit(str(d.get("emisor_nit"))), emisor_dv=str(d.get("emisor_dv") or "")[:2],
         emisor_nombre=str(d.get("emisor_nombre") or "")[:200], comprador_nit=solo_nit(str(d.get("comprador_nit") or "")),
         comprador_nombre=str(d.get("comprador_nombre") or "")[:200], subtotal=_n(d.get("subtotal")), iva=_n(d.get("iva")),
-        total=_n(d.get("total")), lineas=lineas,
+        total=_n(d.get("total")), lineas=lineas, cuenta_cobro=d.get("es_cuenta_de_cobro") is True,
     )

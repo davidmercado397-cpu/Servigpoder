@@ -35,7 +35,7 @@ export default function DetalleFactura() {
     setOcupado(lista ? "lista" : "guardar");
     try {
       const r = await api<FacturaCompleta>(`/contabilidad/facturas/${f!.id}`, { method: "PUT", json: {
-        nota: f!.nota, lista, lineas: f!.lineas.map((l) => ({ id: l.id, producto: l.producto, centro_costos: l.centro_costos, nota: l.nota })) } });
+        nota: f!.nota, lista, cuenta_cobro: f!.cuenta_cobro, lineas: f!.lineas.map((l) => ({ id: l.id, producto: l.producto, centro_costos: l.centro_costos, nota: l.nota })) } });
       setF(r);
       setMsg({ tipo: "ok", texto: lista ? "Lista: sale en el próximo plano." : "Guardada." });
     } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
@@ -53,7 +53,7 @@ export default function DetalleFactura() {
       <div className="flex flex-wrap items-start gap-3">
         <Link href="/contabilidad" className="mt-1 text-slate-400 hover:text-slate-600"><ArrowLeft className="h-5 w-5" /></Link>
         <div>
-          <h1 className="text-2xl font-bold text-marca-900">Factura {f.prefijo}{f.numero}</h1>
+          <h1 className="text-2xl font-bold text-marca-900">{f.cuenta_cobro ? "Cuenta de cobro" : "Factura"} {f.prefijo}{f.numero}</h1>
           <p className="text-sm text-slate-500">{f.emisor_nombre} · NIT {f.emisor_nit}{f.emisor_dv ? `-${f.emisor_dv}` : ""} · emitida {fecha(f.fecha_emision)}
             · vence {fecha(f.fecha_vencimiento)} · {f.forma_pago}</p>
           <p className="text-xs text-slate-400">Comprador: {f.comprador_nombre} (NIT {f.comprador_nit}) · {f.origen === "correo" ? `correo de ${f.correo_de}` : "cargada a mano"}
@@ -82,8 +82,14 @@ export default function DetalleFactura() {
       {f.avisos.length > 0 && <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900"><ul className="ml-4 list-disc">{f.avisos.map((a, i) => <li key={i}>{a}</li>)}</ul></div>}
 
       <section className="tarjeta space-y-3 p-4">
-        <div className="max-w-xl"><label className="label">Nota del documento (encabezado)</label>
-          <input className="input" maxLength={300} disabled={!editable} value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} placeholder="Ej.: COMPRA DE VUELO" /></div>
+        <div className="flex flex-wrap items-end gap-6">
+          <div className="w-full max-w-xl"><label className="label">Nota del documento (encabezado)</label>
+            <input className="input" maxLength={300} disabled={!editable} value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} placeholder="Ej.: COMPRA DE VUELO" /></div>
+          <label className="flex items-center gap-2 pb-2 text-sm" title="En el plano va como Tipo DS y Prefijo DSS, con su propio consecutivo">
+            <input type="checkbox" disabled={!editable} checked={f.cuenta_cobro} onChange={(e) => setF({ ...f, cuenta_cobro: e.target.checked })} />
+            Es cuenta de cobro (en el plano: DS / DSS)
+          </label>
+        </div>
         <div className="overflow-x-auto">
           <table className="tabla text-sm">
             <thead><tr><th>#</th><th>Producto de la factura</th><th className="text-right">Cant.</th><th className="text-right">Valor unitario</th><th className="text-right">IVA</th>

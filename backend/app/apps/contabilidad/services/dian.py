@@ -55,6 +55,7 @@ class Factura:
     total: float
     retenciones: dict = field(default_factory=dict)
     lineas: list[Linea] = field(default_factory=list)
+    cuenta_cobro: bool = False  # el documento viene titulado «cuenta de cobro»
 
 
 @dataclass
@@ -207,6 +208,7 @@ def leer_xml(contenido: bytes) -> Factura:
         subtotal=_num(totales, "LineExtensionAmount"), iva=round(iva, 2),
         total=_num(totales, "PayableAmount") or _num(totales, "TaxInclusiveAmount"),
         retenciones={k: round(v, 2) for k, v in retenciones.items()}, lineas=lineas,
+        cuenta_cobro=any("cuenta de cobro" in (n.text or "").lower() for n in doc.iter() if _local(n.tag) in ("Note", "Title")),
     )
 
 

@@ -248,3 +248,35 @@ def test_config_del_buzon(speed, db):
         s.commit()
     r = speed.post(f"{API}/buzon/leer")
     assert r.status_code == 502 and "contraseña de aplicación" in r.json()["error"]["message"]
+
+
+def test_cuentas_de_cobro_y_consecutivo_desde_world_office(speed):
+    # En World Office las facturas quedaron en 2608008: la siguiente de agosto es la 2608009
+    speed.put(f"{API}/config", json={"empresa_nombre": "SPEED SECURITY LTDA", "empresa_nit": SPEED_NIT, "ultimo_fc": 2608008})
+    hechas = []
+    for n, cufe in (("1", "a"), ("2", "b"), ("3", "c")):
+        f = _cargar(speed, zip_factura(numero=n, cufe=cufe)).json()["data"]["nuevas"][0]
+        d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+        speed.put(f"{API}/facturas/{f['id']}", json={"nota": "COMPRA", "lista": True, "cuenta_cobro": n == "3", "lineas": [
+            {"id": x["id"], "producto": "515515", "centro_costos": "Administracion", "nota": "x"} for x in d["lineas"]]})
+        hechas.append(f["id"])
+    assert speed.get(f"{API}/facturas/{hechas[2]}").json()["data"]["cuenta_cobro"]
+    r = speed.post(f"{API}/plano", json={"fecha": "2026-08-31"})
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
+    filas = [dict(zip(plano.COLUMNAS, hoja.row_values(i))) for i in range(1, hoja.nrows)]
+    docs = {(f["Encab: Tipo Documento"], f["Encab: Prefijo"], f["Encab: Documento Número"]) for f in filas}
+    # Facturas FC siguen en 2608009 y 2608010; la cuenta de cobro va como DS / DSS con su propio consecutivo
+    assert docs == {("FC", "FC", 2608009), ("FC", "FC", 2608010), ("DS", "DSS", 2608001)}
+    # En otro mes el consecutivo empieza de nuevo
+    r = speed.post(f"{API}/plano", json={"fecha": "2026-11-05"})
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
+    assert {hoja.row_values(i)[3] for i in range(1, hoja.nrows)} == {2611001, 2611002}
+    # Una cuenta de cobro y una factura pueden tener el mismo número (son series distintas)
+    p = speed.get(f"{API}/planos").json()["data"][0]
+    assert speed.post(f"{API}/planos/{p['id']}/contabilizar", json={"ids": hechas}).json()["data"]["contabilizadas"] == 3
+    assert {f["serie"] for f in p["facturas"]} == {"FC", "DS"}
+
+
+def test_cuenta_de_cobro_reconocida_en_el_xml():
+    xml = factura_xml().replace("<cbc:IssueDate>", "<cbc:Note>CUENTA DE COBRO No. 15</cbc:Note><cbc:IssueDate>")
+    assert dian.leer_xml(xml.encode()).cuenta_cobro and not dian.leer_xml(factura_xml().encode()).cuenta_cobro

@@ -100,7 +100,8 @@ export default function FacturasRecibidas() {
               <tr key={f.id} className="hover:bg-slate-50">
                 <td><Link className="font-medium text-marca-700 hover:underline" href={`/contabilidad/facturas/${f.id}`}>{f.prefijo}{f.numero}</Link>
                   {f.leida_con === "ia" && <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-800">leída por IA</span>}
-                  {f.tipo !== "factura" && <span className="ml-1 rounded bg-slate-200 px-1 text-xs">{f.tipo.replace("_", " ")}</span>}</td>
+                  {f.tipo !== "factura" && <span className="ml-1 rounded bg-slate-200 px-1 text-xs">{f.tipo.replace("_", " ")}</span>}
+                  {f.cuenta_cobro && <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-800">cuenta de cobro (DS)</span>}</td>
                 <td><p>{f.emisor_nombre}</p><p className="text-xs text-slate-500">NIT {f.emisor_nit}{f.emisor_dv ? `-${f.emisor_dv}` : ""}</p></td>
                 <td>{fecha(f.fecha_emision)}</td>
                 <td className="text-right tabular-nums">{plata(f.subtotal)}</td>

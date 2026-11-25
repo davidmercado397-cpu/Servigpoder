@@ -10,7 +10,7 @@ export type Linea = {
   iva_pct: number; iva_valor: number; producto: string; centro_costos: string; nota: string;
 };
 export type Factura = {
-  id: number; estado: Estado; tipo: string; motivo_aparte: string; leida_con: string; origen: string; prefijo: string; numero: string;
+  id: number; estado: Estado; tipo: string; cuenta_cobro: boolean; motivo_aparte: string; leida_con: string; origen: string; prefijo: string; numero: string;
   fecha_emision: string | null; fecha_vencimiento: string | null; emisor_nit: string; emisor_dv: string; emisor_nombre: string;
   comprador_nit: string; comprador_nombre: string; subtotal: number; iva: number; total: number; nota: string; avisos: string[];
   faltantes: string[]; documento_numero: number | null; fecha_contable: string | null; correo_de: string; correo_asunto: string;

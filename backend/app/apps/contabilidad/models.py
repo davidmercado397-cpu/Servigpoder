@@ -30,8 +30,7 @@ class CtbConfig(BaseEmpresa):
     correo: Mapped[str] = mapped_column(String(160), default="")
     clave_cifrada: Mapped[str | None] = mapped_column(Text, nullable=True)
     carpeta: Mapped[str] = mapped_column(String(80), default="INBOX")
-    activo: Mapped[bool] = mapped_column(Boolean, default=False)  # leer el buzón automáticamente
-    minutos: Mapped[int] = mapped_column(Integer, default=5)
+    # El correo se revisa solo cuando el usuario lo pide (botón «Revisar correo»): no hay lectura automática
     ultima_lectura: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ultimo_error: Mapped[str] = mapped_column(Text, default="")
     # Datos de la empresa y fijos del plano de World Office

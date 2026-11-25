@@ -222,8 +222,8 @@ def test_la_ia_propone_cuenta_y_centro(speed, monkeypatch):
 
 
 def test_config_del_buzon(speed, db):
-    r = speed.put(f"{API}/config", json={"correo": "facturas.speed@gmail.com", "clave": "abcd efgh ijkl mnop", "activo": True,
-                                         "minutos": 5, "empresa_nombre": "SPEED SECURITY LTDA", "empresa_nit": "900.259.118-4"})
+    r = speed.put(f"{API}/config", json={"correo": "facturas.speed@gmail.com", "clave": "abcd efgh ijkl mnop",
+                                         "empresa_nombre": "SPEED SECURITY LTDA", "empresa_nit": "900.259.118-4"})
     assert r.status_code == 200, r.text
     c = r.json()["data"]
     assert c["clave_guardada"] and c["empresa_nit"] == "900259118" and "abcd" not in r.text
@@ -234,6 +234,13 @@ def test_config_del_buzon(speed, db):
     with db() as s:
         s.bind = s.get_bind().execution_options(**traduccion("emp_speed"))
         assert descifrar_secreto(s.get(CtbConfig, 1).clave_cifrada, "imap") == "abcdefghijklmnop"
-    # Sin clave no se puede activar la lectura automática en un buzón nuevo (aquí ya hay clave guardada: se conserva)
-    assert speed.put(f"{API}/config", json={"correo": "facturas.speed@gmail.com", "activo": True, "empresa_nombre": "SPEED SECURITY LTDA",
+    # Guardar sin clave conserva la que había
+    assert speed.put(f"{API}/config", json={"correo": "facturas.speed@gmail.com", "empresa_nombre": "SPEED SECURITY LTDA",
                                             "empresa_nit": "900259118"}).json()["data"]["clave_guardada"]
+    # Sin buzón configurado del todo, «Revisar correo» explica qué falta
+    with db() as s:
+        s.bind = s.get_bind().execution_options(**traduccion("emp_speed"))
+        s.get(CtbConfig, 1).clave_cifrada = None
+        s.commit()
+    r = speed.post(f"{API}/buzon/leer")
+    assert r.status_code == 502 and "contraseña de aplicación" in r.json()["error"]["message"]

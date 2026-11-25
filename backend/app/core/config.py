@@ -64,9 +64,6 @@ class Settings(BaseSettings):
     smtp_clave: str = ""
     smtp_remitente: str = ""  # vacío = el mismo usuario
 
-    # Tareas automáticas en segundo plano (lectura del buzón de Contabilidad). Apagadas en las pruebas.
-    tareas_automaticas: bool = True
-
     admin_username: str = "admin"
     admin_password: str = "admin"
     admin_nombre: str = "Administrador"

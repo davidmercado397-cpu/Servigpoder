@@ -10,7 +10,7 @@ import { usePermiso } from "@/lib/sesion";
 
 type Resumen = {
   conteos: Partial<Record<Estado, number>>; ia: boolean; productos: number; terceros: number;
-  buzon: { correo: string; activo: boolean; minutos: number; ultima_lectura: string | null; ultimo_error: string };
+  buzon: { correo: string; clave_guardada: boolean; ultima_lectura: string | null; ultimo_error: string };
 };
 
 export default function FacturasRecibidas() {
@@ -34,7 +34,7 @@ export default function FacturasRecibidas() {
     setOcupado("buzon");
     try {
       const r = await api<{ correos: number; facturas: number }>("/contabilidad/buzon/leer", { method: "POST" });
-      setMsg({ tipo: "ok", texto: r.correos ? `Se leyeron ${r.correos} correo(s) y llegaron ${r.facturas} factura(s) nueva(s).` : "No hay correos nuevos." });
+      setMsg({ tipo: "ok", texto: r.correos ? `Se revisaron ${r.correos} correo(s) nuevo(s) y llegaron ${r.facturas} factura(s).` : "No hay correos nuevos en el buzón." });
       cargar();
     } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
   }
@@ -56,8 +56,9 @@ export default function FacturasRecibidas() {
     <div className="space-y-4">
       <Titulo accion={revisar && (
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secundario" disabled={!!ocupado || !b?.correo} onClick={leerBuzon} title={b?.correo ? "" : "Configure el buzón primero"}>
-            {ocupado === "buzon" ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />} Leer el buzón ahora
+          <button className="btn-primario" disabled={!!ocupado || !b?.correo || !b?.clave_guardada} onClick={leerBuzon}
+            title={b?.correo && b?.clave_guardada ? "Lee los correos nuevos del buzón y registra sus facturas" : "Configure el buzón primero"}>
+            {ocupado === "buzon" ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />} {ocupado === "buzon" ? "Revisando el correo…" : "Revisar correo"}
           </button>
           <button className="btn-secundario" disabled={!!ocupado} onClick={() => input.current?.click()}>
             {ocupado === "cargar" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Cargar facturas
@@ -68,12 +69,12 @@ export default function FacturasRecibidas() {
 
       {b && (
         <p className="-mt-4 text-sm text-slate-500">
-          {b.correo ? <>Buzón <b>{b.correo}</b> · {b.activo ? `se lee cada ${b.minutos} min` : "lectura automática apagada"} · última lectura {fechaHora(b.ultima_lectura)}</>
+          {b.correo ? <>Buzón <b>{b.correo}</b> · última revisión {fechaHora(b.ultima_lectura)} · el correo se revisa con el botón «Revisar correo»</>
             : <>El buzón de Gmail no está configurado: <Link className="text-marca-700 underline" href="/contabilidad/configuracion">configúrelo aquí</Link>. Mientras tanto puede cargar las facturas a mano.</>}
           {!resumen?.ia && " · La IA no está configurada: las cuentas se proponen solo con lo usado antes con cada proveedor."}
         </p>
       )}
-      {b?.ultimo_error && <Alerta>Última lectura del buzón: {b.ultimo_error}</Alerta>}
+      {b?.ultimo_error && <Alerta>Última revisión del correo: {b.ultimo_error}</Alerta>}
       {resumen && !resumen.productos && <Alerta tipo="info">Cargue el catálogo de cuentas de World Office en Configuración para que la IA proponga la cuenta de cada producto.</Alerta>}
       {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
 

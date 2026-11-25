@@ -67,7 +67,7 @@ def _fac(db: DbSession, factura_id: int) -> CtbFactura:
 def resumen(db: DbSession, _=Depends(require(VER))):
     c = servicio.config(db)
     ia.cargar(db)
-    return ok({"conteos": servicio.conteos(db), "buzon": {"correo": c.correo, "activo": c.activo, "minutos": c.minutos,
+    return ok({"conteos": servicio.conteos(db), "buzon": {"correo": c.correo, "clave_guardada": bool(c.clave_cifrada),
                                                          "ultima_lectura": c.ultima_lectura.isoformat() if c.ultima_lectura else None,
                                                          "ultimo_error": c.ultimo_error},
                "ia": ia.configurada(), "productos": db.query(CtbProducto).count(), "terceros": db.query(CtbTercero).count()})
@@ -250,7 +250,7 @@ def contabilizar(plano_id: int, data: ContabilizarIn, request: Request, db: DbSe
 
 @router.post("/buzon/leer", response_model=ApiResponse[dict], dependencies=[Depends(limitar("ctb_buzon", 6, 60))])
 async def leer_buzon(request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
-    """Lee ya el buzón (sin esperar la revisión automática)."""
+    """Revisa el correo: la única forma de leer el buzón (no hay revisión automática; la ejecuta el usuario)."""
     try:
         registros = await run_in_threadpool(buzon.leer, db)
     except buzon.ErrorBuzon as e:
@@ -272,7 +272,7 @@ def correos(db: DbSession, _=Depends(require(VER))):
 
 def _config_out(db: DbSession) -> dict:
     c = servicio.config(db)
-    return {"correo": c.correo, "clave_guardada": bool(c.clave_cifrada), "carpeta": c.carpeta, "activo": c.activo, "minutos": c.minutos,
+    return {"correo": c.correo, "clave_guardada": bool(c.clave_cifrada), "carpeta": c.carpeta,
             "ultima_lectura": c.ultima_lectura.isoformat() if c.ultima_lectura else None, "ultimo_error": c.ultimo_error,
             "empresa_nombre": c.empresa_nombre, "empresa_nit": c.empresa_nit, "tipo_documento": c.tipo_documento,
             "prefijo": c.prefijo, "bodega": c.bodega, "unidad": c.unidad}
@@ -287,8 +287,6 @@ class ConfigIn(BaseModel):
     correo: str = Field(default="", max_length=160, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
     clave: str = Field(default="", max_length=100)  # contraseña de aplicación de Gmail; vacía = se conserva
     carpeta: str = Field(default="INBOX", min_length=1, max_length=80)
-    activo: bool = False
-    minutos: int = Field(default=5, ge=1, le=1440)
     empresa_nombre: str = Field(min_length=2, max_length=160)
     empresa_nit: str = Field(min_length=5, max_length=20, pattern=r"^[\d.\-\s]+$")
     tipo_documento: str = Field(default="FC", min_length=1, max_length=10)
@@ -300,15 +298,13 @@ class ConfigIn(BaseModel):
 @router.put("/config", response_model=ApiResponse[dict])
 def guardar_config(data: ConfigIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
     c = servicio.config(db)
-    for k in ("correo", "carpeta", "activo", "minutos", "empresa_nombre", "tipo_documento", "prefijo", "bodega", "unidad"):
+    for k in ("correo", "carpeta", "empresa_nombre", "tipo_documento", "prefijo", "bodega", "unidad"):
         v = getattr(data, k)
         setattr(c, k, v.strip() if isinstance(v, str) else v)
     c.empresa_nit = servicio.dian.solo_nit(data.empresa_nit)
     if data.clave.strip():
         c.clave_cifrada = cifrar_secreto(data.clave.replace(" ", ""), "imap")  # Gmail la muestra en grupos de 4
-    if c.activo and (not c.correo or not c.clave_cifrada):
-        raise ApiError(422, "Para leer el buzón automáticamente falta el correo o la contraseña de aplicación")
-    auditar(db, request, "ctb_config", actual.id, correo=c.correo, activo=c.activo, clave_nueva=bool(data.clave.strip()))
+    auditar(db, request, "ctb_config", actual.id, correo=c.correo, clave_nueva=bool(data.clave.strip()))
     db.commit()
     return ok(_config_out(db))
 

@@ -1,7 +1,4 @@
-import asyncio
-import contextlib
 import logging
-from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
@@ -18,23 +15,7 @@ settings = get_settings()
 # OWASP A05: la documentación interactiva solo en desarrollo
 docs = not settings.produccion
 
-@asynccontextmanager
-async def ciclo_de_vida(_: FastAPI):
-    """Tareas en segundo plano: la lectura automática del buzón de Contabilidad."""
-    tareas = []
-    if settings.tareas_automaticas:
-        from app.apps.contabilidad.services.vigilante import bucle
-
-        tareas.append(asyncio.create_task(bucle()))
-    yield
-    for t in tareas:
-        t.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await t
-
-
 app = FastAPI(
-    lifespan=ciclo_de_vida,
     title="Plataforma Servigpoder",
     version="0.2.0",
     docs_url="/api/docs" if docs else None,

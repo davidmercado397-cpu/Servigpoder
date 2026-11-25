@@ -8,7 +8,7 @@ import { fechaHora, type Centro } from "@/lib/contabilidad";
 import { usePermiso } from "@/lib/sesion";
 
 type Config = {
-  correo: string; clave_guardada: boolean; carpeta: string; activo: boolean; minutos: number; ultima_lectura: string | null; ultimo_error: string;
+  correo: string; clave_guardada: boolean; carpeta: string; ultima_lectura: string | null; ultimo_error: string;
   empresa_nombre: string; empresa_nit: string; tipo_documento: string; prefijo: string; bodega: string; unidad: string;
 };
 
@@ -67,7 +67,7 @@ export default function ConfiguracionContabilidad() {
 
       <section className="tarjeta space-y-3 p-4">
         <h2 className="font-semibold text-slate-800">Buzón de Gmail</h2>
-        <p className="text-sm text-slate-500">Las facturas que lleguen a este correo se leen solas. En la cuenta de Gmail: active la verificación en dos pasos y cree una
+        <p className="text-sm text-slate-500">Las facturas que lleguen a este correo se registran cuando se da <b>«Revisar correo»</b> en Facturas recibidas. En la cuenta de Gmail: active la verificación en dos pasos y cree una
           <b> contraseña de aplicación</b> (Cuenta de Google → Seguridad → Contraseñas de aplicaciones); esa es la que va aquí, no la clave normal.
           Los correos y sus adjuntos no se guardan: se leen y quedan marcados como leídos.</p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -76,10 +76,8 @@ export default function ConfiguracionContabilidad() {
             <input className="input" type="password" autoComplete="new-password" disabled={!puede} value={clave} onChange={(e) => setClave(e.target.value)}
               placeholder={c.clave_guardada ? "Vacía = se conserva" : "16 letras"} /></div>
           <div><label className="label">Carpeta</label><input className="input" disabled={!puede} value={c.carpeta} onChange={(e) => set({ carpeta: e.target.value })} /></div>
-          <div><label className="label">Leer cada (minutos)</label><input className="input" type="number" min={1} disabled={!puede} value={c.minutos} onChange={(e) => set({ minutos: Number(e.target.value) || 5 })} /></div>
         </div>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!puede} checked={c.activo} onChange={(e) => set({ activo: e.target.checked })} /> Leer el buzón automáticamente</label>
-        <p className="text-xs text-slate-500">Última lectura: {fechaHora(c.ultima_lectura)}{c.ultimo_error ? ` · error: ${c.ultimo_error}` : ""}</p>
+        <p className="text-xs text-slate-500">Última revisión: {fechaHora(c.ultima_lectura)}{c.ultimo_error ? ` · error: ${c.ultimo_error}` : ""}</p>
       </section>
 
       <section className="tarjeta space-y-3 p-4">

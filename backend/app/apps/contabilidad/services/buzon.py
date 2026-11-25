@@ -1,6 +1,6 @@
 """Lectura del buzón de Gmail por IMAP (con contraseña de aplicación).
 
-Se leen los correos no leídos; de cada uno se toman los adjuntos (zip, XML, PDF) en memoria, se registran las
+Se leen cuando el usuario lo pide (botón «Revisar correo»), los correos no leídos; de cada uno se toman los adjuntos (zip, XML, PDF) en memoria, se registran las
 facturas y el correo queda marcado como leído. Ni el correo ni sus adjuntos se guardan: solo un registro de qué
 pasó con él (remitente, asunto, resultado).
 """

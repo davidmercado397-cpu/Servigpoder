@@ -271,3 +271,21 @@ def test_corregir_puesto_a_mano_no_lo_pisa_la_importacion(admin):
     # Volver a la ciudad de la ubicación
     x = admin.patch(f"/api/capacidad/maestros/puestos/{p['id']}", json={"ciudad": ""}).json()["data"]
     assert x["ciudad"] == "CALI" and x["ciudad_manual"] is None
+
+
+def test_puestos_ordenados_y_ciudad_de_varios(admin):
+    importar_matriz(admin)
+    lista = lambda q: admin.get(f"/api/capacidad/maestros/puestos?{q}&tamano=150").json()["data"]  # noqa: E731
+    codigos = [p["codigo"] for p in lista("orden=puesto&direccion=desc")]
+    assert codigos == sorted(codigos, reverse=True)
+    assert admin.get("/api/capacidad/maestros/puestos?orden=otro").status_code == 422
+    ids = [p["id"] for p in lista("q=86")]
+    r = admin.post("/api/capacidad/maestros/puestos/ciudad", json={"ids": ids, "ciudad": "barranquilla"})
+    assert r.status_code == 200 and r.json()["data"]["actualizados"] == len(ids) == 2
+    assert {p["ciudad"] for p in lista("q=86")} == {"BARRANQUILLA"}
+    por_ciudad = [p["ciudad"] for p in lista("orden=ciudad&direccion=asc")]
+    assert por_ciudad.index("BARRANQUILLA") < por_ciudad.index("CALI")
+    # Vacía: vuelven a la ciudad de su ubicación
+    admin.post("/api/capacidad/maestros/puestos/ciudad", json={"ids": ids, "ciudad": ""})
+    assert {(p["ciudad"], p["ciudad_manual"]) for p in lista("q=86")} == {("CALI", None)}
+    assert admin.post("/api/capacidad/maestros/puestos/ciudad", json={"ids": [999999], "ciudad": "X"}).status_code == 404

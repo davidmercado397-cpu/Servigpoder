@@ -2,6 +2,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
 from app.api.deps import DbSession, require
@@ -11,6 +12,7 @@ from app.core.respuestas import ApiError, ApiResponse, ok
 from app.apps.capacidad.models import (
     MatrizPeriodo, ProgramacionCarga, ProgramacionFila, Puesto, PuestoEquivalencia, Ubicacion, Usuario,
 )
+from app.apps.capacidad.models.maestros import ciudad_puesto
 from app.apps.capacidad.models.matriz import CERRADO
 from app.apps.capacidad.schemas.f1 import (
     EquivalenciaIn, EquivalenciaOut, PorAclarar, PuestoCrear, PuestoCreado, PuestoEditar, PuestoOut, UbicacionOut,
@@ -21,11 +23,44 @@ from app.apps.capacidad.services.codigos import limpiar
 router = APIRouter(prefix="/maestros", tags=["maestros"])
 
 
+# Columnas por las que se ordena la lista de puestos (clic en el título)
+ORDENES_PUESTO = {
+    "poder": lambda: Ubicacion.codigo, "ubicacion": lambda: Ubicacion.nombre, "puesto": lambda: Puesto.codigo,
+    "descripcion": lambda: Puesto.descripcion, "ciudad": ciudad_puesto, "tipo": lambda: Puesto.tipo,
+    "excluido": lambda: Puesto.excluido, "activo": lambda: Puesto.activo,
+}
+
+
 @router.get("/puestos", response_model=ApiResponse[list[PuestoOut]])
 def listar_puestos(db: DbSession, p: Paginacion, q: str = Query("", max_length=100),
-                   _=Depends(require("capacidad.maestros.ver"))):
-    puestos, meta = paginar_consulta(db, _consulta_puestos(q), p)
+                   orden: str = Query("poder", pattern="^(poder|ubicacion|puesto|descripcion|ciudad|tipo|excluido|activo)$"),
+                   direccion: str = Query("asc", pattern="^(asc|desc)$"), _=Depends(require("capacidad.maestros.ver"))):
+    columna = ORDENES_PUESTO[orden]()
+    columna = columna.desc().nulls_last() if direccion == "desc" else columna.asc().nulls_last()
+    consulta = _consulta_puestos(q).order_by(None).order_by(columna, Ubicacion.codigo, Puesto.codigo)
+    puestos, meta = paginar_consulta(db, consulta, p)
     return ok(puestos, **meta)
+
+
+class CiudadVarios(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    # Ciudad para todos; "" = cada uno vuelve a la de su ubicación
+    ciudad: str = Field(default="", max_length=80)
+
+
+@router.post("/puestos/ciudad", response_model=ApiResponse[dict])
+def cambiar_ciudad_varios(data: CiudadVarios, request: Request, db: DbSession,
+                          actual: Usuario = Depends(require("capacidad.maestros.gestionar"))):
+    """Cambia la ciudad de varios puestos a la vez (queda corregida a mano: la importación no la pisa)."""
+    ciudad = data.ciudad.strip().upper() or None
+    puestos = list(db.scalars(select(Puesto).where(Puesto.id.in_(set(data.ids)))).unique())
+    if len(puestos) != len(set(data.ids)):
+        raise ApiError(404, "Algunos puestos no existen")
+    for puesto in puestos:
+        puesto.ciudad_manual = None if ciudad == (puesto.ubicacion.ciudad or "").strip().upper() or None else ciudad
+    auditar(db, request, "puestos_ciudad", actual.id, ciudad=ciudad, puestos=sorted(p.codigo for p in puestos))
+    db.commit()
+    return ok({"actualizados": len(puestos), "ciudad": ciudad})
 
 
 @router.get("/puestos/opciones", response_model=ApiResponse[list[PuestoOut]])

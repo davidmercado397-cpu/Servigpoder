@@ -152,13 +152,48 @@ function PuestosTab() {
   const [q, setQ] = useState("");
   const [puestos, setPuestos] = useState<Puesto[]>([]);
   const [meta, setMeta] = useState<MetaPagina | null>(null);
-  const pag = usePaginacion([q]);
+  // Orden por la columna escogida (clic en el título; otro clic invierte)
+  const [orden, setOrden] = useState<{ campo: string; direccion: "asc" | "desc" }>({ campo: "poder", direccion: "asc" });
+  const pag = usePaginacion([q, orden.campo, orden.direccion]);
+  // Puestos marcados para cambiarles la ciudad a la vez (se conservan al pasar de página)
+  const [marcados, setMarcados] = useState<Map<number, string>>(new Map());
+  const [ciudadVarios, setCiudadVarios] = useState("");
 
   const cargar = useCallback(async () => {
-    const r = await apiEnvelope<Puesto[]>(`/capacidad/maestros/puestos?q=${encodeURIComponent(q)}&${pag.query}`);
+    const params = new URLSearchParams({ q, orden: orden.campo, direccion: orden.direccion });
+    const r = await apiEnvelope<Puesto[]>(`/capacidad/maestros/puestos?${params}&${pag.query}`);
     setPuestos(r.data ?? []);
     setMeta(metaDe(r));
-  }, [q, pag.query]);
+  }, [q, orden, pag.query]);
+
+  function ordenar(campo: string) {
+    setOrden((o) => ({ campo, direccion: o.campo === campo && o.direccion === "asc" ? "desc" : "asc" }));
+  }
+
+  function marcar(lista: Puesto[], si: boolean) {
+    setMarcados((m) => {
+      const n = new Map(m);
+      lista.forEach((p) => (si ? n.set(p.id, p.codigo) : n.delete(p.id)));
+      return n;
+    });
+  }
+
+  async function cambiarCiudadVarios() {
+    setError("");
+    const ciudad = ciudadVarios.trim();
+    const texto = ciudad ? `la ciudad ${ciudad.toUpperCase()}` : "la ciudad de su ubicación (se quita la corrección)";
+    if (!confirm(`¿Poner ${texto} a ${marcados.size} puesto(s)?`)) return;
+    try {
+      const r = await api<{ actualizados: number }>("/capacidad/maestros/puestos/ciudad", { method: "POST", json: { ids: [...marcados.keys()], ciudad } });
+      setAviso(`${r.actualizados} puesto(s) quedaron con ${texto}. Al importar la matriz o la programación de SIESA se respeta.`);
+      setMarcados(new Map());
+      setCiudadVarios("");
+      cargar();
+      api<string[]>("/capacidad/maestros/ciudades").then(setCiudades).catch(() => {});
+    } catch (e) {
+      setError(mensajeError(e));
+    }
+  }
 
   useEffect(() => {
     const t = setTimeout(cargar, 250);
@@ -215,14 +250,44 @@ function PuestosTab() {
           onCancelar={() => setCreando(false)}
         />
       )}
+      {puedeEditar && marcados.size > 0 && (
+        <div className="tarjeta flex flex-wrap items-center gap-3 border-marca-200 bg-marca-50 p-3 text-sm">
+          <span className="font-semibold text-marca-900">{marcados.size} puesto(s) seleccionado(s)</span>
+          <span className="max-w-xs truncate text-xs text-slate-500" title={[...marcados.values()].join(", ")}>{[...marcados.values()].join(", ")}</span>
+          <input className="input w-48" list="ciudades-puesto" placeholder="Nueva ciudad" value={ciudadVarios} onChange={(e) => setCiudadVarios(e.target.value)}
+            title="Vacía = cada puesto vuelve a la ciudad de su ubicación" />
+          <button className="btn-primario" onClick={cambiarCiudadVarios}>Cambiar ciudad</button>
+          <button className="btn-secundario" onClick={() => setMarcados(new Map())}>Quitar selección</button>
+        </div>
+      )}
       <div className="tarjeta overflow-x-auto">
         <table className="tabla">
           <thead>
-            <tr><th>PODER</th><th>Ubicación</th><th>Puesto</th><th>Descripción</th><th>Ciudad</th><th>Tipo</th><th>Excluido</th><th>Activo</th><th /></tr>
+            <tr>
+              {puedeEditar && (
+                <th className="w-8"><input type="checkbox" title="Seleccionar todos los de esta página"
+                  checked={puestos.length > 0 && puestos.every((p) => marcados.has(p.id))}
+                  onChange={(e) => marcar(puestos, e.target.checked)} /></th>
+              )}
+              {([["poder", "PODER"], ["ubicacion", "Ubicación"], ["puesto", "Puesto"], ["descripcion", "Descripción"], ["ciudad", "Ciudad"],
+                ["tipo", "Tipo"], ["excluido", "Excluido"], ["activo", "Activo"]] as const).map(([campo, titulo]) => (
+                <th key={campo}>
+                  <button type="button" className="inline-flex items-center gap-1 hover:text-marca-700" onClick={() => ordenar(campo)}
+                    title={`Ordenar por ${titulo.toLowerCase()}`}>
+                    {titulo}
+                    <span className={orden.campo === campo ? "text-marca-600" : "text-slate-300"}>
+                      {orden.campo === campo && orden.direccion === "desc" ? "▼" : "▲"}
+                    </span>
+                  </button>
+                </th>
+              ))}
+              <th />
+            </tr>
           </thead>
           <tbody>
             {puestos.map((p) => edicion?.id === p.id ? (
               <tr key={p.id} className="bg-marca-50">
+                {puedeEditar && <td />}
                 <td className="font-mono">{p.ubicacion.codigo}</td>
                 <td>{p.ubicacion.nombre}</td>
                 <td><input className="input w-28 font-mono" value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} /></td>
@@ -236,7 +301,8 @@ function PuestosTab() {
                 </td>
               </tr>
             ) : (
-              <tr key={p.id}>
+              <tr key={p.id} className={marcados.has(p.id) ? "bg-marca-50/60" : ""}>
+                {puedeEditar && <td><input type="checkbox" checked={marcados.has(p.id)} onChange={(e) => marcar([p], e.target.checked)} /></td>}
                 <td className="font-mono">{p.ubicacion.codigo}</td>
                 <td>{p.ubicacion.nombre}</td>
                 <td className="font-mono font-semibold">{p.codigo}</td>

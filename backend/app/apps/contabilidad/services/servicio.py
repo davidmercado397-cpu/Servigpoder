@@ -116,7 +116,7 @@ def procesar_archivos(db: Session, archivos: list[tuple[str, bytes]], **meta) ->
                 res.errores.append(f"{nombre}: vino solo el PDF y la IA no está configurada para leerlo")
                 continue
             try:
-                f = ia_contable.leer_pdf(nombre, datos)
+                f = ia_contable.leer_pdf(nombre, datos, config(db).modelo)
             except (dian.FacturaInvalida, ia.IAError) as e:
                 res.errores.append(f"{nombre}: {getattr(e, 'mensaje', str(e))}")
                 continue
@@ -149,7 +149,7 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
                 {"proveedor": fac.emisor_nombre, "nit": fac.emisor_nit,
                  "lineas": [{"n": x.orden, "descripcion": x.descripcion, "cantidad": float(x.cantidad), "valor": float(x.subtotal),
                              "iva_pct": float(x.iva_pct)} for x in fac.lineas]},
-                productos, centros, hist)
+                productos, centros, hist, config(db).modelo)
         except ia.IAError as e:
             log.warning("La IA no propuso la factura %s: %s", fac.id, e.mensaje)
             fac.avisos = [*fac.avisos, f"La IA no pudo proponer la cuenta: {e.mensaje}"]

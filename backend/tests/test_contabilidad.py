@@ -210,6 +210,10 @@ def test_la_ia_propone_cuenta_y_centro(speed, monkeypatch):
         return httpx.Response(200, json={"model": "m", "usage": {}, "choices": [{"message": {"content": json.dumps(respuesta)}}]})
 
     monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
+    # El modelo de Contabilidad es propio del desarrollo
+    c = speed.put(f"{API}/config", json={"modelo": "google/gemini-3.8-flash", "empresa_nombre": "SPEED SECURITY LTDA", "empresa_nit": SPEED_NIT})
+    assert c.json()["data"]["modelo"] == "google/gemini-3.8-flash"
+    assert speed.put(f"{API}/config", json={"modelo": "no es un modelo", "empresa_nombre": "X S", "empresa_nit": SPEED_NIT}).status_code == 422
     speed.post(f"{API}/productos/importar", files={"archivo": ("c.xlsx", xlsx([["515515 PASAJES AEREOS"]]),
                                                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     f = _cargar(speed, zip_factura(cufe="con-ia")).json()["data"]["nuevas"][0]
@@ -218,7 +222,7 @@ def test_la_ia_propone_cuenta_y_centro(speed, monkeypatch):
     # Lo que no está en los catálogos no se acepta
     assert d["lineas"][1]["producto"] == "" and d["lineas"][1]["centro_costos"] == ""
     assert any("cargo de la agencia" in a for a in d["avisos"])
-    assert "515515 PASAJES AEREOS" in pedidos[0]["messages"][0]["content"]
+    assert "515515 PASAJES AEREOS" in pedidos[0]["messages"][0]["content"] and pedidos[0]["model"] == "google/gemini-3.8-flash"
 
 
 def test_config_del_buzon(speed, db):

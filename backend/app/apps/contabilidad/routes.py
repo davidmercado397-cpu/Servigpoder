@@ -272,7 +272,9 @@ def correos(db: DbSession, _=Depends(require(VER))):
 
 def _config_out(db: DbSession) -> dict:
     c = servicio.config(db)
+    ia.cargar(db)
     return {"correo": c.correo, "clave_guardada": bool(c.clave_cifrada), "carpeta": c.carpeta,
+            "modelo": c.modelo, "modelo_general": ia.ajustes().modelo, "ia": ia.configurada(),
             "ultima_lectura": c.ultima_lectura.isoformat() if c.ultima_lectura else None, "ultimo_error": c.ultimo_error,
             "empresa_nombre": c.empresa_nombre, "empresa_nit": c.empresa_nit, "tipo_documento": c.tipo_documento,
             "prefijo": c.prefijo, "bodega": c.bodega, "unidad": c.unidad}
@@ -287,6 +289,8 @@ class ConfigIn(BaseModel):
     correo: str = Field(default="", max_length=160, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
     clave: str = Field(default="", max_length=100)  # contraseña de aplicación de Gmail; vacía = se conserva
     carpeta: str = Field(default="INBOX", min_length=1, max_length=80)
+    # Modelo de OpenRouter para este desarrollo (vacío = el general de la plataforma)
+    modelo: str = Field(default="", max_length=150, pattern=r"^$|^[A-Za-z0-9._\-]+/[A-Za-z0-9._:\-]+$")
     empresa_nombre: str = Field(min_length=2, max_length=160)
     empresa_nit: str = Field(min_length=5, max_length=20, pattern=r"^[\d.\-\s]+$")
     tipo_documento: str = Field(default="FC", min_length=1, max_length=10)
@@ -298,13 +302,13 @@ class ConfigIn(BaseModel):
 @router.put("/config", response_model=ApiResponse[dict])
 def guardar_config(data: ConfigIn, request: Request, db: DbSession, actual: Usuario = Depends(require(CONFIGURAR))):
     c = servicio.config(db)
-    for k in ("correo", "carpeta", "empresa_nombre", "tipo_documento", "prefijo", "bodega", "unidad"):
+    for k in ("correo", "carpeta", "modelo", "empresa_nombre", "tipo_documento", "prefijo", "bodega", "unidad"):
         v = getattr(data, k)
         setattr(c, k, v.strip() if isinstance(v, str) else v)
     c.empresa_nit = servicio.dian.solo_nit(data.empresa_nit)
     if data.clave.strip():
         c.clave_cifrada = cifrar_secreto(data.clave.replace(" ", ""), "imap")  # Gmail la muestra en grupos de 4
-    auditar(db, request, "ctb_config", actual.id, correo=c.correo, clave_nueva=bool(data.clave.strip()))
+    auditar(db, request, "ctb_config", actual.id, correo=c.correo, modelo=c.modelo or "(general)", clave_nueva=bool(data.clave.strip()))
     db.commit()
     return ok(_config_out(db))
 
@@ -316,6 +320,14 @@ async def probar_buzon(db: DbSession, _=Depends(require(CONFIGURAR))):
     except buzon.ErrorBuzon as e:
         raise ApiError(502, str(e)) from e
     return ok({"sin_leer": sin_leer})
+
+
+@router.get("/modelos", response_model=ApiResponse[list[dict]])
+def modelos(_=Depends(require(CONFIGURAR))):
+    """Modelos de OpenRouter (misma cuenta de la plataforma) para elegir el de Contabilidad."""
+    from app.api.routes.ia import lista_modelos
+
+    return ok(lista_modelos())
 
 
 @router.get("/productos", response_model=ApiResponse[list[dict]])

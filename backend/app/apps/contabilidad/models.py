@@ -31,6 +31,8 @@ class CtbConfig(BaseEmpresa):
     clave_cifrada: Mapped[str | None] = mapped_column(Text, nullable=True)
     carpeta: Mapped[str] = mapped_column(String(80), default="INBOX")
     # El correo se revisa solo cuando el usuario lo pide (botón «Revisar correo»): no hay lectura automática
+    # Modelo de IA para leer y proponer las facturas (solo este desarrollo; vacío = el modelo general de la plataforma)
+    modelo: Mapped[str] = mapped_column(String(150), default="", server_default="")
     ultima_lectura: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ultimo_error: Mapped[str] = mapped_column(Text, default="")
     # Datos de la empresa y fijos del plano de World Office

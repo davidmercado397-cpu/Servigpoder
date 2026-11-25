@@ -7,8 +7,10 @@ import { api, mensajeError, subirArchivo } from "@/lib/api";
 import { fechaHora, type Centro } from "@/lib/contabilidad";
 import { usePermiso } from "@/lib/sesion";
 
+type Modelo = { id: string; nombre: string; precio_entrada: number | null; precio_salida: number | null; imagenes: boolean; archivos: boolean };
 type Config = {
   correo: string; clave_guardada: boolean; carpeta: string; ultima_lectura: string | null; ultimo_error: string;
+  modelo: string; modelo_general: string; ia: boolean;
   empresa_nombre: string; empresa_nit: string; tipo_documento: string; prefijo: string; bodega: string; unidad: string;
 };
 
@@ -20,6 +22,7 @@ export default function ConfiguracionContabilidad() {
   const [nuevoCentro, setNuevoCentro] = useState("");
   const [conteo, setConteo] = useState({ productos: 0, terceros: 0 });
   const [ocupado, setOcupado] = useState("");
+  const [modelos, setModelos] = useState<Modelo[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const cuentas = useRef<HTMLInputElement>(null);
   const terceros = useRef<HTMLInputElement>(null);
@@ -30,9 +33,11 @@ export default function ConfiguracionContabilidad() {
     api<{ productos: number; terceros: number }>("/contabilidad/resumen").then((r) => setConteo({ productos: r.productos, terceros: r.terceros })).catch(() => {});
   }
   useEffect(recargar, []);
+  useEffect(() => { if (puede) api<Modelo[]>("/contabilidad/modelos").then(setModelos).catch(() => {}); }, [puede]);
 
   if (!c) return msg ? <Alerta>{msg.texto}</Alerta> : <p className="text-sm text-slate-500">Cargando…</p>;
   const set = (x: Partial<Config>) => setC({ ...c, ...x });
+  const elegido = modelos.find((m) => m.id === (c.modelo || c.modelo_general));
 
   async function hacer(clave_: string, fn: () => Promise<string>) {
     setMsg(null);
@@ -78,6 +83,24 @@ export default function ConfiguracionContabilidad() {
           <div><label className="label">Carpeta</label><input className="input" disabled={!puede} value={c.carpeta} onChange={(e) => set({ carpeta: e.target.value })} /></div>
         </div>
         <p className="text-xs text-slate-500">Última revisión: {fechaHora(c.ultima_lectura)}{c.ultimo_error ? ` · error: ${c.ultimo_error}` : ""}</p>
+      </section>
+
+      <section className="tarjeta space-y-3 p-4">
+        <h2 className="font-semibold text-slate-800">Modelo de IA para las facturas</h2>
+        <p className="text-sm text-slate-500">Usa la misma cuenta de OpenRouter de la plataforma (la clave está en Administración → Inteligencia artificial).
+          Este modelo solo aplica a Contabilidad: lee las facturas que llegan solo en PDF y propone la cuenta, el centro de costos y las notas.</p>
+        {!c.ia && <Alerta tipo="info">La IA no está configurada en la plataforma: sin ella, las cuentas se proponen solo con lo usado antes con cada proveedor.</Alerta>}
+        <div className="max-w-xl">
+          <label className="label">Modelo</label>
+          <input className="input font-mono" list="modelos-contabilidad" disabled={!puede} placeholder={c.modelo_general} value={c.modelo}
+            onChange={(e) => set({ modelo: e.target.value.trim() })} />
+          <datalist id="modelos-contabilidad">{modelos.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}</datalist>
+          <p className="mt-1 text-xs text-slate-500">
+            {!c.modelo && <>Vacío = el modelo general de la plataforma (<span className="font-mono">{c.modelo_general}</span>). </>}
+            {elegido && <>Entrada US${elegido.precio_entrada ?? "—"} y salida US${elegido.precio_salida ?? "—"} por millón de tokens · {elegido.archivos || elegido.imagenes
+              ? "lee PDF e imágenes" : "no lee PDF: las facturas que lleguen sin XML no se podrán leer"}.</>}
+          </p>
+        </div>
       </section>
 
       <section className="tarjeta space-y-3 p-4">

@@ -127,8 +127,13 @@ def _precio(v) -> float | None:
 @router.get("/modelos", response_model=ApiResponse[list[dict]])
 def modelos(_=Depends(require(GESTIONAR))):
     """Modelos disponibles en el proveedor, con su precio y si leen imágenes o PDF."""
+    return ok(lista_modelos())
+
+
+def lista_modelos() -> list[dict]:
+    """La lista de modelos del proveedor (también la usan los desarrollos que eligen su propio modelo)."""
     if _modelos["lista"] and time.time() - _modelos["cuando"] < 3600:
-        return ok(_modelos["lista"])
+        return _modelos["lista"]
     url = get_settings().ia_base_url.rstrip("/") + "/models"
     try:
         with ia.cliente_http() as http:
@@ -147,4 +152,4 @@ def modelos(_=Depends(require(GESTIONAR))):
                       "imagenes": "image" in entradas, "archivos": "file" in entradas})
     lista.sort(key=lambda x: x["id"])
     _modelos.update(cuando=time.time(), lista=lista)
-    return ok(lista)
+    return lista

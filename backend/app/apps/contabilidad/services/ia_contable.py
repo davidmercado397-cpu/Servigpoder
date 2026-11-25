@@ -43,13 +43,13 @@ def _json(texto: str) -> dict:
     return datos
 
 
-def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict]) -> dict:
+def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict], modelo: str = "") -> dict:
     """factura: {"proveedor", "nit", "lineas": [{"n", "descripcion", "cantidad", "valor", "iva_pct"}]}"""
     contexto = ("CATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos)
                 + "\n\nCENTROS DE COSTOS: " + json.dumps(centros, ensure_ascii=False)
                 + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:30], ensure_ascii=False))
     r = ia.completar(INSTRUCCIONES_PROPONER + "\n\n" + contexto,
-                     [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], max_tokens=4000)
+                     [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo=modelo, max_tokens=4000)
     return _json(r.texto)
 
 
@@ -67,11 +67,11 @@ def _fecha(v) -> date | None:
         return None
 
 
-def leer_pdf(nombre: str, contenido: bytes) -> Factura:
+def leer_pdf(nombre: str, contenido: bytes, modelo: str = "") -> Factura:
     """Factura sin XML: la IA lee el PDF. Se marca para verificar."""
     parte = {"type": "file", "file": {"filename": nombre, "file_data": "data:application/pdf;base64," + base64.b64encode(contenido).decode()}}
     r = ia.completar(INSTRUCCIONES_LEER, [{"role": "user", "content": [{"type": "text", "text": f"Archivo: {nombre}"}, parte]}],
-                     max_tokens=6000)
+                     modelo=modelo, max_tokens=6000)
     d = _json(r.texto)
     lineas = []
     for i, x in enumerate(d.get("lineas") or [], start=1):

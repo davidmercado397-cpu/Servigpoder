@@ -1,16 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Titulo } from "@/components/ui";
-import { api, mensajeError } from "@/lib/api";
-import { fechaHora } from "@/lib/contabilidad";
+import { apiEnvelope, mensajeError } from "@/lib/api";
+import { TAMANOS, fechaHora } from "@/lib/contabilidad";
 
 type Correo = { id: number; de: string; asunto: string; fecha: string | null; resultado: string; facturas: number; leido_en: string | null };
 
 export default function CorreosLeidos() {
   const [lista, setLista] = useState<Correo[] | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => { api<Correo[]>("/contabilidad/correos").then(setLista).catch((e) => setError(mensajeError(e))); }, []);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([], TAMANOS);
+  useEffect(() => {
+    apiEnvelope<Correo[]>(`/contabilidad/correos?${pag.query}`).then((r) => { setLista(r.data ?? []); setMeta(metaDe(r)); })
+      .catch((e) => setError(mensajeError(e)));
+  }, [pag.query]);
   return (
     <div className="space-y-4">
       <Titulo>Correos leídos</Titulo>
@@ -30,6 +36,7 @@ export default function CorreosLeidos() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} tamanos={TAMANOS} />
       </div>
     </div>
   );

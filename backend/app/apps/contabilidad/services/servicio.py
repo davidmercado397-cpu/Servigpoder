@@ -231,6 +231,20 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     return contenido, p, facturas
 
 
+def eliminar_plano(db: Session, p: CtbPlano) -> list[CtbFactura]:
+    """Borra un plano (por si algo salió mal). Las facturas que se marcaron contabilizadas con él vuelven a «lista»,
+    sin número de documento, para salir en el próximo plano."""
+    devueltas = []
+    for x in p.items:
+        fac = db.get(CtbFactura, x["factura_id"])
+        if fac is not None and fac.estado == CONTABILIZADA and fac.documento_numero == x["documento"] and fac.fecha_contable == p.fecha:
+            fac.estado, fac.documento_numero, fac.fecha_contable = LISTA, None, None
+            fac.contabilizada_en = fac.contabilizada_por = None
+            devueltas.append(fac)
+    db.delete(p)
+    return devueltas
+
+
 def contabilizar(db: Session, p: CtbPlano, ids: list[int], usuario_id: int | None) -> list[CtbFactura]:
     """Marca como contabilizadas las facturas del plano que quedaron en World Office: no vuelven a salir en el plano."""
     por_id = {x["factura_id"]: x["documento"] for x in p.items}

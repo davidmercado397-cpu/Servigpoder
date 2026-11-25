@@ -2,8 +2,9 @@
 
 from datetime import date
 from io import BytesIO
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -19,6 +20,7 @@ from app.core import ia
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.config import get_settings
+from app.core.paginacion import Pagina, paginar_consulta
 from app.core.rate_limit import limitar
 from app.core.respuestas import ApiError, ApiResponse, ok
 from app.core.security import cifrar_secreto
@@ -27,6 +29,16 @@ from app.models import Usuario
 router = APIRouter(prefix="/contabilidad", tags=["contabilidad"])
 VER, REVISAR, CONFIGURAR = "contabilidad.ver", "contabilidad.revisar", "contabilidad.configurar"
 MAX_ARCHIVOS = 10
+TAMANOS = (20, 50, 100)  # filas por página de los listados de este desarrollo
+
+
+def _pagina(pagina: int = Query(1, ge=1, le=1_000_000), tamano: int = Query(20)) -> Pagina:
+    if tamano not in TAMANOS:
+        raise ApiError(422, "El tamaño de página debe ser 20, 50 o 100", "DATOS_INVALIDOS")
+    return Pagina(pagina, tamano)
+
+
+PaginaCtb = Annotated[Pagina, Depends(_pagina)]
 
 
 def _linea(x) -> dict:
@@ -74,12 +86,17 @@ def resumen(db: DbSession, _=Depends(require(VER))):
 
 
 @router.get("/facturas", response_model=ApiResponse[list[dict]])
-def facturas(db: DbSession, estado: str = PENDIENTE, _=Depends(require(VER))):
+def facturas(db: DbSession, p: PaginaCtb, estado: str = PENDIENTE, todas: bool = False, _=Depends(require(VER))):
+    """Por páginas de 20, 50 o 100. `todas`: sin paginar (el plano necesita todas las listas para elegirlas)."""
     if estado not in ESTADOS:
         raise ApiError(422, "Estado no válido")
     q = select(CtbFactura).where(CtbFactura.estado == estado)
-    q = q.order_by(CtbFactura.contabilizada_en.desc() if estado == CONTABILIZADA else CtbFactura.id.desc()).limit(500)
-    return ok([_factura(f) for f in db.scalars(q)])
+    q = q.order_by(CtbFactura.contabilizada_en.desc() if estado == CONTABILIZADA else CtbFactura.id.desc(), CtbFactura.id.desc())
+    if todas:
+        lista = list(db.scalars(q.limit(2000)))
+        return ok([_factura(f) for f in lista], total=len(lista), pagina=1, tamano=len(lista), paginas=1)
+    items, meta = paginar_consulta(db, q, p)
+    return ok([_factura(f) for f in items], **meta)
 
 
 @router.get("/facturas/{factura_id}", response_model=ApiResponse[dict])
@@ -220,19 +237,33 @@ def descargar_plano(data: PlanoIn, request: Request, db: DbSession, actual: Usua
 
 
 @router.get("/planos", response_model=ApiResponse[list[dict]])
-def planos(db: DbSession, _=Depends(require(VER))):
+def planos(db: DbSession, pag: PaginaCtb, _=Depends(require(VER))):
     out = []
-    for p in db.scalars(select(CtbPlano).order_by(CtbPlano.id.desc()).limit(30)):
+    items, meta = paginar_consulta(db, select(CtbPlano).order_by(CtbPlano.id.desc()), pag)
+    for p in items:
         ids = [x["factura_id"] for x in p.items]
         facs = {f.id: f for f in db.scalars(select(CtbFactura).where(CtbFactura.id.in_(ids)))} if ids else {}
         out.append({"id": p.id, "fecha": p.fecha.isoformat(), "creado_en": p.creado_en.isoformat() if p.creado_en else None,
                     "facturas": [{"documento": x["documento"], "serie": x.get("serie", "FC"), **(_factura(facs[x["factura_id"]]) if x["factura_id"] in facs else
                                                                  {"id": x["factura_id"], "estado": "eliminada"})} for x in p.items]})
-    return ok(out)
+    return ok(out, **meta)
 
 
 class ContabilizarIn(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+@router.delete("/planos/{plano_id}", response_model=ApiResponse[dict])
+def eliminar_plano(plano_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
+    """Elimina un plano descargado; si con él se marcaron facturas contabilizadas, vuelven a «lista»."""
+    p = db.get(CtbPlano, plano_id)
+    if p is None:
+        raise ApiError(404, "Plano no encontrado")
+    devueltas = servicio.eliminar_plano(db, p)
+    auditar(db, request, "ctb_plano_eliminado", actual.id, plano=plano_id, fecha=p.fecha.isoformat(),
+            devueltas=[f"{f.prefijo}{f.numero}" for f in devueltas])
+    db.commit()
+    return ok({"devueltas": len(devueltas)})
 
 
 @router.post("/planos/{plano_id}/contabilizar", response_model=ApiResponse[dict])
@@ -265,10 +296,11 @@ async def leer_buzon(request: Request, db: DbSession, actual: Usuario = Depends(
 
 
 @router.get("/correos", response_model=ApiResponse[list[dict]])
-def correos(db: DbSession, _=Depends(require(VER))):
+def correos(db: DbSession, p: PaginaCtb, _=Depends(require(VER))):
+    items, meta = paginar_consulta(db, select(CtbCorreo).order_by(CtbCorreo.id.desc()), p)
     return ok([{"id": r.id, "de": r.de, "asunto": r.asunto, "fecha": r.fecha.isoformat() if r.fecha else None,
                 "resultado": r.resultado, "facturas": r.facturas, "leido_en": r.creado_en.isoformat() if r.creado_en else None}
-               for r in db.scalars(select(CtbCorreo).order_by(CtbCorreo.id.desc()).limit(200))])
+               for r in items], **meta)
 
 
 # --- Configuración y catálogos ------------------------------------------------------------------------

@@ -1,5 +1,8 @@
 /** Tipos y utilidades del desarrollo Contabilidad (Speed). */
 
+/** Filas por página de los listados de Contabilidad */
+export const TAMANOS = [20, 50, 100] as const;
+
 export type Estado = "pendiente" | "lista" | "aparte" | "descartada" | "contabilizada";
 export const ESTADOS: [Estado, string][] = [
   ["pendiente", "Por revisar"], ["lista", "Listas para el plano"], ["aparte", "Aparte (confirmar)"],

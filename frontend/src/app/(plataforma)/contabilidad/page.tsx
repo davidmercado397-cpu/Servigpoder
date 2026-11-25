@@ -3,9 +3,10 @@
 import { AlertTriangle, Loader2, MailCheck, Upload } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Titulo } from "@/components/ui";
-import { api, mensajeError } from "@/lib/api";
-import { ESTADOS, fecha, fechaHora, plata, type Estado, type Factura } from "@/lib/contabilidad";
+import { api, apiEnvelope, mensajeError } from "@/lib/api";
+import { ESTADOS, TAMANOS, fecha, fechaHora, plata, type Estado, type Factura } from "@/lib/contabilidad";
 import { usePermiso } from "@/lib/sesion";
 
 type Resumen = {
@@ -18,6 +19,8 @@ export default function FacturasRecibidas() {
   const [estado, setEstado] = useState<Estado>("pendiente");
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [lista, setLista] = useState<Factura[] | null>(null);
+  const [meta, setMeta] = useState<MetaPagina | null>(null);
+  const pag = usePaginacion([estado], TAMANOS);
   const [ocupado, setOcupado] = useState<"" | "buzon" | "cargar">("");
   const [msg, setMsg] = useState<{ tipo: "ok" | "error" | "info"; texto: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -25,8 +28,9 @@ export default function FacturasRecibidas() {
   const cargar = useCallback(() => {
     api<Resumen>("/contabilidad/resumen").then(setResumen).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
     setLista(null);
-    api<Factura[]>(`/contabilidad/facturas?estado=${estado}`).then(setLista).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
-  }, [estado]);
+    apiEnvelope<Factura[]>(`/contabilidad/facturas?estado=${estado}&${pag.query}`)
+      .then((r) => { setLista(r.data ?? []); setMeta(metaDe(r)); }).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
+  }, [estado, pag.query]);
   useEffect(() => { cargar(); }, [cargar]);
 
   async function leerBuzon() {
@@ -117,6 +121,7 @@ export default function FacturasRecibidas() {
             ))}
           </tbody>
         </table>
+        <Paginador meta={meta} onPagina={pag.setPagina} onTamano={pag.setTamano} tamanos={TAMANOS} />
       </div>
     </div>
   );

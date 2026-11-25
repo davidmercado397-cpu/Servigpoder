@@ -1,11 +1,12 @@
 "use client";
 
-import { CheckCheck, Download, Loader2 } from "lucide-react";
+import { CheckCheck, Download, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Paginador, metaDe, usePaginacion, type MetaPagina } from "@/components/paginacion";
 import { Alerta, Titulo } from "@/components/ui";
-import { ApiError, api, mensajeError } from "@/lib/api";
-import { fecha, fechaHora, plata, type Factura } from "@/lib/contabilidad";
+import { ApiError, api, apiEnvelope, mensajeError } from "@/lib/api";
+import { TAMANOS, fecha, fechaHora, plata, type Factura } from "@/lib/contabilidad";
 import { usePermiso } from "@/lib/sesion";
 
 type Plano = { id: number; fecha: string; creado_en: string | null; facturas: (Factura & { documento: number; serie: string })[] };
@@ -19,15 +20,20 @@ export default function PlanoWorldOffice() {
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [marcar, setMarcar] = useState<Record<number, number[]>>({});
   const [ocupado, setOcupado] = useState("");
+  const [metaPlanos, setMetaPlanos] = useState<MetaPagina | null>(null);
+  const pagListas = usePaginacion([], TAMANOS);  // las listas se traen todas (para elegirlas) y se paginan aquí
+  const pagPlanos = usePaginacion([], TAMANOS);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
   const cargar = useCallback(() => {
-    api<Factura[]>("/contabilidad/facturas?estado=lista").then((l) => { setListas(l); setElegidas(l.map((f) => f.id)); }).catch(() => {});
-    api<Plano[]>("/contabilidad/planos").then((p) => {
+    api<Factura[]>("/contabilidad/facturas?estado=lista&todas=true").then((l) => { setListas(l); setElegidas(l.map((f) => f.id)); }).catch(() => {});
+    apiEnvelope<Plano[]>(`/contabilidad/planos?${pagPlanos.query}`).then((r) => {
+      const p = r.data ?? [];
       setPlanos(p);
+      setMetaPlanos(metaDe(r));
       setMarcar(Object.fromEntries(p.map((x) => [x.id, x.facturas.filter((f) => f.estado === "lista").map((f) => f.id)])));
     }).catch(() => {});
-  }, []);
+  }, [pagPlanos.query]);
   useEffect(() => { cargar(); }, [cargar]);
 
   async function descargar() {
@@ -61,8 +67,23 @@ export default function PlanoWorldOffice() {
       cargar();
     } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
   }
+  async function eliminar(p: Plano) {
+    const marcadas = p.facturas.filter((f) => f.estado === "contabilizada" && f.documento_numero === f.documento).length;
+    const aviso = marcadas ? `\n\n${marcadas} factura(s) se marcaron contabilizadas con este plano: vuelven a «lista» y saldrán en el próximo plano.` : "";
+    if (!confirm(`¿Eliminar el plano #${p.id} (cargue ${fecha(p.fecha)})?${aviso}`)) return;
+    setMsg(null);
+    setOcupado(`e${p.id}`);
+    try {
+      const r = await api<{ devueltas: number }>(`/contabilidad/planos/${p.id}`, { method: "DELETE" });
+      setMsg({ tipo: "ok", texto: `Plano #${p.id} eliminado${r.devueltas ? `: ${r.devueltas} factura(s) volvieron a «lista»` : ""}.` });
+      cargar();
+    } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
+  }
   const alternar = (lista: number[], id: number) => (lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]);
   const total = listas.filter((f) => elegidas.includes(f.id)).reduce((s, f) => s + f.total, 0);
+  const paginasListas = Math.max(1, Math.ceil(listas.length / pagListas.tamano));
+  const metaListas: MetaPagina = { total: listas.length, pagina: Math.min(pagListas.pagina, paginasListas), tamano: pagListas.tamano, paginas: paginasListas };
+  const listasVisibles = listas.slice((metaListas.pagina - 1) * metaListas.tamano, metaListas.pagina * metaListas.tamano);
 
   return (
     <div className="space-y-5">
@@ -86,7 +107,7 @@ export default function PlanoWorldOffice() {
             <thead><tr><th className="w-8" /><th>Factura</th><th>Proveedor</th><th>Emisión</th><th className="text-right">Productos</th><th className="text-right">Total</th></tr></thead>
             <tbody>
               {listas.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-400">No hay facturas listas. <Link className="text-marca-700 underline" href="/contabilidad">Revise las recibidas</Link>.</td></tr>}
-              {listas.map((f) => (
+              {listasVisibles.map((f) => (
                 <tr key={f.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setElegidas(alternar(elegidas, f.id))}>
                   <td><input type="checkbox" readOnly checked={elegidas.includes(f.id)} /></td>
                   <td>{f.prefijo}{f.numero}{f.cuenta_cobro && <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-800">DSS</span>}</td>
@@ -97,7 +118,16 @@ export default function PlanoWorldOffice() {
             </tbody>
           </table>
         </div>
-        {listas.length > 0 && <p className="text-right text-sm text-slate-600">{elegidas.length} factura(s) · total {plata(total)}</p>}
+        {listas.length > 0 && (
+          <>
+            <Paginador meta={metaListas} onPagina={pagListas.setPagina} onTamano={pagListas.setTamano} tamanos={TAMANOS} />
+            <div className="flex flex-wrap items-center justify-end gap-3 text-sm text-slate-600">
+              <button className="text-marca-700 hover:underline" onClick={() => setElegidas(listas.map((f) => f.id))}>Elegir todas</button>
+              <button className="text-marca-700 hover:underline" onClick={() => setElegidas([])}>Ninguna</button>
+              <span>{elegidas.length} de {listas.length} factura(s) elegidas · total {plata(total)}</span>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="tarjeta space-y-3 p-4">
@@ -109,8 +139,13 @@ export default function PlanoWorldOffice() {
             <div key={p.id} className="rounded-lg border border-slate-200 p-3">
               <div className="mb-2 flex flex-wrap items-center gap-3">
                 <p className="font-medium">Plano #{p.id} · cargue {fecha(p.fecha)} <span className="text-xs font-normal text-slate-500">(descargado {fechaHora(p.creado_en)})</span></p>
+                {revisar && (
+                  <button className="btn-secundario ml-auto px-3 py-1.5 text-sm text-red-700" disabled={!!ocupado} onClick={() => eliminar(p)} title="Eliminar este plano">
+                    {ocupado === `e${p.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Eliminar
+                  </button>
+                )}
                 {revisar && pendientes.length > 0 && (
-                  <button className="btn-primario ml-auto px-3 py-1.5 text-sm" disabled={!!ocupado || !(marcar[p.id] ?? []).length} onClick={() => contabilizar(p)}>
+                  <button className="btn-primario px-3 py-1.5 text-sm" disabled={!!ocupado || !(marcar[p.id] ?? []).length} onClick={() => contabilizar(p)}>
                     {ocupado === `p${p.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />} Marcar contabilizadas
                   </button>
                 )}
@@ -135,6 +170,7 @@ export default function PlanoWorldOffice() {
             </div>
           );
         })}
+        {planos.length > 0 && <Paginador meta={metaPlanos} onPagina={pagPlanos.setPagina} onTamano={pagPlanos.setTamano} tamanos={TAMANOS} />}
       </section>
     </div>
   );

@@ -168,6 +168,22 @@ def test_flujo_bandeja_plano_y_contabilizadas(speed):
     assert [p["facturas"][0]["documento"] for p in planos] == [2608002, 2608001]
 
 
+def test_listados_por_paginas(speed):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:  # 23 facturas en un solo zip
+        for i in range(23):
+            z.writestr(f"f{i}.xml", attached(factura_xml(numero=str(100 + i), cufe=f"p{i}")))
+    assert len(_cargar(speed, buf.getvalue()).json()["data"]["nuevas"]) == 23
+    r = speed.get(f"{API}/facturas?estado=pendiente").json()
+    assert len(r["data"]) == 20 and r["meta"]["extra"] == {"total": 23, "pagina": 1, "tamano": 20, "paginas": 2}
+    r = speed.get(f"{API}/facturas?estado=pendiente&pagina=2&tamano=20").json()
+    assert len(r["data"]) == 3
+    assert len(speed.get(f"{API}/facturas?estado=pendiente&tamano=50").json()["data"]) == 23
+    assert speed.get(f"{API}/facturas?estado=pendiente&tamano=30").status_code == 422
+    assert len(speed.get(f"{API}/facturas?estado=pendiente&todas=true").json()["data"]) == 23  # el plano las elige todas
+    assert speed.get(f"{API}/correos?tamano=100").json()["meta"]["extra"]["tamano"] == 100
+
+
 def test_otro_comprador_y_notas_van_aparte(speed):
     r = _cargar(speed, zip_factura(comprador_nit="900369097", cufe="c-servig"))
     f = r.json()["data"]["nuevas"][0]
@@ -275,6 +291,15 @@ def test_cuentas_de_cobro_y_consecutivo_desde_world_office(speed):
     p = speed.get(f"{API}/planos").json()["data"][0]
     assert speed.post(f"{API}/planos/{p['id']}/contabilizar", json={"ids": hechas}).json()["data"]["contabilizadas"] == 3
     assert {f["serie"] for f in p["facturas"]} == {"FC", "DSS"}
+    # Eliminar un plano: lo que se marcó contabilizado con él vuelve a «lista» (y la siguiente cuenta de cobro vuelve a ser la 346)
+    otro = speed.get(f"{API}/planos").json()["data"][1]
+    assert speed.delete(f"{API}/planos/{otro['id']}").json()["data"]["devueltas"] == 0  # el de agosto no se marcó
+    assert speed.delete(f"{API}/planos/{p['id']}").json()["data"]["devueltas"] == 3
+    assert {x["estado"] for x in speed.get(f"{API}/facturas?estado=lista").json()["data"]} == {"lista"}
+    assert len(speed.get(f"{API}/facturas?estado=lista").json()["data"]) == 3 and speed.get(f"{API}/planos").json()["data"] == []
+    r = speed.post(f"{API}/plano", json={"fecha": "2026-11-05"})
+    p = speed.get(f"{API}/planos").json()["data"][0]
+    speed.post(f"{API}/planos/{p['id']}/contabilizar", json={"ids": hechas})
     # La siguiente cuenta de cobro es la 347
     f = _cargar(speed, zip_factura(numero="4", cufe="d")).json()["data"]["nuevas"][0]
     d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]

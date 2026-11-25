@@ -118,10 +118,10 @@ export default function ConfiguracionContabilidad() {
           <div><label className="label">Cuentas de cobro: tipo de documento</label><input className="input" disabled={!puede} value={c.tipo_documento_ds} onChange={(e) => set({ tipo_documento_ds: e.target.value })} /></div>
           <div><label className="label">Cuentas de cobro: prefijo</label><input className="input" disabled={!puede} value={c.prefijo_ds} onChange={(e) => set({ prefijo_ds: e.target.value })} /></div>
           <div><label className="label">Cuentas de cobro: último número usado en World Office</label>
-            <input className="input" inputMode="numeric" disabled={!puede} value={c.ultimo_ds ?? ""} placeholder="Vacío = empieza en 001"
+            <input className="input" inputMode="numeric" disabled={!puede} value={c.ultimo_ds ?? ""} placeholder="Ej. 345"
               onChange={(e) => set({ ultimo_ds: e.target.value.replace(/\D/g, "") ? Number(e.target.value.replace(/\D/g, "")) : null })} /></div>
-          <p className="text-xs text-slate-500 sm:col-span-3">El número de documento es AAMM + consecutivo (2608009). El plano sigue desde el último número usado en el mismo
-            mes de la fecha de cargue; en un mes nuevo empieza en 001.</p>
+          <p className="text-xs text-slate-500 sm:col-span-3">Facturas: el número es AAMM + consecutivo (2608009); sigue desde el último usado en el mes de la fecha de
+            cargue y en un mes nuevo empieza en 001. Cuentas de cobro: número seguido que no reinicia (345, 346…).</p>
           <div><label className="label">Bodega</label><input className="input" disabled={!puede} value={c.bodega} onChange={(e) => set({ bodega: e.target.value })} /></div>
           <div><label className="label">Unidad de medida</label><input className="input" disabled={!puede} value={c.unidad} onChange={(e) => set({ unidad: e.target.value })} /></div>
         </div>

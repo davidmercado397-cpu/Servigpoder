@@ -190,10 +190,13 @@ def faltantes(fac: CtbFactura) -> list[str]:
 # --- Plano y contabilización ------------------------------------------------------------------------
 
 def _base_consecutivo(db: Session, fecha: date, cuenta_cobro: bool, ultimo_wo: int | None) -> int:
-    """El último consecutivo usado en el mes de `fecha` en esa serie (FC o DS): por las ya contabilizadas aquí o el
-    último número que se registró en World Office (Configuración)."""
-    nums = db.scalars(select(CtbFactura.documento_numero).where(
-        CtbFactura.estado == CONTABILIZADA, CtbFactura.documento_numero.is_not(None), CtbFactura.cuenta_cobro.is_(cuenta_cobro)))
+    """El último número usado en esa serie: por las ya contabilizadas aquí o el último que se registró en World Office
+    (Configuración). Facturas (FC): consecutivo del mes de `fecha` (AAMM + 001). Cuentas de cobro (DS): número seguido
+    que no reinicia con el mes (345, 346…)."""
+    nums = list(db.scalars(select(CtbFactura.documento_numero).where(
+        CtbFactura.estado == CONTABILIZADA, CtbFactura.documento_numero.is_not(None), CtbFactura.cuenta_cobro.is_(cuenta_cobro))))
+    if cuenta_cobro:
+        return max(nums + [ultimo_wo or 0])
     return max([plano.consecutivo(n, fecha) for n in nums] + [plano.consecutivo(ultimo_wo, fecha)])
 
 
@@ -210,7 +213,7 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     filas, items = [], []
     for fac in facturas:
         siguiente[fac.cuenta_cobro] += 1
-        numero = plano.documento(fecha, siguiente[fac.cuenta_cobro])
+        numero = siguiente[True] if fac.cuenta_cobro else plano.documento(fecha, siguiente[False])
         tipo, prefijo = (c.tipo_documento_ds, c.prefijo_ds) if fac.cuenta_cobro else (c.tipo_documento, c.prefijo)
         items.append({"factura_id": fac.id, "documento": numero, "serie": tipo})
         for x in fac.lineas:

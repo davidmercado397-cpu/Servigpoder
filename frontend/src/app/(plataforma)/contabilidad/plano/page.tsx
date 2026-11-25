@@ -72,7 +72,7 @@ export default function PlanoWorldOffice() {
       <section className="tarjeta space-y-3 p-4">
         <h2 className="font-semibold text-slate-800">1. Descargar el plano</h2>
         <p className="text-sm text-slate-500">Salen las facturas <b>listas</b> que aún no están contabilizadas: una fila por producto, con el número de documento
-          AAMM + consecutivo del mes (las facturas FC y las cuentas de cobro DS llevan cada una su consecutivo). Las que marque como contabilizadas ya no vuelven a salir.</p>
+          AAMM + consecutivo del mes en las facturas (FC) y número seguido en las cuentas de cobro (DS). Las que marque como contabilizadas ya no vuelven a salir.</p>
         <div className="flex flex-wrap items-end gap-3">
           <div><label className="label">Fecha de cargue en World Office</label>
             <input type="date" className="input" value={fechaWo} onChange={(e) => setFechaWo(e.target.value)} /></div>

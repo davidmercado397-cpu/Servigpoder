@@ -266,15 +266,15 @@ def test_cuentas_de_cobro_y_consecutivo_desde_world_office(speed):
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
     filas = [dict(zip(plano.COLUMNAS, hoja.row_values(i))) for i in range(1, hoja.nrows)]
     docs = {(f["Encab: Tipo Documento"], f["Encab: Prefijo"], f["Encab: Documento Número"]) for f in filas}
-    # Facturas FC siguen en 2608009 y 2608010; la cuenta de cobro va como DS / DSS con el 346
-    assert docs == {("FC", "FC", 2608009), ("FC", "FC", 2608010), ("DS", "DSS", 346)}
+    # Facturas FC siguen en 2608009 y 2608010; la cuenta de cobro va como DSS / DSS con el 346
+    assert docs == {("FC", "FC", 2608009), ("FC", "FC", 2608010), ("DSS", "DSS", 346)}
     # En otro mes las facturas empiezan de nuevo; la cuenta de cobro no reinicia
     r = speed.post(f"{API}/plano", json={"fecha": "2026-11-05"})
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
     assert {hoja.row_values(i)[3] for i in range(1, hoja.nrows)} == {2611001, 2611002, 346}
     p = speed.get(f"{API}/planos").json()["data"][0]
     assert speed.post(f"{API}/planos/{p['id']}/contabilizar", json={"ids": hechas}).json()["data"]["contabilizadas"] == 3
-    assert {f["serie"] for f in p["facturas"]} == {"FC", "DS"}
+    assert {f["serie"] for f in p["facturas"]} == {"FC", "DSS"}
     # La siguiente cuenta de cobro es la 347
     f = _cargar(speed, zip_factura(numero="4", cufe="d")).json()["data"]["nuevas"][0]
     d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]

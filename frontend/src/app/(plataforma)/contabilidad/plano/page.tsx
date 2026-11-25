@@ -72,7 +72,7 @@ export default function PlanoWorldOffice() {
       <section className="tarjeta space-y-3 p-4">
         <h2 className="font-semibold text-slate-800">1. Descargar el plano</h2>
         <p className="text-sm text-slate-500">Salen las facturas <b>listas</b> que aún no están contabilizadas: una fila por producto, con el número de documento
-          AAMM + consecutivo del mes en las facturas (FC) y número seguido en las cuentas de cobro (DS). Las que marque como contabilizadas ya no vuelven a salir.</p>
+          AAMM + consecutivo del mes en las facturas (FC) y número seguido en las cuentas de cobro (DSS). Las que marque como contabilizadas ya no vuelven a salir.</p>
         <div className="flex flex-wrap items-end gap-3">
           <div><label className="label">Fecha de cargue en World Office</label>
             <input type="date" className="input" value={fechaWo} onChange={(e) => setFechaWo(e.target.value)} /></div>
@@ -89,7 +89,7 @@ export default function PlanoWorldOffice() {
               {listas.map((f) => (
                 <tr key={f.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setElegidas(alternar(elegidas, f.id))}>
                   <td><input type="checkbox" readOnly checked={elegidas.includes(f.id)} /></td>
-                  <td>{f.prefijo}{f.numero}{f.cuenta_cobro && <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-800">DS</span>}</td>
+                  <td>{f.prefijo}{f.numero}{f.cuenta_cobro && <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-800">DSS</span>}</td>
                   <td>{f.emisor_nombre}</td><td>{fecha(f.fecha_emision)}</td>
                   <td className="text-right">{f.lineas}</td><td className="text-right tabular-nums">{plata(f.total)}</td>
                 </tr>

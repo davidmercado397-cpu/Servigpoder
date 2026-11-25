@@ -191,7 +191,7 @@ def faltantes(fac: CtbFactura) -> list[str]:
 
 def _base_consecutivo(db: Session, fecha: date, cuenta_cobro: bool, ultimo_wo: int | None) -> int:
     """El último número usado en esa serie: por las ya contabilizadas aquí o el último que se registró en World Office
-    (Configuración). Facturas (FC): consecutivo del mes de `fecha` (AAMM + 001). Cuentas de cobro (DS): número seguido
+    (Configuración). Facturas (FC): consecutivo del mes de `fecha` (AAMM + 001). Cuentas de cobro (DSS): número seguido
     que no reinicia con el mes (345, 346…)."""
     nums = list(db.scalars(select(CtbFactura.documento_numero).where(
         CtbFactura.estado == CONTABILIZADA, CtbFactura.documento_numero.is_not(None), CtbFactura.cuenta_cobro.is_(cuenta_cobro))))
@@ -208,7 +208,7 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     if not facturas:
         raise ValueError("No hay facturas listas para el plano")
     c = config(db)
-    # Cada serie lleva su consecutivo: facturas (FC) y cuentas de cobro (DS)
+    # Cada serie lleva su consecutivo: facturas (FC) y cuentas de cobro (DSS)
     siguiente = {False: _base_consecutivo(db, fecha, False, c.ultimo_fc), True: _base_consecutivo(db, fecha, True, c.ultimo_ds)}
     filas, items = [], []
     for fac in facturas:

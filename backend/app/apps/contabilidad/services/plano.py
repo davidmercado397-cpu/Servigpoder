@@ -3,7 +3,7 @@
 Una fila por producto de la factura; el encabezado se repite en cada fila (así lo pide la plantilla de World Office).
 Modelo: DocumentosComprasEncabezadosMovimientoInventarioWO.xls (Speed, 2026-11-25). Reglas del usuario:
 - Documento Número = AAMM + consecutivo de 3 cifras de las facturas que se van contabilizando en ese mes (2608001).
-  Las cuentas de cobro van como Tipo DS y Prefijo DSS, con su propio número seguido que no reinicia con el mes
+  Las cuentas de cobro van como Tipo DSS y Prefijo DSS, con su propio número seguido que no reinicia con el mes
   (345, 346…; 2026-11-25).
 - Fecha = la fecha de cargue en World Office (la digita contabilidad antes de descargar).
 - Tercero interno y externo = NIT del proveedor sin dígito de verificación.

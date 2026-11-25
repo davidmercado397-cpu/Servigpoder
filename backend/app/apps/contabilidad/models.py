@@ -40,8 +40,8 @@ class CtbConfig(BaseEmpresa):
     empresa_nit: Mapped[str] = mapped_column(String(20), default="900259118")
     tipo_documento: Mapped[str] = mapped_column(String(10), default="FC")
     prefijo: Mapped[str] = mapped_column(String(10), default="FC")
-    # Cuentas de cobro: otro tipo de documento y prefijo, con su propio consecutivo
-    tipo_documento_ds: Mapped[str] = mapped_column(String(10), default="DS", server_default="DS")
+    # Cuentas de cobro: tipo de documento y prefijo DSS, con su propio número seguido
+    tipo_documento_ds: Mapped[str] = mapped_column(String(10), default="DSS", server_default="DSS")
     prefijo_ds: Mapped[str] = mapped_column(String(10), default="DSS", server_default="DSS")
     # Último número ya usado en World Office por serie (para seguir el consecutivo del mes). Vacío = ninguno
     ultimo_fc: Mapped[int | None] = mapped_column(Integer, nullable=True)

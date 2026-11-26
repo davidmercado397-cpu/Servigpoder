@@ -116,8 +116,28 @@ class CtbLinea(BaseEmpresa):
     producto: Mapped[str] = mapped_column(String(40), default="")
     centro_costos: Mapped[str] = mapped_column(String(80), default="")
     nota: Mapped[str] = mapped_column(String(200), default="")
+    # Lo que propuso el agente: si contabilidad lo cambia, el agente ofrece aprender la corrección
+    producto_ia: Mapped[str] = mapped_column(String(40), default="", server_default="")
 
     factura: Mapped[CtbFactura] = relationship(back_populates="lineas")
+
+
+class CtbRegla(BaseEmpresa):
+    """Regla contable propia de la empresa que el agente aplica por encima de la norma general.
+    P. ej. «En Speed los intereses de mora no van a la cuenta de intereses: van al costo (7) o al gasto (5)»."""
+
+    __tablename__ = "ctb_regla"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    texto: Mapped[str] = mapped_column(Text)
+    cuentas: Mapped[str] = mapped_column(String(200), default="")  # cuentas que menciona (referencia)
+    activa: Mapped[bool] = mapped_column(Boolean, default=True)
+    origen: Mapped[str] = mapped_column(String(20), default="manual")  # manual | correccion
+    ejemplo: Mapped[str] = mapped_column(String(400), default="")  # la factura/línea de la que salió
+    usos: Mapped[int] = mapped_column(Integer, default=0)  # veces que el agente dijo aplicarla
+    creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class CtbProducto(BaseEmpresa):

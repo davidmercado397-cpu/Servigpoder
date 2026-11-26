@@ -11,7 +11,16 @@ export const ESTADOS: [Estado, string][] = [
 export type Linea = {
   id: number; orden: number; codigo_proveedor: string; descripcion: string; cantidad: number; valor_unitario: number; subtotal: number;
   iva_pct: number; iva_valor: number; producto: string; centro_costos: string; nota: string;
+  /** La cuenta que propuso el agente (si contabilidad la cambia, el agente ofrece aprender) */
+  producto_ia?: string;
 };
+/** Regla contable de la empresa que el agente aplica por encima de la norma general */
+export type Regla = {
+  id: number; texto: string; cuentas: string; activa: boolean; origen: "manual" | "correccion"; ejemplo: string; usos: number;
+  creado_en: string | null; actualizado_en: string | null;
+};
+/** Una cuenta que contabilidad corrigió al guardar: el agente ofrece aprenderla como regla */
+export type Correccion = { linea_id: number; orden: number; descripcion: string; cuenta_agente: string; cuenta_correcta: string };
 export type Factura = {
   id: number; estado: Estado; tipo: string; cuenta_cobro: boolean; motivo_aparte: string; leida_con: string; origen: string; prefijo: string; numero: string;
   fecha_emision: string | null; fecha_vencimiento: string | null; emisor_nit: string; emisor_dv: string; emisor_nombre: string;

@@ -12,7 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.apps.contabilidad.models import (
-    APARTE, CONTABILIZADA, LISTA, PENDIENTE, CtbCentroCostos, CtbConfig, CtbFactura, CtbLinea, CtbPlano, CtbProducto, CtbTercero,
+    APARTE, CONTABILIZADA, LISTA, PENDIENTE, CtbCentroCostos, CtbConfig, CtbFactura, CtbLinea, CtbPlano, CtbProducto, CtbRegla,
+    CtbTercero,
 )
 from app.apps.contabilidad.services import dian, ia_contable, plano
 from app.core import ia
@@ -136,20 +137,27 @@ def historial(db: Session, nit: str, sin: int | None = None) -> list[dict]:
     return [{"descripcion": d[:120], "producto": p, "centro_costos": c, "nota": n} for d, p, c, n in db.execute(q)]
 
 
+def reglas_activas(db: Session) -> list[CtbRegla]:
+    return list(db.scalars(select(CtbRegla).where(CtbRegla.activa.is_(True)).order_by(CtbRegla.id)))
+
+
 def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
-    """Llena producto, centro de costos y notas de lo que esté vacío. Sin IA (o si falla), repite lo más usado con el proveedor."""
+    """Llena producto, centro de costos y notas de lo que esté vacío. Sin IA (o si falla), repite lo más usado con el proveedor.
+    El agente aplica primero las reglas de la empresa."""
     productos = [(c, n) for c, n in db.execute(select(CtbProducto.codigo, CtbProducto.nombre).where(CtbProducto.activo.is_(True)))]
     centros = list(db.scalars(select(CtbCentroCostos.nombre).where(CtbCentroCostos.activo.is_(True)).order_by(CtbCentroCostos.nombre)))
     hist = historial(db, fac.emisor_nit, sin=fac.id)
     validos = {c for c, _ in productos}
     propuesta: dict = {}
+    reglas = reglas_activas(db)
+    numeradas = {i: r for i, r in enumerate(reglas, start=1)}
     if ia.configurada() and (productos or hist):
         try:
             propuesta = ia_contable.proponer(
                 {"proveedor": fac.emisor_nombre, "nit": fac.emisor_nit,
                  "lineas": [{"n": x.orden, "descripcion": x.descripcion, "cantidad": float(x.cantidad), "valor": float(x.subtotal),
                              "iva_pct": float(x.iva_pct)} for x in fac.lineas]},
-                productos, centros, hist, config(db).modelo)
+                productos, centros, hist, config(db).modelo, [(i, r.texto) for i, r in numeradas.items()])
         except ia.IAError as e:
             log.warning("La IA no propuso la factura %s: %s", fac.id, e.mensaje)
             fac.avisos = [*fac.avisos, f"La IA no pudo proponer la cuenta: {e.mensaje}"]
@@ -162,6 +170,7 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
         producto = str(p.get("producto") or "").strip()
         if not x.producto:
             x.producto = producto if producto and (not validos or producto in validos) else (comun_p[0][0] if comun_p else "")
+            x.producto_ia = x.producto
         centro = str(p.get("centro_costos") or "").strip()
         if not x.centro_costos:
             x.centro_costos = centro if centro and (not centros or centro in centros) else (comun_c[0][0] if comun_c else "")
@@ -169,6 +178,18 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
             x.nota = str(p.get("nota") or "").strip()[:200] or (hist[0]["nota"] if hist else "")
     if not fac.nota:
         fac.nota = str(propuesta.get("nota") or "").strip()[:300] or (fac.lineas[0].nota.upper() if fac.lineas and fac.lineas[0].nota else "")
+    # Reglas de la empresa que el agente dijo aplicar: quedan a la vista y suman su uso
+    aplicadas = []
+    for n in propuesta.get("reglas_aplicadas") or []:
+        try:
+            r = numeradas.get(int(n))
+        except (TypeError, ValueError):
+            r = None
+        if r is not None and r not in aplicadas:
+            aplicadas.append(r)
+            r.usos = (r.usos or 0) + 1
+    if aplicadas:
+        fac.avisos = [*fac.avisos, *[f"Regla de la empresa aplicada: {r.texto[:200]}" for r in aplicadas]]
     dudas = [str(d)[:300] for d in propuesta.get("dudas") or [] if d]
     if dudas:
         fac.avisos = [*fac.avisos, *[f"IA: {d}" for d in dudas[:5]]]

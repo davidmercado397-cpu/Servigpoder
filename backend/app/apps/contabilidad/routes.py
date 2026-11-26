@@ -13,9 +13,9 @@ from sqlalchemy import select
 from app.api.deps import DbSession, require
 from app.apps.contabilidad.models import (
     APARTE, CONTABILIZADA, DESCARTADA, ESTADOS, LISTA, PENDIENTE, CtbCentroCostos, CtbCorreo, CtbFactura, CtbPlano, CtbProducto,
-    CtbTercero,
+    CtbRegla, CtbTercero,
 )
-from app.apps.contabilidad.services import buzon, servicio
+from app.apps.contabilidad.services import buzon, ia_contable, servicio
 from app.core import ia
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
@@ -45,7 +45,7 @@ def _linea(x) -> dict:
     return {"id": x.id, "orden": x.orden, "codigo_proveedor": x.codigo_proveedor, "descripcion": x.descripcion,
             "cantidad": float(x.cantidad), "valor_unitario": float(x.valor_unitario), "subtotal": float(x.subtotal),
             "iva_pct": float(x.iva_pct), "iva_valor": float(x.iva_valor), "producto": x.producto,
-            "centro_costos": x.centro_costos, "nota": x.nota}
+            "centro_costos": x.centro_costos, "nota": x.nota, "producto_ia": x.producto_ia or ""}
 
 
 def _factura(f: CtbFactura, completa: bool = False) -> dict:
@@ -124,10 +124,16 @@ def guardar(factura_id: int, data: FacturaIn, request: Request, db: DbSession, a
     if f.estado in (CONTABILIZADA, DESCARTADA):
         raise ApiError(409, "La factura ya está " + ("contabilizada" if f.estado == CONTABILIZADA else "descartada"))
     por_id = {x.id: x for x in f.lineas}
+    # Correcciones a lo que propuso el agente (en este guardado): el agente ofrece aprenderlas como regla
+    correcciones = []
     for ln in data.lineas:
         x = por_id.get(ln.id)
         if x is not None:
-            x.producto, x.centro_costos, x.nota = ln.producto.strip(), ln.centro_costos.strip(), ln.nota.strip()
+            nuevo = ln.producto.strip()
+            if x.producto_ia and x.producto == x.producto_ia and nuevo and nuevo != x.producto_ia:
+                correcciones.append({"linea_id": x.id, "orden": x.orden, "descripcion": x.descripcion[:200],
+                                     "cuenta_agente": x.producto_ia, "cuenta_correcta": nuevo})
+            x.producto, x.centro_costos, x.nota = nuevo, ln.centro_costos.strip(), ln.nota.strip()
     f.nota = data.nota.strip()
     if data.cuenta_cobro is not None:
         f.cuenta_cobro = data.cuenta_cobro
@@ -142,7 +148,7 @@ def guardar(factura_id: int, data: FacturaIn, request: Request, db: DbSession, a
         f.estado = PENDIENTE
     auditar(db, request, "ctb_factura_revisada", actual.id, factura=f"{f.prefijo}{f.numero}", nit=f.emisor_nit, estado=f.estado)
     db.commit()
-    return ok(_factura(f, True))
+    return ok({**_factura(f, True), "correcciones": correcciones})
 
 
 class EstadoIn(BaseModel):
@@ -422,3 +428,89 @@ async def importar_terceros(request: Request, db: DbSession, archivo: UploadFile
     auditar(db, request, "ctb_terceros_importados", actual.id, terceros=n)
     db.commit()
     return ok({"terceros": n})
+
+
+# --- Reglas del agente contable (lo que aprende de cómo se hace en la empresa) -------------------------
+
+def _regla(r: CtbRegla) -> dict:
+    return {"id": r.id, "texto": r.texto, "cuentas": r.cuentas, "activa": r.activa, "origen": r.origen, "ejemplo": r.ejemplo,
+            "usos": r.usos or 0, "creado_en": r.creado_en.isoformat() if r.creado_en else None,
+            "actualizado_en": r.actualizado_en.isoformat() if r.actualizado_en else None}
+
+
+class ReglaIn(BaseModel):
+    texto: str = Field(min_length=5, max_length=2000)
+    cuentas: str = Field(default="", max_length=200)
+    activa: bool = True
+    origen: str = Field(default="manual", pattern=r"^(manual|correccion)$")
+    ejemplo: str = Field(default="", max_length=400)
+
+
+@router.get("/reglas", response_model=ApiResponse[list[dict]])
+def reglas(db: DbSession, _=Depends(require(VER))):
+    return ok([_regla(r) for r in db.scalars(select(CtbRegla).order_by(CtbRegla.activa.desc(), CtbRegla.id))])
+
+
+@router.post("/reglas", response_model=ApiResponse[dict], status_code=201)
+def crear_regla(data: ReglaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
+    r = CtbRegla(texto=data.texto.strip(), cuentas=data.cuentas.strip(), activa=data.activa, origen=data.origen,
+                 ejemplo=data.ejemplo.strip(), creado_por=actual.id)
+    db.add(r)
+    db.flush()
+    auditar(db, request, "ctb_regla_creada", actual.id, regla=r.id, origen=r.origen, texto=r.texto[:300])
+    db.commit()
+    return ok(_regla(r))
+
+
+@router.put("/reglas/{regla_id}", response_model=ApiResponse[dict])
+def editar_regla(regla_id: int, data: ReglaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
+    r = db.get(CtbRegla, regla_id)
+    if r is None:
+        raise ApiError(404, "Regla no encontrada")
+    antes = r.texto
+    r.texto, r.cuentas, r.activa = data.texto.strip(), data.cuentas.strip(), data.activa
+    auditar(db, request, "ctb_regla_editada", actual.id, regla=r.id, antes=antes[:300], despues=r.texto[:300], activa=r.activa)
+    db.commit()
+    return ok(_regla(r))
+
+
+@router.delete("/reglas/{regla_id}", response_model=ApiResponse[dict])
+def eliminar_regla(regla_id: int, request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
+    r = db.get(CtbRegla, regla_id)
+    if r is None:
+        raise ApiError(404, "Regla no encontrada")
+    auditar(db, request, "ctb_regla_eliminada", actual.id, regla=r.id, texto=r.texto[:300])
+    db.delete(r)
+    db.commit()
+    return ok({"eliminada": regla_id})
+
+
+class RedactarIn(BaseModel):
+    factura_id: int
+    linea_id: int
+    cuenta_agente: str = Field(max_length=40)
+    cuenta_correcta: str = Field(min_length=1, max_length=40)
+    motivo: str = Field(default="", max_length=1000)  # por qué va en esa cuenta (opcional, lo dice contabilidad)
+
+
+@router.post("/reglas/redactar", response_model=ApiResponse[dict], dependencies=[Depends(limitar("ctb_ia", 20, 60))])
+def redactar_regla(data: RedactarIn, db: DbSession, _=Depends(require(REVISAR))):
+    """El agente redacta la regla que aprende de una corrección. No la guarda: contabilidad la revisa y la guarda."""
+    f = _fac(db, data.factura_id)
+    x = next((ln for ln in f.lineas if ln.id == data.linea_id), None)
+    if x is None:
+        raise ApiError(404, "Línea no encontrada")
+    ia.cargar(db)
+    if not ia.configurada():
+        raise ApiError(503, "La IA no está configurada (Administración → Inteligencia artificial)")
+    productos = [(c, n) for c, n in db.execute(select(CtbProducto.codigo, CtbProducto.nombre).where(CtbProducto.activo.is_(True)))]
+    existentes = [(i, r.texto) for i, r in enumerate(servicio.reglas_activas(db), start=1)]
+    try:
+        d = ia_contable.redactar_regla({"proveedor": f.emisor_nombre, "descripcion": x.descripcion, "cuenta_agente": data.cuenta_agente,
+                                        "cuenta_correcta": data.cuenta_correcta, "motivo": data.motivo.strip()},
+                                       productos, existentes, servicio.config(db).modelo)
+    except ia.IAError as e:
+        raise ApiError(e.status, e.mensaje, e.codigo) from e
+    if not d["texto"]:
+        raise ApiError(502, "El agente no redactó la regla. Escríbala usted.")
+    return ok({**d, "ejemplo": f"{f.emisor_nombre[:80]} · «{x.descripcion[:120]}»: {data.cuenta_agente or '—'} → {data.cuenta_correcta}"})

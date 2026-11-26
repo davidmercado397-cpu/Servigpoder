@@ -11,15 +11,30 @@ from app.core import ia
 
 log = logging.getLogger("app.contabilidad")
 
-INSTRUCCIONES_PROPONER = """Eres el auxiliar contable de una empresa colombiana de vigilancia. Para registrar una factura de
-compra en World Office propones, para CADA producto de la factura:
+INSTRUCCIONES_PROPONER = """Eres el agente contable de la empresa: un contador público colombiano experto en causación de
+facturas de compra y documentos soporte (PUC del Decreto 2650 de 1993, NIIF para pymes, IVA descontable o mayor valor del
+costo, retenciones en la fuente, IVA e ICA, intereses, multas, fletes, descuentos, anticipos y gastos no deducibles).
+
+LAS REGLAS DE LA EMPRESA MANDAN: si una regla de la lista REGLAS DE LA EMPRESA aplica, úsala aunque la norma general o la
+costumbre digan otra cosa (p. ej. si la regla dice que los intereses de mora van al costo o al gasto, no los lleves a la
+cuenta de intereses de mora). Si dos reglas chocan, usa la más específica. Si ninguna aplica, usa tu criterio contable.
+
+Para registrar una factura de compra en World Office propones, para CADA producto de la factura:
 - "producto": el código del CATÁLOGO DE CUENTAS que corresponde al gasto, costo o activo (usa solo códigos del catálogo);
 - "centro_costos": uno de los CENTROS DE COSTOS (exacto);
 - "nota": una nota corta en minúsculas de lo que se compró (p. ej. "compra de vuelos").
 Y para la factura, "nota": una nota corta en MAYÚSCULAS (p. ej. "COMPRA DE VUELO").
 Si el HISTORIAL muestra cómo se registró antes este proveedor, síguelo salvo que el producto sea claramente distinto.
-Si dudas, escoge lo más probable y explícalo en "dudas". Responde SOLO un JSON:
-{"nota": "…", "lineas": [{"n": 1, "producto": "código", "centro_costos": "nombre", "nota": "…"}], "dudas": ["…"]}"""
+Si dudas, escoge lo más probable y explícalo en "dudas". En "reglas_aplicadas" pon los números de las REGLAS DE LA
+EMPRESA que usaste. Responde SOLO un JSON:
+{"nota": "…", "lineas": [{"n": 1, "producto": "código", "centro_costos": "nombre", "nota": "…"}], "reglas_aplicadas": [1],
+ "dudas": ["…"]}"""
+
+INSTRUCCIONES_REGLA = """Eres el agente contable de la empresa. Contabilidad corrigió una cuenta que tú propusiste y quiere que
+aprendas a hacerlo así en adelante. Redacta UNA regla corta (1 a 3 frases), general pero precisa, que explique cuándo
+aplica (el concepto, no una factura puntual: no pongas números de factura ni valores) y a qué cuenta o grupo de cuentas va.
+Usa los nombres de las cuentas del catálogo. Si contabilidad explicó el motivo, úsalo. Responde SOLO un JSON:
+{"texto": "…", "cuentas": "códigos que menciona la regla, separados por coma"}"""
 
 INSTRUCCIONES_LEER = """Lees una factura electrónica colombiana (PDF o imagen) y devuelves sus datos EXACTOS como aparecen.
 No inventes: si un dato no aparece, null. Valores como números (sin $ ni puntos de miles; decimales con punto).
@@ -44,14 +59,35 @@ def _json(texto: str) -> dict:
     return datos
 
 
-def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict], modelo: str = "") -> dict:
-    """factura: {"proveedor", "nit", "lineas": [{"n", "descripcion", "cantidad", "valor", "iva_pct"}]}"""
-    contexto = ("CATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos)
+def _reglas_texto(reglas: list[tuple[int, str]]) -> str:
+    if not reglas:
+        return "(todavía no hay reglas de la empresa)"
+    return "\n".join(f"{i}. {t}" for i, t in reglas)
+
+
+def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict], modelo: str = "",
+             reglas: list[tuple[int, str]] | None = None) -> dict:
+    """factura: {"proveedor", "nit", "lineas": [{"n", "descripcion", "cantidad", "valor", "iva_pct"}]}.
+    reglas: [(número, texto)] de las reglas activas de la empresa."""
+    contexto = ("REGLAS DE LA EMPRESA (mandan sobre la norma general):\n" + _reglas_texto(reglas or [])
+                + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos)
                 + "\n\nCENTROS DE COSTOS: " + json.dumps(centros, ensure_ascii=False)
                 + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:30], ensure_ascii=False))
     r = ia.completar(INSTRUCCIONES_PROPONER + "\n\n" + contexto,
                      [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo=modelo, max_tokens=4000)
     return _json(r.texto)
+
+
+def redactar_regla(caso: dict, productos: list[tuple[str, str]], reglas: list[tuple[int, str]], modelo: str = "") -> dict:
+    """caso: {"proveedor", "descripcion", "cuenta_agente", "cuenta_correcta", "motivo"} → {"texto", "cuentas"}"""
+    nombres = dict(productos)
+    caso = {**caso, "nombre_cuenta_agente": nombres.get(caso.get("cuenta_agente", ""), ""),
+            "nombre_cuenta_correcta": nombres.get(caso.get("cuenta_correcta", ""), "")}
+    r = ia.completar(INSTRUCCIONES_REGLA + "\n\nREGLAS QUE YA EXISTEN (no las repitas):\n" + _reglas_texto(reglas)
+                     + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos),
+                     [{"role": "user", "content": "CORRECCIÓN:\n" + json.dumps(caso, ensure_ascii=False)}], modelo=modelo, max_tokens=1500)
+    d = _json(r.texto)
+    return {"texto": str(d.get("texto") or "").strip()[:2000], "cuentas": str(d.get("cuentas") or "").strip()[:200]}
 
 
 def _n(v) -> float:

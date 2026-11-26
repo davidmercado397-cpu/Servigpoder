@@ -1,6 +1,6 @@
 "use client";
 
-import { FileSpreadsheet, Inbox, Mail, Settings2 } from "lucide-react";
+import { BookOpenCheck, FileSpreadsheet, Inbox, Mail, Settings2 } from "lucide-react";
 import { ShellApp, type GrupoMenu } from "@/components/shell-app";
 
 const MENU: GrupoMenu[] = [
@@ -12,6 +12,7 @@ const MENU: GrupoMenu[] = [
       { href: "/contabilidad/correos", texto: "Correos leídos", icono: Mail, permiso: "contabilidad.ver" },
     ],
   },
+  { grupo: "Agente contable", items: [{ href: "/contabilidad/reglas", texto: "Reglas de la empresa", icono: BookOpenCheck, permiso: "contabilidad.ver" }] },
   { grupo: "Configuración", items: [{ href: "/contabilidad/configuracion", texto: "Buzón y catálogos", icono: Settings2, permiso: "contabilidad.ver" }] },
 ];
 

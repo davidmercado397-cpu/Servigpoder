@@ -4,9 +4,10 @@ import { ArrowLeft, Ban, CheckCircle2, Loader2, RotateCcw, Save, Sparkles } from
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AprenderCorrecciones } from "@/components/aprender-regla";
 import { Alerta } from "@/components/ui";
 import { api, mensajeError } from "@/lib/api";
-import { fecha, plata, type Centro, type FacturaCompleta, type Producto } from "@/lib/contabilidad";
+import { fecha, plata, type Centro, type Correccion, type FacturaCompleta, type Producto } from "@/lib/contabilidad";
 import { usePermiso } from "@/lib/sesion";
 
 const RETENCION: Record<string, string> = { rete_fuente: "Rete fuente", rete_iva: "Rete IVA", rete_ica: "Rete ICA", otra: "Otra retención" };
@@ -18,6 +19,7 @@ export default function DetalleFactura() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [centros, setCentros] = useState<Centro[]>([]);
   const [ocupado, setOcupado] = useState("");
+  const [correcciones, setCorrecciones] = useState<Correccion[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
   useEffect(() => {
@@ -34,9 +36,11 @@ export default function DetalleFactura() {
     setMsg(null);
     setOcupado(lista ? "lista" : "guardar");
     try {
-      const r = await api<FacturaCompleta>(`/contabilidad/facturas/${f!.id}`, { method: "PUT", json: {
+      const r = await api<FacturaCompleta & { correcciones?: Correccion[] }>(`/contabilidad/facturas/${f!.id}`, { method: "PUT", json: {
         nota: f!.nota, lista, cuenta_cobro: f!.cuenta_cobro, lineas: f!.lineas.map((l) => ({ id: l.id, producto: l.producto, centro_costos: l.centro_costos, nota: l.nota })) } });
       setF(r);
+      // Si cambió cuentas que propuso el agente, se le ofrece que las aprenda
+      if (r.correcciones?.length) setCorrecciones(r.correcciones);
       setMsg({ tipo: "ok", texto: lista ? "Lista: sale en el próximo plano." : "Guardada." });
     } catch (e) { setMsg({ tipo: "error", texto: mensajeError(e) }); } finally { setOcupado(""); }
   }
@@ -106,6 +110,7 @@ export default function DetalleFactura() {
                     <input className={`input w-56 ${!l.producto ? "border-amber-400" : ""}`} list="productos-wo" disabled={!editable} value={l.producto}
                       onChange={(e) => setLinea(i, { producto: e.target.value.split(" ")[0] })} placeholder="Código" />
                     <p className="mt-0.5 max-w-56 truncate text-xs text-slate-500">{productos.find((p) => p.codigo === l.producto)?.nombre ?? (l.producto ? "No está en el catálogo" : "")}</p>
+                    {l.producto_ia && l.producto !== l.producto_ia && <p className="text-xs text-slate-400">El agente propuso {l.producto_ia}</p>}
                   </td>
                   <td><select className={`input w-44 ${!l.centro_costos ? "border-amber-400" : ""}`} disabled={!editable} value={l.centro_costos} onChange={(e) => setLinea(i, { centro_costos: e.target.value })}>
                     <option value="">—</option>{centros.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
@@ -126,6 +131,7 @@ export default function DetalleFactura() {
         </div>
       </section>
       {f.faltantes.length > 0 && editable && <p className="text-sm text-amber-800">Para el plano falta: {f.faltantes.join("; ")}.</p>}
+      {correcciones.length > 0 && <AprenderCorrecciones facturaId={f.id} correcciones={correcciones} productos={productos} onCerrar={() => setCorrecciones([])} />}
     </div>
   );
 }

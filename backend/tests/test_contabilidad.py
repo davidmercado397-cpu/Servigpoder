@@ -312,3 +312,61 @@ def test_cuentas_de_cobro_y_consecutivo_desde_world_office(speed):
 def test_cuenta_de_cobro_reconocida_en_el_xml():
     xml = factura_xml().replace("<cbc:IssueDate>", "<cbc:Note>CUENTA DE COBRO No. 15</cbc:Note><cbc:IssueDate>")
     assert dian.leer_xml(xml.encode()).cuenta_cobro and not dian.leer_xml(factura_xml().encode()).cuenta_cobro
+
+
+def test_agente_aprende_las_reglas_de_la_empresa(speed, monkeypatch):
+    """Las reglas de la empresa mandan sobre la norma general; al corregir una cuenta, el agente redacta la regla a aprender."""
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    pedidos, respuestas = [], []
+
+    def falso(request: httpx.Request) -> httpx.Response:
+        pedidos.append(json.loads(request.content))
+        return httpx.Response(200, json={"model": "m", "usage": {}, "choices": [{"message": {"content": json.dumps(respuestas.pop(0))}}]})
+
+    monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
+    speed.post(f"{API}/productos/importar", files={"archivo": ("c.xlsx", xlsx([["530520 INTERESES DE MORA"], ["519595 OTROS GASTOS"], ["735095 OTROS COSTOS"]]),
+                                                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    # Regla escrita a mano por contabilidad
+    r = speed.post(f"{API}/reglas", json={"texto": "En Speed los intereses de mora no van a la cuenta de intereses de mora: van al costo (7) o al gasto (5) del concepto principal.",
+                                          "cuentas": "5, 7"})
+    assert r.status_code == 201, r.text
+    regla = r.json()["data"]
+
+    respuestas.append({"nota": "INTERESES", "lineas": [{"n": 1, "producto": "519595", "centro_costos": "Administracion", "nota": "intereses de mora"},
+                                                       {"n": 2, "producto": "519595", "centro_costos": "Administracion", "nota": "cargo"}],
+                       "reglas_aplicadas": [1, 99], "dudas": []})
+    f = _cargar(speed, zip_factura(cufe="con-regla")).json()["data"]["nuevas"][0]
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    sistema = pedidos[-1]["messages"][0]["content"]
+    assert "LAS REGLAS DE LA EMPRESA MANDAN" in sistema and "1. En Speed los intereses de mora" in sistema
+    assert d["lineas"][0]["producto"] == "519595" and d["lineas"][0]["producto_ia"] == "519595"
+    assert any("Regla de la empresa aplicada" in a for a in d["avisos"])
+    assert speed.get(f"{API}/reglas").json()["data"][0]["usos"] == 1  # la 99 no existe: no cuenta
+
+    # Contabilidad corrige la cuenta de la línea 1: el agente ofrece aprenderlo
+    lineas = [{"id": x["id"], "producto": "735095" if x["orden"] == 1 else x["producto"], "centro_costos": x["centro_costos"], "nota": x["nota"]}
+              for x in d["lineas"]]
+    g = speed.put(f"{API}/facturas/{f['id']}", json={"nota": d["nota"], "lineas": lineas}).json()["data"]
+    assert [(c["orden"], c["cuenta_agente"], c["cuenta_correcta"]) for c in g["correcciones"]] == [(1, "519595", "735095")]
+    # Guardar otra vez sin cambios no vuelve a ofrecerlo
+    assert speed.put(f"{API}/facturas/{f['id']}", json={"nota": d["nota"], "lineas": lineas}).json()["data"]["correcciones"] == []
+
+    respuestas.append({"texto": "Los intereses de mora de los proveedores de servicio para los puestos van al costo 735095.", "cuentas": "735095"})
+    c = g["correcciones"][0]
+    red = speed.post(f"{API}/reglas/redactar", json={"factura_id": f["id"], "linea_id": c["linea_id"], "cuenta_agente": c["cuenta_agente"],
+                                                    "cuenta_correcta": c["cuenta_correcta"], "motivo": "es del puesto del cliente"})
+    assert red.status_code == 200, red.text
+    caso = json.loads(pedidos[-1]["messages"][1]["content"].split("\n", 1)[1])
+    assert caso["nombre_cuenta_correcta"] == "OTROS COSTOS" and caso["motivo"] == "es del puesto del cliente"
+    assert "1. En Speed los intereses de mora" in pedidos[-1]["messages"][0]["content"]  # conoce las reglas que ya existen
+    nueva = speed.post(f"{API}/reglas", json={**{k: red.json()["data"][k] for k in ("texto", "cuentas", "ejemplo")}, "origen": "correccion"})
+    assert nueva.status_code == 201 and nueva.json()["data"]["origen"] == "correccion"
+
+    # Editar y desactivar: la desactivada ya no se le pasa al agente
+    speed.put(f"{API}/reglas/{regla['id']}", json={"texto": regla["texto"], "cuentas": "5, 7", "activa": False})
+    respuestas.append({"nota": "X", "lineas": [], "dudas": []})
+    speed.post(f"{API}/facturas/{f['id']}/proponer")
+    sistema = pedidos[-1]["messages"][0]["content"]
+    assert "intereses de mora no van" not in sistema and "1. Los intereses de mora de los proveedores" in sistema
+    assert speed.delete(f"{API}/reglas/{regla['id']}").status_code == 200
+    assert len(speed.get(f"{API}/reglas").json()["data"]) == 1

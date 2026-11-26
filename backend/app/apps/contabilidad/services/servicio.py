@@ -75,16 +75,14 @@ def registrar(db: Session, f: dian.Factura, *, leida_con: str = "xml", origen: s
     f.prefijo, f.numero = dian.limpiar_numero(f.prefijo, f.numero)
     # Valores negativos: los mínimos (ajustes al peso de hasta $200) quedan fuera del plano solos; los demás no se pueden
     # llevar negativos: se avisa para quitarlos del plano o revisarlos
+    # Valores negativos (ajustes al peso, descuentos): la línea no va en el plano y su valor se resta de los otros productos
     excluir = set()
     for x in f.lineas:
         if x.subtotal < 0 or x.valor_unitario < 0:
             valor = abs(x.subtotal or x.valor_unitario * x.cantidad)
-            if valor <= MAX_NEGATIVO_A_CERO:
-                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${valor:,.0f}: queda fuera del plano".replace(",", "."))
-                excluir.add(x.orden)
-            else:
-                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${valor:,.0f}: no se puede llevar negativo al plano; "
-                              f"quítela del plano o revísela con el proveedor".replace(",", "."))
+            avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${_pesos(valor)}: no va en el plano y se resta "
+                          f"de los otros productos de la factura")
+            excluir.add(x.orden)
     hay_terceros = db.scalar(select(CtbTercero.id).limit(1)) is not None
     if hay_terceros and not db.scalar(select(CtbTercero.id).where(CtbTercero.nit == f.emisor_nit)):
         avisos.append(f"El proveedor NIT {f.emisor_nit} no está en el listado de terceros de World Office: créelo antes de cargar el plano")
@@ -157,7 +155,6 @@ def reglas_activas(db: Session) -> list[CtbRegla]:
 
 
 AGENTE = "contabilidad"
-MAX_NEGATIVO_A_CERO = 200  # pesos: un valor negativo hasta aquí (ajuste al peso) se lleva en 0 y no sale en el plano
 TOPE_CUENTAS = 60  # catálogo hasta este tamaño va completo; más grande, solo las cuentas candidatas (RAG)
 TOPE_REGLAS = 10  # igual con las reglas de la empresa
 CUENTAS_POR_LINEA = 12
@@ -330,20 +327,59 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
         fac.avisos = [*fac.avisos, *[f"IA: {d}" for d in dudas[:5]]]
 
 
+def _pesos(v: float) -> str:
+    return f"{v:,.2f}".rstrip("0").rstrip(".").replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _subtotal(x: CtbLinea) -> float:
+    return float(x.subtotal or 0) or float(x.valor_unitario or 0) * float(x.cantidad or 0)
+
+
 def va_al_plano(x: CtbLinea) -> bool:
-    """No salen en el plano las líneas quitadas (a mano o por ser un negativo mínimo) ni las que valen 0."""
+    """No salen en el plano las líneas quitadas, las negativas (se restan de las demás) ni las que valen 0."""
     return not x.excluida and float(x.valor_unitario or 0) > 0
+
+
+@dataclass
+class Ajuste:
+    """Cómo quedan los productos en el plano después de restar los valores negativos de la factura."""
+    valor_unitario: dict[int, float] = field(default_factory=dict)  # línea → valor unitario para el plano
+    detalle: list[str] = field(default_factory=list)  # «−$4 de la línea 3 (CONSUMO…): queda en $13.529»
+    sobrante: float = 0.0  # lo negativo que no alcanzó a restarse (los negativos superan la factura)
+
+
+def ajustar_negativos(fac: CtbFactura) -> Ajuste:
+    """Los valores negativos no van en el plano: se restan de los otros productos sin dejar ninguno en negativo. Primero de
+    un producto de cantidad 1 que alcance (el valor unitario queda exacto); si no, del más grande, y así hasta cubrirlo."""
+    aj = Ajuste()
+    negativo = round(sum(-_subtotal(x) for x in fac.lineas if _subtotal(x) < 0), 2)
+    positivas = [x for x in fac.lineas if va_al_plano(x)]
+    restante = {x.id: _subtotal(x) for x in positivas}
+    if negativo <= 0 or not positivas:
+        aj.sobrante = negativo if not positivas else 0.0
+        return aj
+    cubre = [x for x in positivas if float(x.cantidad or 0) == 1 and restante[x.id] >= negativo]
+    orden = (sorted(cubre, key=lambda x: -restante[x.id]) + sorted([x for x in positivas if x not in cubre], key=lambda x: -restante[x.id]))
+    for x in orden:
+        if negativo <= 0:
+            break
+        quita = min(negativo, restante[x.id])
+        restante[x.id] = round(restante[x.id] - quita, 2)
+        negativo = round(negativo - quita, 2)
+        cantidad = float(x.cantidad or 1) or 1
+        aj.valor_unitario[x.id] = round(restante[x.id] / cantidad, 4)
+        aj.detalle.append(f"−${_pesos(quita)} de la línea {x.orden} ({x.descripcion[:40]}): en el plano queda en ${_pesos(restante[x.id])}")
+    aj.sobrante = max(0.0, negativo)
+    return aj
 
 
 def faltantes(fac: CtbFactura) -> list[str]:
     """Lo que impide que la factura salga en el plano."""
     out = []
+    sobrante = ajustar_negativos(fac).sobrante
+    if sobrante > 0:
+        out.append(f"Los valores negativos superan a los productos por ${_pesos(sobrante)}: no se pueden restar sin dejar un valor negativo")
     for x in fac.lineas:
-        if x.excluida:
-            continue
-        if float(x.valor_unitario or 0) < 0:
-            out.append(f"Línea {x.orden}: viene en negativo (−${abs(float(x.subtotal or 0)):,.0f}): quítela del plano o revísela".replace(",", "."))
-            continue
         if not va_al_plano(x):
             continue
         if not x.producto:
@@ -380,7 +416,8 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     siguiente = {False: _base_consecutivo(db, fecha, False, c.ultimo_fc), True: _base_consecutivo(db, fecha, True, c.ultimo_ds)}
     filas, items = [], []
     for fac in facturas:
-        lineas = [x for x in fac.lineas if va_al_plano(x)]
+        ajuste = ajustar_negativos(fac)
+        lineas = [x for x in fac.lineas if va_al_plano(x) and ajuste.valor_unitario.get(x.id, 1) > 0]
         if not lineas:  # todo en 0: no lleva número de documento
             continue
         siguiente[fac.cuenta_cobro] += 1
@@ -392,7 +429,8 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
             filas.append(plano.Fila(
                 documento=numero, nit=fac.emisor_nit, prefijo_ext=prefijo_ext, numero_ext=numero_ext, nota=fac.nota,
                 forma_pago=fac.forma_pago, fecha_emision=fac.fecha_emision, producto=x.producto, cantidad=float(x.cantidad),
-                iva=round(float(x.iva_pct) / 100, 4), valor_unitario=float(x.valor_unitario), vencimiento=fac.fecha_vencimiento,
+                iva=round(float(x.iva_pct) / 100, 4), valor_unitario=ajuste.valor_unitario.get(x.id, float(x.valor_unitario)),
+                vencimiento=fac.fecha_vencimiento,
                 nota_detalle=x.nota, centro_costos=x.centro_costos,
                 codigo_centro=db.scalar(select(CtbCentroCostos.codigo).where(CtbCentroCostos.nombre == x.centro_costos)) or "",
                 tipo=tipo, prefijo=prefijo))

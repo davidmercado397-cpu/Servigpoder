@@ -517,27 +517,30 @@ def test_negativos_y_numero_de_factura_para_world_office(speed):
     xml = xml.replace("<cbc:ID>PTC6", "<cbc:ID>FE45-").replace("<sts:Prefix>PTC6", "<sts:Prefix>FE45").replace("1841310</cbc:ID>", "1841310-6</cbc:ID>")
     f = _cargar(speed, attached(xml), "neg.xml").json()["data"]["nuevas"][0]
     assert (f["prefijo"], f["numero"]) == ("FE45", "1841310")
-    assert any("−$6: queda fuera del plano" in a for a in f["avisos"])
+    assert any("viene en −$6: no va en el plano y se resta" in a for a in f["avisos"])
     d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
     assert d["lineas"][1]["excluida"] and d["lineas"][1]["valor_unitario"] == -6  # se ve, pero no va
-    # La línea en 0 no pide cuenta ni sale en el plano
+    assert d["lineas"][0]["valor_plano"] == 99994 and "−$6 de la línea 1" in d["ajuste_negativos"][0]
     r = speed.put(f"{API}/facturas/{f['id']}", json={"nota": "MONITOREO", "lista": True, "lineas": [
-        {"id": d["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "monitoreo"}]})
+        {"id": d["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "monitoreo"},
+        {"id": d["lineas"][1]["id"], "excluida": True}]})
     assert r.status_code == 200, r.text
     hoja = xlrd.open_workbook(file_contents=speed.post(f"{API}/plano", json={"fecha": "2026-11-26"}).content).sheet_by_index(0)
-    assert hoja.nrows == 2  # solo la línea con valor
+    assert hoja.nrows == 2  # la línea negativa no va
     fila = dict(zip(plano.COLUMNAS, hoja.row_values(1)))
     assert (fila["Encab: Pref Dto Ext"], fila["Encab: No. Dto Ext"]) == ("FE45", 1841310)
+    assert fila["Detalle: Valor Unitario"] == 99994  # 100.000 − 6
 
-    # Un negativo grande no se puede llevar: la factura no pasa al plano
-    xml = factura_xml(cufe="neg-2", lineas=((1, "Servicio", 100000.0, 19, 19000.0), (1, "Descuento comercial", -5000.0, 0, 0.0)))
-    g = _cargar(speed, attached(xml), "neg2.xml").json()["data"]["nuevas"][0]
-    assert any("no se puede llevar negativo" in a for a in g["avisos"])
-    assert any("viene en negativo" in x for x in g["faltantes"])
-    # Contabilidad la quita del plano a mano y ya puede pasar
-    dg = speed.get(f"{API}/facturas/{g['id']}").json()["data"]
-    r = speed.put(f"{API}/facturas/{g['id']}", json={"nota": "SERVICIO", "lista": True, "lineas": [
-        {"id": dg["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "servicio"},
-        {"id": dg["lineas"][1]["id"], "excluida": True}]})
-    assert r.status_code == 200, r.text
-    assert r.json()["data"]["estado"] == "lista" and r.json()["data"]["lineas"][1]["excluida"]
+    # Como la factura de energía: los ajustes (−3 y −1) se restan de un producto de cantidad 1 que alcance
+    xml = factura_xml(cufe="neg-2", lineas=((222, "ENERGIA ACTIVA FP", 194261.10, 0, 0.0), (1, "Ajustes a la decena", -3.0, 0, 0.0),
+                                            (1, "CONSUMO EXCEDENTE", 13533.0, 0, 0.0), (1, "ASEO SERVICIO RESIDENCIAL", 43224.0, 0, 0.0),
+                                            (1, "ASEO AJUSTE A LA DECENA", -1.0, 0, 0.0)))
+    g = speed.get(f"{API}/facturas/{_cargar(speed, attached(xml), 'energia.xml').json()['data']['nuevas'][0]['id']}").json()["data"]
+    assert [x["excluida"] for x in g["lineas"]] == [False, True, False, False, True]
+    assert [x["valor_plano"] for x in g["lineas"]] == [None, None, None, 43220, None]  # energía (222 unidades) queda igual
+    assert not any("negativo" in x for x in g["faltantes"])
+
+    # Si los negativos superan a los productos no se puede restar: la factura no pasa al plano
+    xml = factura_xml(cufe="neg-3", lineas=((1, "Servicio", 1000.0, 0, 0.0), (1, "Descuento", -5000.0, 0, 0.0)))
+    h = _cargar(speed, attached(xml), "neg3.xml").json()["data"]["nuevas"][0]
+    assert any("superan a los productos por $4.000" in x for x in h["faltantes"])

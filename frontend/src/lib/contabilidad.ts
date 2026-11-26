@@ -13,6 +13,8 @@ export type Linea = {
   iva_pct: number; iva_valor: number; producto: string; centro_costos: string; nota: string;
   /** No va en el plano (la quitó contabilidad o es un negativo mínimo) */
   excluida?: boolean;
+  /** Valor unitario con que va en el plano si se le restó un valor negativo de la factura */
+  valor_plano?: number | null;
   /** La cuenta que propuso el agente (si contabilidad la cambia, el agente ofrece aprender) */
   producto_ia?: string;
 };
@@ -42,7 +44,9 @@ export type Factura = {
 /** Con qué producto se ha registrado el proveedor en World Office (informe «Compras por Producto y Proveedor») */
 export type OpcionProveedor = { producto: string; nombre: string; compras: number; ultima_fecha: string | null; ultimo_precio: number };
 export type FacturaCompleta = Omit<Factura, "lineas"> & { cufe: string; forma_pago: string; moneda: string; retenciones: Record<string, number>; lineas: Linea[];
-  opciones_proveedor?: OpcionProveedor[] };
+  opciones_proveedor?: OpcionProveedor[];
+  /** Cómo se restaron los valores negativos de los otros productos */
+  ajuste_negativos?: string[] };
 export type Producto = { codigo: string; nombre: string; activo: boolean };
 export type Centro = { id: number; nombre: string; codigo: string; activo: boolean };
 

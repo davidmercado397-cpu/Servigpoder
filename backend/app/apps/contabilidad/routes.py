@@ -61,8 +61,10 @@ def _factura(f: CtbFactura, completa: bool = False) -> dict:
            "correo_de": f.correo_de, "correo_asunto": f.correo_asunto,
            "creado_en": f.creado_en.isoformat() if f.creado_en else None, "lineas": len(f.lineas)}
     if completa:
+        aj = servicio.ajustar_negativos(f)
         out.update(cufe=f.cufe, forma_pago=f.forma_pago, moneda=f.moneda, retenciones=f.retenciones or {},
-                   lineas=[_linea(x) for x in f.lineas])
+                   lineas=[{**_linea(x), "valor_plano": aj.valor_unitario.get(x.id)} for x in f.lineas],
+                   ajuste_negativos=aj.detalle)
     return out
 
 

@@ -106,8 +106,8 @@ export default function DetalleFactura() {
                   <td className="text-right tabular-nums line-through">{l.cantidad.toLocaleString("es-CO")}</td>
                   <td className={`text-right tabular-nums line-through ${l.valor_unitario < 0 ? "text-red-400" : ""}`}>{plata(l.valor_unitario)}</td>
                   <td />
-                  <td colSpan={3} className="text-xs italic">Fuera del plano{l.valor_unitario < 0 ? " (valor negativo)" : ""}</td>
-                  <td>{editable && <button className="inline-flex items-center gap-1 text-xs text-marca-700 hover:underline" title="Volver a llevar esta línea al plano"
+                  <td colSpan={3} className="text-xs italic">Fuera del plano{l.valor_unitario < 0 ? ": se resta de los otros productos" : ""}</td>
+                  <td>{editable && l.valor_unitario >= 0 && <button className="inline-flex items-center gap-1 text-xs text-marca-700 hover:underline" title="Volver a llevar esta línea al plano"
                     onClick={() => setLinea(i, { excluida: false })}><Undo2 className="h-3.5 w-3.5" /> Incluir</button>}</td>
                 </tr>
               ) : (
@@ -115,7 +115,8 @@ export default function DetalleFactura() {
                   <td>{l.orden}</td>
                   <td className="max-w-xs"><p className="text-xs">{l.descripcion}</p></td>
                   <td className="text-right tabular-nums">{l.cantidad.toLocaleString("es-CO")}</td>
-                  <td className={`text-right tabular-nums ${l.valor_unitario < 0 ? "font-semibold text-red-700" : ""}`}>{plata(l.valor_unitario)}</td>
+                  <td className={`text-right tabular-nums ${l.valor_unitario < 0 ? "font-semibold text-red-700" : ""}`}>{plata(l.valor_unitario)}
+                    {l.valor_plano != null && <p className="text-xs font-normal text-amber-700" title="Se le restaron los valores negativos de la factura">en el plano {plata(l.valor_plano)}</p>}</td>
                   <td className="text-right tabular-nums">{l.iva_pct} %</td>
                   <td>
                     <input className={`input w-56 ${!l.producto ? "border-amber-400" : ""}`} list="productos-wo" disabled={!editable} value={l.producto}
@@ -136,6 +137,12 @@ export default function DetalleFactura() {
           </table>
           <datalist id="productos-wo">{productos.map((p) => <option key={p.codigo} value={p.codigo}>{p.nombre}</option>)}</datalist>
         </div>
+        {(f.ajuste_negativos ?? []).length > 0 && (
+          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">Valores negativos restados de otros productos (no van en el plano)</p>
+            <ul className="ml-4 list-disc">{f.ajuste_negativos!.map((t, k) => <li key={k}>{t}</li>)}</ul>
+          </div>
+        )}
         {(f.opciones_proveedor ?? []).length > 0 && (
           <div className="rounded-lg bg-slate-50 p-3 text-sm">
             <p className="mb-1 font-medium text-slate-700">Así se ha registrado este proveedor en World Office</p>

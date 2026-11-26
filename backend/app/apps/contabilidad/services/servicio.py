@@ -13,8 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.apps.contabilidad.models import (
-    APARTE, CONTABILIZADA, LISTA, PENDIENTE, CtbCentroCostos, CtbConfig, CtbFactura, CtbLinea, CtbPlano, CtbProducto, CtbRegla,
-    CtbTercero,
+    APARTE, CONTABILIZADA, LISTA, PENDIENTE, CtbCentroCostos, CtbConfig, CtbFactura, CtbLinea, CtbPlano, CtbProducto,
+    CtbProductoProveedor, CtbRegla, CtbTercero,
 )
 from app.apps.contabilidad.services import dian, ia_contable, plano
 from app.core import ia, vectores
@@ -210,6 +210,16 @@ def _contexto_rag(db: Session, fac: CtbFactura, lineas: list[CtbLinea], producto
     return productos_sel, reglas_sel, ejemplos, tokens
 
 
+def opciones_proveedor(db: Session, nit: str, limite: int = 15) -> list[dict]:
+    """Productos (cuentas) con que se ha registrado este proveedor en World Office, los más usados primero."""
+    nombres = dict(db.execute(select(CtbProducto.codigo, CtbProducto.nombre)).all())
+    q = (select(CtbProductoProveedor).where(CtbProductoProveedor.nit == nit)
+         .order_by(CtbProductoProveedor.compras.desc(), CtbProductoProveedor.ultima_fecha.desc()).limit(limite))
+    return [{"producto": o.producto, "nombre": nombres.get(o.producto, ""), "compras": o.compras,
+             "ultima_fecha": o.ultima_fecha.isoformat() if o.ultima_fecha else None, "ultimo_precio": float(o.ultimo_precio or 0)}
+            for o in db.scalars(q)]
+
+
 def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
     """Llena producto, centro de costos y notas de lo que esté vacío. Para no gastar de más:
     1. memoria: lo que ya se contabilizó igual con este proveedor se repite sin llamar a la IA;
@@ -228,6 +238,19 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
             x.producto_ia = x.producto
             x.centro_costos = x.centro_costos or centro
             x.nota = x.nota or nota
+    # World Office: si este proveedor siempre se ha registrado con un solo producto (en 2 compras o más), se usa ese sin
+    # costo de IA; con una sola compra, se le pasa a la IA como pista
+    opciones = opciones_proveedor(db, fac.emisor_nit)
+    if len(opciones) == 1 and opciones[0]["compras"] >= 2 and any(not x.producto for x in fac.lineas):
+        unica = opciones[0]
+        for x in fac.lineas:
+            if not x.producto:
+                x.producto = x.producto_ia = unica["producto"]
+                x.nota = x.nota or (unica["nombre"] or "").lower()[:200]
+                if not x.centro_costos and len(centros) == 1:
+                    x.centro_costos = centros[0]
+        fac.avisos = [*fac.avisos, f"Producto tomado de World Office: este proveedor siempre se ha registrado con "
+                                   f"{unica['producto']} {unica['nombre']} ({unica['compras']} compra(s))"]
     pendientes = [x for x in fac.lineas if not x.producto]
     if recordadas:
         fac.avisos = [*fac.avisos, f"{len(recordadas)} de {len(fac.lineas)} líneas se tomaron de facturas ya contabilizadas de este proveedor (sin costo de IA)"]
@@ -240,6 +263,9 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
         productos_sel, reglas_sel, ejemplos = productos, reglas, []
         try:
             productos_sel, reglas_sel, ejemplos, tokens_vec = _contexto_rag(db, fac, pendientes, productos, reglas, hist)
+            # Las cuentas que ya se usaron con este proveedor en World Office siempre son candidatas
+            ya = {c for c, _ in productos_sel}
+            productos_sel = productos_sel + [(c, n) for c, n in productos if c not in ya and c in {o["producto"] for o in opciones}]
             if tokens_vec:
                 vectores.registrar_uso(db, AGENTE, "vectores", tokens_vec, 0, ia.ajustes().modelo_vectores)
         except ia.IAError as e:  # sin vectores: el contexto completo (más caro, pero funciona)
@@ -249,7 +275,7 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
                 {"proveedor": fac.emisor_nombre, "nit": fac.emisor_nit,
                  "lineas": [{"n": x.orden, "descripcion": x.descripcion, "cantidad": float(x.cantidad), "valor": float(x.subtotal),
                              "iva_pct": float(x.iva_pct)} for x in pendientes]},
-                productos_sel, centros, hist, config(db).modelo, [(rg.id, rg.texto) for rg in reglas_sel], ejemplos)
+                productos_sel, centros, hist, config(db).modelo, [(rg.id, rg.texto) for rg in reglas_sel], ejemplos, opciones)
             vectores.registrar_uso(db, AGENTE, "propuesta", r.tokens_entrada, r.tokens_salida, r.modelo)
         except ia.IAError as e:
             log.warning("La IA no propuso la factura %s: %s", fac.id, e.mensaje)
@@ -414,6 +440,61 @@ def importar_cuentas(db: Session, contenido: bytes) -> int:
         else:
             db.add(CtbProducto(codigo=codigo, nombre=nombre))
     return len(vistos)
+
+
+def _fecha_excel(v) -> date | None:
+    """Fecha de una celda: fecha, fecha y hora, o número de serie de Excel (si la celda no tiene formato de fecha)."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, (int, float)) and 20000 < v < 80000:
+        from openpyxl.utils.datetime import from_excel
+
+        return from_excel(v).date()
+    return None
+
+
+def importar_productos_proveedores(db: Session, contenido: bytes) -> tuple[int, int]:
+    """Informe de World Office «Compras por Producto y Proveedor»: Inventario («15281001 EQUIPOS TELECOMUNICACIONES»),
+    Tercero («CRC COMUNICACIONES S.A.S  830095304»), U Medida, Ultimo Precio Unitario, Fecha. Reemplaza lo que había
+    (el informe trae todo el histórico) y agrega al catálogo los productos que falten. Devuelve (relaciones, productos)."""
+    filas = _filas(contenido)
+    i_enc = next((i for i, f in enumerate(filas[:10]) if f and str(f[0] or "").strip().lower() == "inventario"), None)
+    if i_enc is None:
+        raise ValueError("No se encontró el encabezado «Inventario | Tercero» del informe de compras por producto y proveedor")
+    relaciones: dict[tuple[str, str], dict] = {}
+    productos: dict[str, str] = {}
+    for f in filas[i_enc + 1:]:
+        if not f or len(f) < 2:
+            continue
+        mp = re.match(r"^(\d{4,12})\s+(.+)$", str(f[0] or "").strip())
+        mt = re.match(r"^(.*?)\s+(\d{5,15})(?:\s*-\s*\d)?$", str(f[1] or "").strip())
+        if not mp or not mt:
+            continue
+        codigo, nit = mp.group(1), mt.group(2)
+        productos[codigo] = mp.group(2).strip()[:200]
+        fecha = _fecha_excel(f[4]) if len(f) > 4 else None
+        precio = float(f[3]) if len(f) > 3 and isinstance(f[3], (int, float)) else 0.0
+        r = relaciones.setdefault((nit, codigo), {"tercero": mt.group(1).strip()[:200], "compras": 0, "unidad": str(f[2] or "")[:20] if len(f) > 2 else "",
+                                                  "ultimo_precio": precio, "ultima_fecha": fecha})
+        r["compras"] += 1
+        if fecha and (r["ultima_fecha"] is None or fecha >= r["ultima_fecha"]):
+            r["ultima_fecha"], r["ultimo_precio"] = fecha, precio
+    if not relaciones:
+        raise ValueError("El informe no trae compras por producto y proveedor")
+    db.query(CtbProductoProveedor).delete()
+    for (nit, codigo), r in relaciones.items():
+        db.add(CtbProductoProveedor(nit=nit, producto=codigo, **r))
+    existentes = {p.codigo: p for p in db.scalars(select(CtbProducto))}
+    for codigo, nombre in productos.items():
+        if codigo in existentes:
+            existentes[codigo].activo = True
+            if not existentes[codigo].nombre:
+                existentes[codigo].nombre = nombre
+        else:
+            db.add(CtbProducto(codigo=codigo, nombre=nombre))
+    return len(relaciones), len(productos)
 
 
 def importar_terceros(db: Session, contenido: bytes) -> int:

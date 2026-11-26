@@ -433,3 +433,50 @@ def test_rag_y_memoria_bajan_el_costo(speed, monkeypatch):
     respuestas.append({"nota": "X", "lineas": [], "reglas_aplicadas": []})
     _cargar(speed, zip_factura(numero="1841401", cufe="rag-3"))
     assert len(chats) == antes + 1
+
+
+def _compras_por_proveedor(filas):
+    return xlsx([["SPEED SECURITY LTDA"], ["Compras por Producto y Proveedor Basado en Movimientos"], ["Entre 01/01/2020 Y 31/12/2026"],
+                 ["Inventario", "Tercero", "U Medida", "Ultimo Precio Unitario", "Fecha"], *filas])
+
+
+def test_productos_por_proveedor_de_world_office(speed, monkeypatch):
+    from datetime import datetime as dt
+
+    tipo = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    informe = _compras_por_proveedor([
+        ["515515 PASAJES AEREOS", "PRICE RES S.A.S  900474794", "Und.", 250000, dt(2026, 3, 1)],
+        ["515515 PASAJES AEREOS", "PRICE RES S.A.S  900474794", "Und.", 300000, dt(2026, 7, 1)],
+        ["15281001 EQUIPOS TELECOMUNICACIONES", "CRC COMUNICACIONES S.A.S  830095304", "Und.", 470000, dt(2025, 6, 4)],
+        ["734525 Mantenimiento Equipo de Computacion", "CRC COMUNICACIONES S.A.S  830095304", "Und.", 365000, dt(2025, 8, 20)],
+    ])
+    r = speed.post(f"{API}/productos-proveedor/importar", files={"archivo": ("compras.xlsx", informe, tipo)})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"] == {"relaciones": 3, "productos": 3}
+    codigos = {p["codigo"] for p in speed.get(f"{API}/productos").json()["data"]}
+    assert {"515515", "15281001", "734525"} <= codigos  # los productos de World Office entran al catálogo
+
+    # PRICE RES siempre con 515515 (2 compras): se usa sin IA
+    f = _cargar(speed, zip_factura(cufe="pp-1")).json()["data"]["nuevas"][0]
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    assert {x["producto"] for x in d["lineas"]} == {"515515"} and d["lineas"][0]["centro_costos"] == "Administracion"
+    assert any("Producto tomado de World Office" in a for a in d["avisos"])
+    assert d["opciones_proveedor"][0] == {"producto": "515515", "nombre": "PASAJES AEREOS", "compras": 2, "ultima_fecha": "2026-07-01",
+                                          "ultimo_precio": 300000.0}
+
+    # CRC tiene dos opciones: la IA las recibe y escoge
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    pedidos = []
+
+    def falso(request: httpx.Request) -> httpx.Response:
+        pedidos.append(json.loads(request.content))
+        return httpx.Response(200, json={"model": "m", "usage": {}, "choices": [{"message": {"content": json.dumps(
+            {"nota": "COMPRA EQUIPO", "lineas": [{"n": 1, "producto": "15281001", "centro_costos": "Administracion", "nota": "radio"}]})}}]})
+
+    monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
+    xml = factura_xml(cufe="pp-2", lineas=((1, "Radio portátil", 470000.0, 19, 89300.0),)).replace("900474794", "830095304")
+    f = _cargar(speed, attached(xml), "crc.xml").json()["data"]["nuevas"][0]
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    assert d["lineas"][0]["producto"] == "15281001"
+    sistema = next(p for p in pedidos if "OPCIONES DE ESTE PROVEEDOR" in p["messages"][0]["content"])["messages"][0]["content"]
+    assert '["15281001", "EQUIPOS TELECOMUNICACIONES", 1, "2025-06-04"]' in sistema and '"734525"' in sistema

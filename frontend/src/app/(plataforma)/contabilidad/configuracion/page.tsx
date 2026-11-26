@@ -21,17 +21,19 @@ export default function ConfiguracionContabilidad() {
   const [clave, setClave] = useState("");
   const [centros, setCentros] = useState<Centro[]>([]);
   const [nuevoCentro, setNuevoCentro] = useState("");
-  const [conteo, setConteo] = useState({ productos: 0, terceros: 0 });
+  const [conteo, setConteo] = useState({ productos: 0, terceros: 0, productos_proveedor: 0 });
   const [ocupado, setOcupado] = useState("");
   const [modelos, setModelos] = useState<Modelo[]>([]);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const cuentas = useRef<HTMLInputElement>(null);
   const terceros = useRef<HTMLInputElement>(null);
+  const compras = useRef<HTMLInputElement>(null);
 
   function recargar() {
     api<Config>("/contabilidad/config").then(setC).catch((e) => setMsg({ tipo: "error", texto: mensajeError(e) }));
     api<Centro[]>("/contabilidad/centros").then(setCentros).catch(() => {});
-    api<{ productos: number; terceros: number }>("/contabilidad/resumen").then((r) => setConteo({ productos: r.productos, terceros: r.terceros })).catch(() => {});
+    api<{ productos: number; terceros: number; productos_proveedor: number }>("/contabilidad/resumen")
+      .then((r) => setConteo({ productos: r.productos, terceros: r.terceros, productos_proveedor: r.productos_proveedor ?? 0 })).catch(() => {});
   }
   useEffect(recargar, []);
   useEffect(() => { if (puede) api<Modelo[]>("/contabilidad/modelos").then(setModelos).catch(() => {}); }, [puede]);
@@ -55,8 +57,9 @@ export default function ConfiguracionContabilidad() {
     return `Conexión correcta con Gmail: hay ${r.sin_leer} correo(s) sin leer en «${c.carpeta}».`;
   });
   const importar = (ruta: string, f: File | undefined) => f && hacer(ruta, async () => {
-    const r = await subirArchivo<{ cuentas?: number; terceros?: number }>(`/contabilidad/${ruta}/importar`, f);
+    const r = await subirArchivo<{ cuentas?: number; terceros?: number; relaciones?: number; productos?: number }>(`/contabilidad/${ruta}/importar`, f);
     recargar();
+    if (r.relaciones != null) return `Se cargaron ${r.relaciones} relaciones de proveedor y producto (${r.productos} productos de World Office).`;
     return r.cuentas != null ? `Se cargaron ${r.cuentas} cuentas.` : `Se cargaron ${r.terceros} terceros.`;
   });
   const agregarCentro = (nombre: string, activo = true, codigo = "") => hacer("centro", async () => {
@@ -150,6 +153,14 @@ export default function ConfiguracionContabilidad() {
             <p className="text-xs text-slate-500">Listado de terceros de World Office. Avisa si llega una factura de un proveedor que no está creado.</p>
             {puede && <button className="btn-secundario mt-2" disabled={!!ocupado} onClick={() => terceros.current?.click()}><Upload className="h-4 w-4" /> Cargar Excel</button>}
             <input ref={terceros} type="file" accept=".xlsx" className="hidden" onChange={(e) => { importar("terceros", e.target.files?.[0]); e.target.value = ""; }} />
+          </div>
+          <div className="rounded-lg border border-marca-200 bg-marca-50/30 p-3 sm:col-span-2">
+            <p className="font-medium">Productos por proveedor <span className="text-sm font-normal text-slate-500">({conteo.productos_proveedor} relaciones)</span></p>
+            <p className="text-xs text-slate-500">Informe de World Office «Compras por Producto y Proveedor»: con qué producto (cuenta) se ha registrado cada proveedor.
+              El agente elige entre esas opciones; si un proveedor siempre se ha registrado con un solo producto (2 compras o más), lo usa sin gastar IA.
+              Al cargarlo se reemplaza el anterior y los productos que falten entran al catálogo.</p>
+            {puede && <button className="btn-secundario mt-2" disabled={!!ocupado} onClick={() => compras.current?.click()}><Upload className="h-4 w-4" /> Cargar Excel</button>}
+            <input ref={compras} type="file" accept=".xlsx" className="hidden" onChange={(e) => { importar("productos-proveedor", e.target.files?.[0]); e.target.value = ""; }} />
           </div>
         </div>
         <div>

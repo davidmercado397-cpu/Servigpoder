@@ -25,6 +25,8 @@ Para registrar una factura de compra en World Office propones, para CADA product
 - "nota": una nota corta en minúsculas de lo que se compró (p. ej. "compra de vuelos").
 Y para la factura, "nota": una nota corta en MAYÚSCULAS (p. ej. "COMPRA DE VUELO").
 Si el HISTORIAL muestra cómo se registró antes este proveedor, síguelo salvo que el producto sea claramente distinto.
+OPCIONES DE ESTE PROVEEDOR EN WORLD OFFICE son los productos (cuentas) con que contabilidad lo ha registrado, los más usados
+primero: elige entre ellos el que corresponda a cada producto de la factura; usa otra cuenta solo si claramente no encaja.
 Los EJEMPLOS DE OTROS PROVEEDORES muestran cómo se contabilizaron conceptos parecidos: úsalos como referencia.
 Si dudas, escoge lo más probable y explícalo en "dudas". En "reglas_aplicadas" pon los números (entre corchetes) de las
 REGLAS DE LA EMPRESA que usaste. Responde SOLO un JSON:
@@ -69,13 +71,16 @@ def _reglas_texto(reglas: list[tuple[int, str]]) -> str:
 
 
 def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict], modelo: str = "",
-             reglas: list[tuple[int, str]] | None = None, ejemplos: list[dict] | None = None) -> tuple[dict, ia.Respuesta]:
+             reglas: list[tuple[int, str]] | None = None, ejemplos: list[dict] | None = None,
+             opciones: list[dict] | None = None) -> tuple[dict, ia.Respuesta]:
     """factura: {"proveedor", "nit", "lineas": [{"n", "descripcion", "cantidad", "valor", "iva_pct"}]}.
     reglas: [(número, texto)] de las reglas de la empresa que vienen al caso (RAG); productos: las cuentas candidatas.
     El orden del contexto va de lo más estable a lo más cambiante (aprovecha el caché de instrucciones del proveedor)."""
     contexto = ("REGLAS DE LA EMPRESA (mandan sobre la norma general):\n" + _reglas_texto(reglas or [])
                 + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos)
                 + "\n\nCENTROS DE COSTOS: " + json.dumps(centros, ensure_ascii=False)
+                + "\n\nOPCIONES DE ESTE PROVEEDOR EN WORLD OFFICE (producto, nombre, veces, última fecha):\n"
+                + json.dumps([[o["producto"], o["nombre"], o["compras"], o["ultima_fecha"]] for o in opciones or []], ensure_ascii=False)
                 + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:15], ensure_ascii=False)
                 + "\n\nEJEMPLOS DE OTROS PROVEEDORES (conceptos parecidos ya contabilizados):\n" + json.dumps(ejemplos or [], ensure_ascii=False))
     r = ia.completar(INSTRUCCIONES_PROPONER + "\n\n" + contexto,

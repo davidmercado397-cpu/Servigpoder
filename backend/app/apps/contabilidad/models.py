@@ -6,7 +6,7 @@ armar el plano. Las tablas viven en el esquema de cada empresa (BaseEmpresa); el
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import BaseEmpresa
@@ -162,6 +162,23 @@ class CtbCentroCostos(BaseEmpresa):
     nombre: Mapped[str] = mapped_column(String(80), unique=True)  # como va en el plano (p. ej. «Administracion»)
     codigo: Mapped[str] = mapped_column(String(40), default="")
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CtbProductoProveedor(BaseEmpresa):
+    """Con qué producto (cuenta) de World Office se ha registrado cada proveedor: del informe «Compras por Producto y
+    Proveedor». Le dice al agente qué opciones tiene con cada proveedor."""
+
+    __tablename__ = "ctb_producto_proveedor"
+    __table_args__ = (UniqueConstraint("nit", "producto", name="uq_ctb_producto_proveedor"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nit: Mapped[str] = mapped_column(String(20), index=True)
+    tercero: Mapped[str] = mapped_column(String(200), default="")
+    producto: Mapped[str] = mapped_column(String(40))
+    compras: Mapped[int] = mapped_column(Integer, default=1)  # veces que aparece en el informe
+    unidad: Mapped[str] = mapped_column(String(20), default="")
+    ultimo_precio: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    ultima_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class CtbTercero(BaseEmpresa):

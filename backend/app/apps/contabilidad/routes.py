@@ -12,8 +12,8 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, require
 from app.apps.contabilidad.models import (
-    APARTE, CONTABILIZADA, DESCARTADA, ESTADOS, LISTA, PENDIENTE, CtbCentroCostos, CtbCorreo, CtbFactura, CtbPlano, CtbProducto,
-    CtbRegla, CtbTercero,
+    APARTE, CONTABILIZADA, DESCARTADA, ESTADOS, LISTA, PENDIENTE, CtbCentroCostos, CtbCorreo, CtbFactura, CtbPlano,
+    CtbProducto, CtbProductoProveedor, CtbRegla, CtbTercero,
 )
 from app.apps.contabilidad.services import buzon, ia_contable, servicio
 from app.core import ia, vectores
@@ -82,7 +82,8 @@ def resumen(db: DbSession, _=Depends(require(VER))):
     return ok({"conteos": servicio.conteos(db), "buzon": {"correo": c.correo, "clave_guardada": bool(c.clave_cifrada),
                                                          "ultima_lectura": c.ultima_lectura.isoformat() if c.ultima_lectura else None,
                                                          "ultimo_error": c.ultimo_error},
-               "ia": ia.configurada(), "productos": db.query(CtbProducto).count(), "terceros": db.query(CtbTercero).count()})
+               "ia": ia.configurada(), "productos": db.query(CtbProducto).count(), "terceros": db.query(CtbTercero).count(),
+               "productos_proveedor": db.query(CtbProductoProveedor).count()})
 
 
 @router.get("/facturas", response_model=ApiResponse[list[dict]])
@@ -101,7 +102,9 @@ def facturas(db: DbSession, p: PaginaCtb, estado: str = PENDIENTE, todas: bool =
 
 @router.get("/facturas/{factura_id}", response_model=ApiResponse[dict])
 def factura(factura_id: int, db: DbSession, _=Depends(require(VER))):
-    return ok(_factura(_fac(db, factura_id), True))
+    f = _fac(db, factura_id)
+    # Con qué productos se ha registrado este proveedor en World Office (para revisar la propuesta)
+    return ok({**_factura(f, True), "opciones_proveedor": servicio.opciones_proveedor(db, f.emisor_nit, 10)})
 
 
 class LineaIn(BaseModel):
@@ -422,6 +425,18 @@ async def importar_productos(request: Request, db: DbSession, archivo: UploadFil
     auditar(db, request, "ctb_cuentas_importadas", actual.id, cuentas=n)
     db.commit()
     return ok({"cuentas": n})
+
+
+@router.post("/productos-proveedor/importar", response_model=ApiResponse[dict], dependencies=[Depends(limitar("ctb_cargar", 10, 60))])
+async def importar_productos_proveedor(request: Request, db: DbSession, archivo: UploadFile = File(...), actual: Usuario = Depends(require(CONFIGURAR))):
+    """Informe «Compras por Producto y Proveedor» de World Office: qué cuentas se han usado con cada proveedor."""
+    try:
+        relaciones, productos = servicio.importar_productos_proveedores(db, await leer_xlsx(archivo))
+    except ValueError as e:
+        raise ApiError(422, str(e)) from e
+    auditar(db, request, "ctb_productos_proveedor_importados", actual.id, relaciones=relaciones, productos=productos)
+    db.commit()
+    return ok({"relaciones": relaciones, "productos": productos})
 
 
 @router.post("/terceros/importar", response_model=ApiResponse[dict], dependencies=[Depends(limitar("ctb_cargar", 10, 60))])

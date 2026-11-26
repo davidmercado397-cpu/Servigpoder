@@ -123,6 +123,23 @@ export default function DetalleFactura() {
           </table>
           <datalist id="productos-wo">{productos.map((p) => <option key={p.codigo} value={p.codigo}>{p.nombre}</option>)}</datalist>
         </div>
+        {(f.opciones_proveedor ?? []).length > 0 && (
+          <div className="rounded-lg bg-slate-50 p-3 text-sm">
+            <p className="mb-1 font-medium text-slate-700">Así se ha registrado este proveedor en World Office</p>
+            <div className="flex flex-wrap gap-2">
+              {f.opciones_proveedor!.map((o) => (
+                <span key={o.producto} className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 ring-1 ring-slate-200">
+                  <span className="font-mono">{o.producto}</span> {o.nombre}
+                  <span className="text-xs text-slate-500">· {o.compras} compra(s){o.ultima_fecha ? ` · última ${fecha(o.ultima_fecha)}` : ""}{o.ultimo_precio ? ` · ${plata(o.ultimo_precio)}` : ""}</span>
+                  {editable && f.lineas.length > 0 && (
+                    <button className="text-xs text-marca-700 hover:underline" title="Poner este producto en todas las líneas"
+                      onClick={() => setF({ ...f, lineas: f.lineas.map((l) => ({ ...l, producto: o.producto })) })}>usar en todas</button>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap justify-end gap-6 border-t border-slate-100 pt-3 text-sm">
           <span>Subtotal <b className="tabular-nums">{plata(f.subtotal)}</b></span>
           <span>IVA <b className="tabular-nums">{plata(f.iva)}</b></span>

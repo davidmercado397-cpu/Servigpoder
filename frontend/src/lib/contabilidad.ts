@@ -37,7 +37,10 @@ export type Factura = {
   /** cuántos productos trae (en el detalle, la lista de líneas) */
   lineas: number;
 };
-export type FacturaCompleta = Omit<Factura, "lineas"> & { cufe: string; forma_pago: string; moneda: string; retenciones: Record<string, number>; lineas: Linea[] };
+/** Con qué producto se ha registrado el proveedor en World Office (informe «Compras por Producto y Proveedor») */
+export type OpcionProveedor = { producto: string; nombre: string; compras: number; ultima_fecha: string | null; ultimo_precio: number };
+export type FacturaCompleta = Omit<Factura, "lineas"> & { cufe: string; forma_pago: string; moneda: string; retenciones: Record<string, number>; lineas: Linea[];
+  opciones_proveedor?: OpcionProveedor[] };
 export type Producto = { codigo: string; nombre: string; activo: boolean };
 export type Centro = { id: number; nombre: string; codigo: string; activo: boolean };
 

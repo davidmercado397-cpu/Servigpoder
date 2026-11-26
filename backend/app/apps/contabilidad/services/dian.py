@@ -106,6 +106,18 @@ def _buscar(raiz: Element, nombre: str) -> Element | None:
     return next((e for e in raiz.iter() if _local(e.tag) == nombre), None)
 
 
+def limpiar_numero(prefijo: str, numero: str) -> tuple[str, str]:
+    """Prefijo y número de la factura para el plano: «FE45 - 4548» → («FE45», «4548»); «4548-4» → «4548». En el número
+    va solo la cifra: sin el separador del prefijo ni lo que venga después de un «-» (World Office no lo acepta)."""
+    p = re.sub(r"[\s\-_/.#]+$", "", (prefijo or "").strip())
+    n = (numero or "").strip()
+    if p and n.upper().startswith(p.upper()):
+        n = n[len(p):]
+    n = n.lstrip(" -_/.#")
+    m = re.match(r"^(\d+)", n)
+    return p[:20], (m.group(1) if m else n)[:40]
+
+
 def solo_nit(valor: str) -> str:
     """NIT sin dígito de verificación ni puntos: «900.474.794-1» → «900474794»."""
     t = re.sub(r"[.\s]", "", valor or "")

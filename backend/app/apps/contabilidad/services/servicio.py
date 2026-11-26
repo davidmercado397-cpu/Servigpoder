@@ -72,6 +72,18 @@ def registrar(db: Session, f: dian.Factura, *, leida_con: str = "xml", origen: s
         estado, motivo = APARTE, f"La factura es a nombre de {f.comprador_nombre or 'otro comprador'} (NIT {f.comprador_nit or 'sin NIT'})"
     if leida_con == "ia":
         avisos.append("Leída por la IA desde el PDF (no vino el XML): verifique los valores con la factura")
+    f.prefijo, f.numero = dian.limpiar_numero(f.prefijo, f.numero)
+    # Valores negativos: los mínimos (ajustes al peso de hasta $200) van en 0 y no salen en el plano; los demás no se
+    # pueden llevar negativos y se avisa para revisarlos
+    for x in f.lineas:
+        if x.subtotal < 0 or x.valor_unitario < 0:
+            valor = abs(x.subtotal or x.valor_unitario * x.cantidad)
+            if valor <= MAX_NEGATIVO_A_CERO:
+                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») venía en −${valor:,.0f}: se lleva en 0 y no sale en el plano".replace(",", "."))
+                x.subtotal = x.valor_unitario = x.iva_valor = 0
+            else:
+                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${valor:,.0f}: no se puede llevar negativo al plano; "
+                              f"revísela con el proveedor".replace(",", "."))
     hay_terceros = db.scalar(select(CtbTercero.id).limit(1)) is not None
     if hay_terceros and not db.scalar(select(CtbTercero.id).where(CtbTercero.nit == f.emisor_nit)):
         avisos.append(f"El proveedor NIT {f.emisor_nit} no está en el listado de terceros de World Office: créelo antes de cargar el plano")
@@ -143,6 +155,7 @@ def reglas_activas(db: Session) -> list[CtbRegla]:
 
 
 AGENTE = "contabilidad"
+MAX_NEGATIVO_A_CERO = 200  # pesos: un valor negativo hasta aquí (ajuste al peso) se lleva en 0 y no sale en el plano
 TOPE_CUENTAS = 60  # catálogo hasta este tamaño va completo; más grande, solo las cuentas candidatas (RAG)
 TOPE_REGLAS = 10  # igual con las reglas de la empresa
 CUENTAS_POR_LINEA = 12
@@ -315,10 +328,20 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
         fac.avisos = [*fac.avisos, *[f"IA: {d}" for d in dudas[:5]]]
 
 
+def va_al_plano(x: CtbLinea) -> bool:
+    """Las líneas en 0 (p. ej. un ajuste al peso negativo que se llevó a 0) no salen en el plano."""
+    return float(x.valor_unitario or 0) > 0
+
+
 def faltantes(fac: CtbFactura) -> list[str]:
     """Lo que impide que la factura salga en el plano."""
     out = []
     for x in fac.lineas:
+        if float(x.valor_unitario or 0) < 0:
+            out.append(f"Línea {x.orden}: viene en negativo (−${abs(float(x.subtotal or 0)):,.0f}) y no se puede llevar al plano".replace(",", "."))
+            continue
+        if not va_al_plano(x):
+            continue
         if not x.producto:
             out.append(f"Línea {x.orden}: falta el producto (cuenta)")
         if not x.centro_costos:
@@ -353,18 +376,24 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
     siguiente = {False: _base_consecutivo(db, fecha, False, c.ultimo_fc), True: _base_consecutivo(db, fecha, True, c.ultimo_ds)}
     filas, items = [], []
     for fac in facturas:
+        lineas = [x for x in fac.lineas if va_al_plano(x)]
+        if not lineas:  # todo en 0: no lleva número de documento
+            continue
         siguiente[fac.cuenta_cobro] += 1
         numero = siguiente[True] if fac.cuenta_cobro else plano.documento(fecha, siguiente[False])
         tipo, prefijo = (c.tipo_documento_ds, c.prefijo_ds) if fac.cuenta_cobro else (c.tipo_documento, c.prefijo)
         items.append({"factura_id": fac.id, "documento": numero, "serie": prefijo})  # FC o DSS
-        for x in fac.lineas:
+        prefijo_ext, numero_ext = dian.limpiar_numero(fac.prefijo, fac.numero)
+        for x in lineas:
             filas.append(plano.Fila(
-                documento=numero, nit=fac.emisor_nit, prefijo_ext=fac.prefijo, numero_ext=fac.numero, nota=fac.nota,
+                documento=numero, nit=fac.emisor_nit, prefijo_ext=prefijo_ext, numero_ext=numero_ext, nota=fac.nota,
                 forma_pago=fac.forma_pago, fecha_emision=fac.fecha_emision, producto=x.producto, cantidad=float(x.cantidad),
                 iva=round(float(x.iva_pct) / 100, 4), valor_unitario=float(x.valor_unitario), vencimiento=fac.fecha_vencimiento,
                 nota_detalle=x.nota, centro_costos=x.centro_costos,
                 codigo_centro=db.scalar(select(CtbCentroCostos.codigo).where(CtbCentroCostos.nombre == x.centro_costos)) or "",
                 tipo=tipo, prefijo=prefijo))
+    if not items:
+        raise ValueError("Las facturas elegidas no tienen valores para llevar al plano")
     contenido = plano.excel(filas, fecha, c.empresa_nombre, c.bodega, c.unidad)
     p = CtbPlano(fecha=fecha, items=items, usuario_id=usuario_id)
     db.add(p)

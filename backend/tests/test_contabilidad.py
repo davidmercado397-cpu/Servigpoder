@@ -506,3 +506,31 @@ def test_respuesta_cortada_de_la_ia_se_reintenta(speed, monkeypatch):
     assert len(pedidos) == 2 and pedidos[1]["max_tokens"] == 2 * pedidos[0]["max_tokens"]
     assert "solo el objeto JSON" in pedidos[1]["messages"][-1]["content"] or "únicamente con el objeto JSON" in pedidos[1]["messages"][-1]["content"]
     assert "RICOH MPC 4503" in pedidos[0]["messages"][0]["content"]  # el agente sabe identificar el producto por la marca
+
+
+def test_negativos_y_numero_de_factura_para_world_office(speed):
+    assert dian.limpiar_numero("FE45", "FE45 - 4548") == ("FE45", "4548")
+    assert dian.limpiar_numero("FE45-", "4548-4") == ("FE45", "4548")
+    assert dian.limpiar_numero("PTC6", "1841310") == ("PTC6", "1841310")
+    # Factura con número «FE45-4548-6» y un ajuste al peso de −6 pesos
+    xml = factura_xml(cufe="neg-1", lineas=((1, "Servicio de monitoreo", 100000.0, 19, 19000.0), (1, "Ajuste al peso", -6.0, 0, 0.0)))
+    xml = xml.replace("<cbc:ID>PTC6", "<cbc:ID>FE45-").replace("<sts:Prefix>PTC6", "<sts:Prefix>FE45").replace("1841310</cbc:ID>", "1841310-6</cbc:ID>")
+    f = _cargar(speed, attached(xml), "neg.xml").json()["data"]["nuevas"][0]
+    assert (f["prefijo"], f["numero"]) == ("FE45", "1841310")
+    assert any("−$6: se lleva en 0 y no sale en el plano" in a for a in f["avisos"])
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    assert d["lineas"][1]["valor_unitario"] == 0
+    # La línea en 0 no pide cuenta ni sale en el plano
+    r = speed.put(f"{API}/facturas/{f['id']}", json={"nota": "MONITOREO", "lista": True, "lineas": [
+        {"id": d["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "monitoreo"}]})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=speed.post(f"{API}/plano", json={"fecha": "2026-11-26"}).content).sheet_by_index(0)
+    assert hoja.nrows == 2  # solo la línea con valor
+    fila = dict(zip(plano.COLUMNAS, hoja.row_values(1)))
+    assert (fila["Encab: Pref Dto Ext"], fila["Encab: No. Dto Ext"]) == ("FE45", 1841310)
+
+    # Un negativo grande no se puede llevar: la factura no pasa al plano
+    xml = factura_xml(cufe="neg-2", lineas=((1, "Servicio", 100000.0, 19, 19000.0), (1, "Descuento comercial", -5000.0, 0, 0.0)))
+    g = _cargar(speed, attached(xml), "neg2.xml").json()["data"]["nuevas"][0]
+    assert any("no se puede llevar negativo" in a for a in g["avisos"])
+    assert any("viene en negativo" in x for x in g["faltantes"])

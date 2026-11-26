@@ -3,6 +3,7 @@
 import io
 import logging
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -16,7 +17,7 @@ from app.apps.contabilidad.models import (
     CtbTercero,
 )
 from app.apps.contabilidad.services import dian, ia_contable, plano
-from app.core import ia
+from app.core import ia, vectores
 
 log = logging.getLogger("app.contabilidad")
 CENTROS_INICIALES = ["Administracion"]
@@ -141,23 +142,115 @@ def reglas_activas(db: Session) -> list[CtbRegla]:
     return list(db.scalars(select(CtbRegla).where(CtbRegla.activa.is_(True)).order_by(CtbRegla.id)))
 
 
+AGENTE = "contabilidad"
+TOPE_CUENTAS = 60  # catálogo hasta este tamaño va completo; más grande, solo las cuentas candidatas (RAG)
+TOPE_REGLAS = 10  # igual con las reglas de la empresa
+CUENTAS_POR_LINEA = 12
+TOPE_EJEMPLOS = 8
+MAX_EJEMPLOS = 3000  # líneas contabilizadas que se vectorizan como ejemplos
+
+
+def normalizar(texto: str) -> str:
+    """Descripción comparable: sin tildes, sin números (periodos, fechas, consecutivos) ni signos."""
+    t = unicodedata.normalize("NFD", (texto or "").lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-zñ ]", " ", t)).strip()
+
+
+def memoria(db: Session, fac: CtbFactura) -> dict[int, tuple[str, str, str]]:
+    """Líneas que ya se contabilizaron igual con este proveedor: se repiten sin llamar a la IA (sin costo).
+    Solo cuenta lo contabilizado después del último cambio en las reglas (si una regla cambió, el agente vuelve a decidir)."""
+    ultima_regla = db.scalar(select(func.max(CtbRegla.actualizado_en)))
+    q = (select(CtbLinea.descripcion, CtbLinea.producto, CtbLinea.centro_costos, CtbLinea.nota).join(CtbFactura)
+         .where(CtbFactura.emisor_nit == fac.emisor_nit, CtbFactura.estado == CONTABILIZADA, CtbFactura.id != fac.id, CtbLinea.producto != "")
+         .order_by(CtbFactura.contabilizada_en.desc()).limit(300))
+    if ultima_regla is not None:
+        q = q.where(CtbFactura.contabilizada_en > ultima_regla)
+    previas: dict[str, tuple[str, str, str]] = {}
+    for d, p, c, n in db.execute(q):
+        previas.setdefault(normalizar(d), (p, c, n))
+    return {x.orden: previas[normalizar(x.descripcion)] for x in fac.lineas if normalizar(x.descripcion) in previas}
+
+
+def _contexto_rag(db: Session, fac: CtbFactura, lineas: list[CtbLinea], productos: list[tuple[str, str]], reglas: list[CtbRegla],
+                  hist: list[dict]) -> tuple[list[tuple[str, str]], list[CtbRegla], list[dict], int]:
+    """RAG: en vez de todo el catálogo y todas las reglas, solo lo que se parece a esta factura. Devuelve
+    (cuentas candidatas, reglas que vienen al caso, ejemplos de otros proveedores, tokens de vectorización)."""
+    # Ejemplos: cómo se contabilizaron conceptos parecidos de otros proveedores
+    filas = db.execute(select(CtbLinea.descripcion, CtbLinea.producto).join(CtbFactura)
+                       .where(CtbFactura.estado == CONTABILIZADA, CtbFactura.emisor_nit != fac.emisor_nit, CtbLinea.producto != "")
+                       .order_by(CtbLinea.id.desc()).limit(MAX_EJEMPLOS))
+    ejemplos_por_ref: dict[str, tuple[str, str]] = {}
+    for d, p in filas:
+        ejemplos_por_ref.setdefault(f"{p}|{vectores.huella(normalizar(d))[:16]}", (d[:200], p))
+    # Si todo es pequeño, va completo y no se vectoriza nada (cero costo de vectores)
+    if len(reglas) <= TOPE_REGLAS and len(productos) <= TOPE_CUENTAS and not ejemplos_por_ref:
+        return productos, reglas, [], 0
+    vecs, tokens = ia.embeber([f"{fac.emisor_nombre}: {x.descripcion}"[:1000] for x in lineas])
+    reglas_sel = reglas
+    if len(reglas) > TOPE_REGLAS:
+        tokens += vectores.sincronizar(db, "ctb_regla", {str(r.id): r.texto for r in reglas})
+        ids = {int(ref) for ref, _ in vectores.buscar(db, "ctb_regla", vecs, TOPE_REGLAS)}
+        reglas_sel = [r for r in reglas if r.id in ids]
+    productos_sel = productos
+    if len(productos) > TOPE_CUENTAS:
+        tokens += vectores.sincronizar(db, "ctb_cuenta", {c: f"{c} {n}" for c, n in productos})
+        elegidas = {ref for ref, _ in vectores.buscar(db, "ctb_cuenta", vecs, min(40, CUENTAS_POR_LINEA * len(lineas)))}
+        # Siempre: las del historial del proveedor y las que nombran las reglas que vienen al caso
+        elegidas |= {h["producto"] for h in hist}
+        for r in reglas_sel:
+            elegidas |= set(re.findall(r"\b\d{4,10}\b", f"{r.texto} {r.cuentas}"))
+        productos_sel = [(c, n) for c, n in productos if c in elegidas]
+    ejemplos = []
+    if ejemplos_por_ref:
+        tokens += vectores.sincronizar(db, "ctb_ejemplo", {ref: d for ref, (d, _) in ejemplos_por_ref.items()})
+        for ref, _ in vectores.buscar(db, "ctb_ejemplo", vecs, TOPE_EJEMPLOS, minimo=0.3):
+            d, p = ejemplos_por_ref[ref]
+            ejemplos.append({"descripcion": d, "producto": p})
+    return productos_sel, reglas_sel, ejemplos, tokens
+
+
 def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
-    """Llena producto, centro de costos y notas de lo que esté vacío. Sin IA (o si falla), repite lo más usado con el proveedor.
-    El agente aplica primero las reglas de la empresa."""
+    """Llena producto, centro de costos y notas de lo que esté vacío. Para no gastar de más:
+    1. memoria: lo que ya se contabilizó igual con este proveedor se repite sin llamar a la IA;
+    2. RAG: al agente solo le llegan las cuentas, reglas y ejemplos parecidos a la factura (no todo el catálogo);
+    3. sin IA (o si falla), repite lo más usado con el proveedor. El agente aplica primero las reglas de la empresa."""
     productos = [(c, n) for c, n in db.execute(select(CtbProducto.codigo, CtbProducto.nombre).where(CtbProducto.activo.is_(True)))]
     centros = list(db.scalars(select(CtbCentroCostos.nombre).where(CtbCentroCostos.activo.is_(True)).order_by(CtbCentroCostos.nombre)))
     hist = historial(db, fac.emisor_nit, sin=fac.id)
     validos = {c for c, _ in productos}
     propuesta: dict = {}
+
+    recordadas = memoria(db, fac)
+    for x in fac.lineas:
+        if x.orden in recordadas and not x.producto:
+            x.producto, centro, nota = recordadas[x.orden]
+            x.producto_ia = x.producto
+            x.centro_costos = x.centro_costos or centro
+            x.nota = x.nota or nota
+    pendientes = [x for x in fac.lineas if not x.producto]
+    if recordadas:
+        fac.avisos = [*fac.avisos, f"{len(recordadas)} de {len(fac.lineas)} líneas se tomaron de facturas ya contabilizadas de este proveedor (sin costo de IA)"]
+        if not pendientes:
+            vectores.registrar_uso(db, AGENTE, "memoria")
+
     reglas = reglas_activas(db)
-    numeradas = {i: r for i, r in enumerate(reglas, start=1)}
-    if ia.configurada() and (productos or hist):
+    por_id: dict[int, CtbRegla] = {r.id: r for r in reglas}
+    if pendientes and ia.configurada() and (productos or hist):
+        productos_sel, reglas_sel, ejemplos = productos, reglas, []
         try:
-            propuesta = ia_contable.proponer(
+            productos_sel, reglas_sel, ejemplos, tokens_vec = _contexto_rag(db, fac, pendientes, productos, reglas, hist)
+            if tokens_vec:
+                vectores.registrar_uso(db, AGENTE, "vectores", tokens_vec, 0, ia.ajustes().modelo_vectores)
+        except ia.IAError as e:  # sin vectores: el contexto completo (más caro, pero funciona)
+            log.warning("RAG de contabilidad no disponible (factura %s): %s", fac.id, e.mensaje)
+        try:
+            propuesta, r = ia_contable.proponer(
                 {"proveedor": fac.emisor_nombre, "nit": fac.emisor_nit,
                  "lineas": [{"n": x.orden, "descripcion": x.descripcion, "cantidad": float(x.cantidad), "valor": float(x.subtotal),
-                             "iva_pct": float(x.iva_pct)} for x in fac.lineas]},
-                productos, centros, hist, config(db).modelo, [(i, r.texto) for i, r in numeradas.items()])
+                             "iva_pct": float(x.iva_pct)} for x in pendientes]},
+                productos_sel, centros, hist, config(db).modelo, [(rg.id, rg.texto) for rg in reglas_sel], ejemplos)
+            vectores.registrar_uso(db, AGENTE, "propuesta", r.tokens_entrada, r.tokens_salida, r.modelo)
         except ia.IAError as e:
             log.warning("La IA no propuso la factura %s: %s", fac.id, e.mensaje)
             fac.avisos = [*fac.avisos, f"La IA no pudo proponer la cuenta: {e.mensaje}"]
@@ -178,18 +271,19 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
             x.nota = str(p.get("nota") or "").strip()[:200] or (hist[0]["nota"] if hist else "")
     if not fac.nota:
         fac.nota = str(propuesta.get("nota") or "").strip()[:300] or (fac.lineas[0].nota.upper() if fac.lineas and fac.lineas[0].nota else "")
-    # Reglas de la empresa que el agente dijo aplicar: quedan a la vista y suman su uso
-    aplicadas = []
+    # Reglas de la empresa que el agente dijo aplicar: quedan a la vista, suman su uso y se recuerdan en la factura
+    aplicadas: list[CtbRegla] = []
     for n in propuesta.get("reglas_aplicadas") or []:
         try:
-            r = numeradas.get(int(n))
+            rg = por_id.get(int(n))
         except (TypeError, ValueError):
-            r = None
-        if r is not None and r not in aplicadas:
-            aplicadas.append(r)
-            r.usos = (r.usos or 0) + 1
+            rg = None
+        if rg is not None and rg not in aplicadas:
+            aplicadas.append(rg)
+            rg.usos = (rg.usos or 0) + 1
+    fac.reglas_aplicadas = [rg.id for rg in aplicadas]
     if aplicadas:
-        fac.avisos = [*fac.avisos, *[f"Regla de la empresa aplicada: {r.texto[:200]}" for r in aplicadas]]
+        fac.avisos = [*fac.avisos, *[f"Regla de la empresa aplicada: {rg.texto[:200]}" for rg in aplicadas]]
     dudas = [str(d)[:300] for d in propuesta.get("dudas") or [] if d]
     if dudas:
         fac.avisos = [*fac.avisos, *[f"IA: {d}" for d in dudas[:5]]]

@@ -1,6 +1,6 @@
 """Contabilidad (Speed): bandeja de facturas recibidas, plano de World Office, buzón de Gmail y catálogos."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
 from typing import Annotated
 
@@ -16,7 +16,7 @@ from app.apps.contabilidad.models import (
     CtbRegla, CtbTercero,
 )
 from app.apps.contabilidad.services import buzon, ia_contable, servicio
-from app.core import ia
+from app.core import ia, vectores
 from app.core.archivos import leer_xlsx
 from app.core.auditoria import auditar
 from app.core.config import get_settings
@@ -134,6 +134,11 @@ def guardar(factura_id: int, data: FacturaIn, request: Request, db: DbSession, a
                 correcciones.append({"linea_id": x.id, "orden": x.orden, "descripcion": x.descripcion[:200],
                                      "cuenta_agente": x.producto_ia, "cuenta_correcta": nuevo})
             x.producto, x.centro_costos, x.nota = nuevo, ln.centro_costos.strip(), ln.nota.strip()
+    # Salud de las reglas: si se corrige una factura donde el agente aplicó reglas, esas reglas quedan para revisar
+    if correcciones and f.reglas_aplicadas:
+        for rg in db.scalars(select(CtbRegla).where(CtbRegla.id.in_(f.reglas_aplicadas))):
+            rg.corregida = (rg.corregida or 0) + 1
+        f.reglas_aplicadas = []
     f.nota = data.nota.strip()
     if data.cuenta_cobro is not None:
         f.cuenta_cobro = data.cuenta_cobro
@@ -434,7 +439,7 @@ async def importar_terceros(request: Request, db: DbSession, archivo: UploadFile
 
 def _regla(r: CtbRegla) -> dict:
     return {"id": r.id, "texto": r.texto, "cuentas": r.cuentas, "activa": r.activa, "origen": r.origen, "ejemplo": r.ejemplo,
-            "usos": r.usos or 0, "creado_en": r.creado_en.isoformat() if r.creado_en else None,
+            "usos": r.usos or 0, "corregida": r.corregida or 0, "creado_en": r.creado_en.isoformat() if r.creado_en else None,
             "actualizado_en": r.actualizado_en.isoformat() if r.actualizado_en else None}
 
 
@@ -454,7 +459,7 @@ def reglas(db: DbSession, _=Depends(require(VER))):
 @router.post("/reglas", response_model=ApiResponse[dict], status_code=201)
 def crear_regla(data: ReglaIn, request: Request, db: DbSession, actual: Usuario = Depends(require(REVISAR))):
     r = CtbRegla(texto=data.texto.strip(), cuentas=data.cuentas.strip(), activa=data.activa, origen=data.origen,
-                 ejemplo=data.ejemplo.strip(), creado_por=actual.id)
+                 ejemplo=data.ejemplo.strip(), creado_por=actual.id, actualizado_en=datetime.now(timezone.utc))
     db.add(r)
     db.flush()
     auditar(db, request, "ctb_regla_creada", actual.id, regla=r.id, origen=r.origen, texto=r.texto[:300])
@@ -469,6 +474,7 @@ def editar_regla(regla_id: int, data: ReglaIn, request: Request, db: DbSession, 
         raise ApiError(404, "Regla no encontrada")
     antes = r.texto
     r.texto, r.cuentas, r.activa = data.texto.strip(), data.cuentas.strip(), data.activa
+    r.actualizado_en = datetime.now(timezone.utc)  # lo contabilizado antes de este cambio ya no se repite sin el agente
     auditar(db, request, "ctb_regla_editada", actual.id, regla=r.id, antes=antes[:300], despues=r.texto[:300], activa=r.activa)
     db.commit()
     return ok(_regla(r))
@@ -504,13 +510,38 @@ def redactar_regla(data: RedactarIn, db: DbSession, _=Depends(require(REVISAR)))
     if not ia.configurada():
         raise ApiError(503, "La IA no está configurada (Administración → Inteligencia artificial)")
     productos = [(c, n) for c, n in db.execute(select(CtbProducto.codigo, CtbProducto.nombre).where(CtbProducto.activo.is_(True)))]
-    existentes = [(i, r.texto) for i, r in enumerate(servicio.reglas_activas(db), start=1)]
+    activas = servicio.reglas_activas(db)
+    # Reglas parecidas (RAG): para actualizar la que ya existe en vez de duplicarla, sin mandar todas
+    parecidas = activas
+    if len(activas) > servicio.TOPE_REGLAS:
+        try:
+            vecs, t = ia.embeber([f"{x.descripcion} {data.cuenta_correcta} {data.motivo}"[:1000]])
+            t += vectores.sincronizar(db, "ctb_regla", {str(r.id): r.texto for r in activas})
+            ids = {int(ref) for ref, _ in vectores.buscar(db, "ctb_regla", vecs, 5)}
+            parecidas = [r for r in activas if r.id in ids]
+            vectores.registrar_uso(db, servicio.AGENTE, "vectores", t, 0, ia.ajustes().modelo_vectores)
+        except ia.IAError:
+            parecidas = activas[-servicio.TOPE_REGLAS:]
     try:
-        d = ia_contable.redactar_regla({"proveedor": f.emisor_nombre, "descripcion": x.descripcion, "cuenta_agente": data.cuenta_agente,
-                                        "cuenta_correcta": data.cuenta_correcta, "motivo": data.motivo.strip()},
-                                       productos, existentes, servicio.config(db).modelo)
+        d, r = ia_contable.redactar_regla({"proveedor": f.emisor_nombre, "descripcion": x.descripcion, "cuenta_agente": data.cuenta_agente,
+                                           "cuenta_correcta": data.cuenta_correcta, "motivo": data.motivo.strip()},
+                                          productos if len(productos) <= servicio.TOPE_CUENTAS else
+                                          [(c, n) for c, n in productos if c in (data.cuenta_agente, data.cuenta_correcta)],
+                                          [(rg.id, rg.texto) for rg in parecidas], servicio.config(db).modelo)
     except ia.IAError as e:
         raise ApiError(e.status, e.mensaje, e.codigo) from e
+    vectores.registrar_uso(db, servicio.AGENTE, "regla", r.tokens_entrada, r.tokens_salida, r.modelo)
+    db.commit()
     if not d["texto"]:
         raise ApiError(502, "El agente no redactó la regla. Escríbala usted.")
-    return ok({**d, "ejemplo": f"{f.emisor_nombre[:80]} · «{x.descripcion[:120]}»: {data.cuenta_agente or '—'} → {data.cuenta_correcta}"})
+    actualiza = db.get(CtbRegla, d["actualiza"]) if d["actualiza"] else None
+    return ok({**d, "regla_actual": actualiza.texto if actualiza else None,
+               "ejemplo": f"{f.emisor_nombre[:80]} · «{x.descripcion[:120]}»: {data.cuenta_agente or '—'} → {data.cuenta_correcta}"})
+
+
+@router.get("/agente/uso", response_model=ApiResponse[dict])
+def uso_agente(db: DbSession, _=Depends(require(VER))):
+    """Consumo del agente contable en el mes: propuestas con IA, las resueltas con la memoria (sin IA) y los tokens."""
+    hoy = date.today()
+    return ok({**vectores.resumen_uso(db, servicio.AGENTE, hoy.replace(day=1)),
+               "modelo": servicio.config(db).modelo or ia.ajustes().modelo, "modelo_vectores": ia.ajustes().modelo_vectores})

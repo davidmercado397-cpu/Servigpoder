@@ -334,11 +334,11 @@ def test_agente_aprende_las_reglas_de_la_empresa(speed, monkeypatch):
 
     respuestas.append({"nota": "INTERESES", "lineas": [{"n": 1, "producto": "519595", "centro_costos": "Administracion", "nota": "intereses de mora"},
                                                        {"n": 2, "producto": "519595", "centro_costos": "Administracion", "nota": "cargo"}],
-                       "reglas_aplicadas": [1, 99], "dudas": []})
+                       "reglas_aplicadas": [regla["id"], 99], "dudas": []})
     f = _cargar(speed, zip_factura(cufe="con-regla")).json()["data"]["nuevas"][0]
     d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
     sistema = pedidos[-1]["messages"][0]["content"]
-    assert "LAS REGLAS DE LA EMPRESA MANDAN" in sistema and "1. En Speed los intereses de mora" in sistema
+    assert "LAS REGLAS DE LA EMPRESA MANDAN" in sistema and f"[{regla['id']}] En Speed los intereses de mora" in sistema
     assert d["lineas"][0]["producto"] == "519595" and d["lineas"][0]["producto_ia"] == "519595"
     assert any("Regla de la empresa aplicada" in a for a in d["avisos"])
     assert speed.get(f"{API}/reglas").json()["data"][0]["usos"] == 1  # la 99 no existe: no cuenta
@@ -358,7 +358,7 @@ def test_agente_aprende_las_reglas_de_la_empresa(speed, monkeypatch):
     assert red.status_code == 200, red.text
     caso = json.loads(pedidos[-1]["messages"][1]["content"].split("\n", 1)[1])
     assert caso["nombre_cuenta_correcta"] == "OTROS COSTOS" and caso["motivo"] == "es del puesto del cliente"
-    assert "1. En Speed los intereses de mora" in pedidos[-1]["messages"][0]["content"]  # conoce las reglas que ya existen
+    assert "En Speed los intereses de mora" in pedidos[-1]["messages"][0]["content"]  # conoce las reglas parecidas que ya existen
     nueva = speed.post(f"{API}/reglas", json={**{k: red.json()["data"][k] for k in ("texto", "cuentas", "ejemplo")}, "origen": "correccion"})
     assert nueva.status_code == 201 and nueva.json()["data"]["origen"] == "correccion"
 
@@ -367,6 +367,69 @@ def test_agente_aprende_las_reglas_de_la_empresa(speed, monkeypatch):
     respuestas.append({"nota": "X", "lineas": [], "dudas": []})
     speed.post(f"{API}/facturas/{f['id']}/proponer")
     sistema = pedidos[-1]["messages"][0]["content"]
-    assert "intereses de mora no van" not in sistema and "1. Los intereses de mora de los proveedores" in sistema
+    assert "intereses de mora no van" not in sistema and "] Los intereses de mora de los proveedores" in sistema
     assert speed.delete(f"{API}/reglas/{regla['id']}").status_code == 200
     assert len(speed.get(f"{API}/reglas").json()["data"]) == 1
+
+
+def _vector(texto: str) -> list[float]:
+    """Embedding de prueba: bolsa de palabras en 64 posiciones (textos con palabras en común se parecen)."""
+    import hashlib
+    v = [0.0] * 64
+    for palabra in texto.lower().split():
+        v[int(hashlib.md5(palabra.encode()).hexdigest(), 16) % 64] += 1.0
+    return v
+
+
+def test_rag_y_memoria_bajan_el_costo(speed, monkeypatch):
+    """Catálogo y reglas grandes: al agente solo le llega lo parecido (RAG). Lo ya contabilizado se repite sin IA."""
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    chats, embeddings, respuestas = [], [], []
+
+    def falso(request: httpx.Request) -> httpx.Response:
+        cuerpo = json.loads(request.content)
+        if request.url.path.endswith("/embeddings"):
+            embeddings.append(cuerpo)
+            return httpx.Response(200, json={"data": [{"index": i, "embedding": _vector(t)} for i, t in enumerate(cuerpo["input"])],
+                                             "usage": {"prompt_tokens": 7 * len(cuerpo["input"])}})
+        chats.append(cuerpo)
+        return httpx.Response(200, json={"model": "m", "usage": {"prompt_tokens": 900, "completion_tokens": 80},
+                                         "choices": [{"message": {"content": json.dumps(respuestas.pop(0))}}]})
+
+    monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
+    cuentas = [["515515 PASAJES AEREOS"], ["519595 OTROS"]] + [[f"51{10 + i:02d}95 HONORARIOS DE ASESORIA NUMERO {i}"] for i in range(68)]
+    speed.post(f"{API}/productos/importar", files={"archivo": ("c.xlsx", xlsx(cuentas), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    for i in range(10):
+        speed.post(f"{API}/reglas", json={"texto": f"Los arrendamientos de bodega número {i} van a la cuenta de arrendamientos"})
+    clave = speed.post(f"{API}/reglas", json={"texto": "Los pasajes aereos de viajes de la gerencia van a 515515"}).json()["data"]
+
+    respuestas.append({"nota": "COMPRA DE VUELO", "lineas": [{"n": 1, "producto": "515515", "centro_costos": "Administracion", "nota": "vuelo"},
+                                                             {"n": 2, "producto": "519595", "centro_costos": "Administracion", "nota": "cargo"}],
+                       "reglas_aplicadas": [clave["id"]]})
+    f = _cargar(speed, zip_factura(cufe="rag-1")).json()["data"]["nuevas"][0]
+    sistema = chats[-1]["messages"][0]["content"]
+    assert "515515 PASAJES AEREOS" in sistema
+    assert sistema.count("HONORARIOS DE ASESORIA") < 68  # no viaja el catálogo completo
+    assert sistema.count("Los arrendamientos de bodega") < 10 and "pasajes aereos de viajes" in sistema  # solo las reglas al caso
+    assert embeddings and embeddings[0]["model"] == "openai/text-embedding-3-small" and embeddings[0]["dimensions"] == 512
+
+    # Se contabiliza y llega otra factura igual del mismo proveedor: se repite sin llamar al modelo
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    speed.put(f"{API}/facturas/{f['id']}", json={"nota": d["nota"], "lista": True, "lineas": [
+        {"id": x["id"], "producto": x["producto"], "centro_costos": x["centro_costos"], "nota": x["nota"]} for x in d["lineas"]]})
+    r = speed.post(f"{API}/plano", json={"fecha": "2026-08-25"})
+    speed.post(f"{API}/planos/{int(r.headers['x-plano-id'])}/contabilizar", json={"ids": [f["id"]]})
+    antes = len(chats)
+    g = _cargar(speed, zip_factura(numero="1841400", cufe="rag-2")).json()["data"]["nuevas"][0]
+    otra = speed.get(f"{API}/facturas/{g['id']}").json()["data"]
+    assert len(chats) == antes  # sin llamada al modelo
+    assert [x["producto"] for x in otra["lineas"]] == ["515515", "519595"] and any("sin costo de IA" in a for a in otra["avisos"])
+    uso = speed.get(f"{API}/agente/uso").json()["data"]
+    assert uso["por_tipo"]["propuesta"]["veces"] == 1 and uso["por_tipo"]["memoria"]["veces"] == 1
+    assert uso["por_tipo"]["vectores"]["tokens_entrada"] > 0 and uso["tokens_salida"] == 80
+
+    # Si cambia una regla, lo contabilizado antes ya no se repite a ciegas: el agente vuelve a decidir
+    speed.put(f"{API}/reglas/{clave['id']}", json={"texto": clave["texto"] + " (revisada)", "cuentas": ""})
+    respuestas.append({"nota": "X", "lineas": [], "reglas_aplicadas": []})
+    _cargar(speed, zip_factura(numero="1841401", cufe="rag-3"))
+    assert len(chats) == antes + 1

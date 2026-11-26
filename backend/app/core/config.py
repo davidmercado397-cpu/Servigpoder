@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     ia_modelo: str = "anthropic/claude-opus-5"  # cualquier modelo de openrouter.ai/models
     # En OpenRouter: solo proveedores con retención cero de datos (además de no entrenar con ellos)
     ia_zdr: bool = True
+    # RAG: modelo de embeddings (barato) y tamaño del vector para la memoria de los agentes
+    ia_modelo_vectores: str = "openai/text-embedding-3-small"
+    ia_dimensiones_vectores: int = 512
     # Aprobado por protección de datos: nombres y cédulas pueden enviarse al proveedor de IA
     asistente_datos_personales: bool = True
     asistente_max_diario: int = 100  # preguntas por usuario y día

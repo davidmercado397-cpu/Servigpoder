@@ -94,6 +94,9 @@ class Ajustes:
     modelo_siesa: str
     zdr: bool
     origen_clave: str  # panel | servidor | "" (sin clave)
+    # Vectorización (RAG): modelo de embeddings y tamaño del vector
+    modelo_vectores: str = ""
+    dimensiones_vectores: int = 0
 
 
 # Lo configurado en el panel de administración (se recarga de la base en cada petición que usa la IA)
@@ -132,7 +135,7 @@ def ajustes() -> Ajustes:
     modelo = _panel.get("modelo") or s.ia_modelo
     return Ajustes(api_key=clave, base_url=s.ia_base_url, modelo=modelo, modelo_costeo=_panel.get("modelo_costeo") or modelo,
                    modelo_siesa=_panel.get("modelo_siesa") or s.siesa_modelo or modelo,
-                   zdr=s.ia_zdr, origen_clave=origen)
+                   zdr=s.ia_zdr, origen_clave=origen, modelo_vectores=s.ia_modelo_vectores, dimensiones_vectores=s.ia_dimensiones_vectores)
 
 
 @dataclass
@@ -256,6 +259,38 @@ def completar(instrucciones: str, mensajes: list[dict], *, modelo: str = "", max
     return Respuesta(texto=((eleccion.get("message") or {}).get("content") or "").strip(),
                      tokens_entrada=uso.get("prompt_tokens") or 0, tokens_salida=uso.get("completion_tokens") or 0,
                      modelo=datos.get("model") or cuerpo["model"])
+
+
+def embeber(textos: list[str]) -> tuple[list[list[float]], int]:
+    """Vectores (embeddings) normalizados de los textos, con la misma cuenta de OpenRouter. Devuelve (vectores, tokens)."""
+    s = ajustes()
+    if not s.api_key:
+        raise IANoConfigurada()
+    if not textos:
+        return [], 0
+    cuerpo: dict = {"model": s.modelo_vectores, "input": textos, **_privacidad(s)}
+    if s.dimensiones_vectores and s.modelo_vectores.startswith("openai/text-embedding-3"):
+        cuerpo["dimensions"] = s.dimensiones_vectores  # vectores más cortos: menos espacio y búsqueda más rápida
+    url = s.base_url.rstrip("/") + "/embeddings"
+    cabeceras = {"Authorization": f"Bearer {s.api_key}"}
+    try:
+        with cliente_http() as http:
+            r = http.post(url, headers=cabeceras, json=cuerpo)
+        datos = r.json()
+    except (httpx.HTTPError, ValueError) as e:
+        raise IAError(503, "No fue posible vectorizar los textos.") from e
+    if r.status_code >= 400 or not isinstance(datos, dict) or datos.get("error") or not datos.get("data"):
+        log.warning("Embeddings: respuesta %s %s", r.status_code, str(datos)[:300])
+        raise IAError(502, "El servicio de vectores respondió con un error.")
+    filas = sorted(datos["data"], key=lambda x: x.get("index", 0))
+    vectores = []
+    for f in filas:
+        v = [float(x) for x in f.get("embedding") or []]
+        norma = sum(x * x for x in v) ** 0.5 or 1.0
+        vectores.append([x / norma for x in v])
+    if len(vectores) != len(textos):
+        raise IAError(502, "El servicio de vectores devolvió una respuesta incompleta.")
+    return vectores, int((datos.get("usage") or {}).get("prompt_tokens") or (datos.get("usage") or {}).get("total_tokens") or 0)
 
 
 def _ejecutar(h: Herramienta | None, argumentos: str | None) -> str:

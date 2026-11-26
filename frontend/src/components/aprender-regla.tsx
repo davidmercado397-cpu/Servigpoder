@@ -16,7 +16,7 @@ export function AprenderCorrecciones({ facturaId, correcciones, productos, onCer
 }) {
   const [i, setI] = useState(0);
   const [motivo, setMotivo] = useState("");
-  const [borrador, setBorrador] = useState<{ texto: string; cuentas: string; ejemplo: string } | null>(null);
+  const [borrador, setBorrador] = useState<{ texto: string; cuentas: string; ejemplo: string; actualiza: number | null; regla_actual: string | null } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const [guardadas, setGuardadas] = useState(0);
@@ -34,11 +34,13 @@ export function AprenderCorrecciones({ facturaId, correcciones, productos, onCer
         cuenta_agente: c.cuenta_agente, cuenta_correcta: c.cuenta_correcta, motivo } }));
     } catch (e) { setError(mensajeError(e)); } finally { setOcupado(false); }
   }
-  async function guardar() {
+  async function guardar(comoNueva = false) {
     if (!borrador) return;
     setError(""); setOcupado(true);
     try {
-      await api("/contabilidad/reglas", { method: "POST", json: { ...borrador, origen: "correccion" } });
+      const { texto, cuentas, ejemplo, actualiza } = borrador;
+      if (actualiza && !comoNueva) await api(`/contabilidad/reglas/${actualiza}`, { method: "PUT", json: { texto, cuentas, activa: true } });
+      else await api("/contabilidad/reglas", { method: "POST", json: { texto, cuentas, ejemplo, origen: "correccion" } });
       setGuardadas(guardadas + 1);
       siguiente();
     } catch (e) { setError(mensajeError(e)); } finally { setOcupado(false); }
@@ -66,7 +68,13 @@ export function AprenderCorrecciones({ facturaId, correcciones, productos, onCer
           </>
         ) : (
           <>
-            <div><label className="label">Regla que aprenderá el agente (puede ajustarla)</label>
+            {borrador.actualiza && borrador.regla_actual && (
+              <div className="rounded-lg bg-sky-50 p-3 text-sky-900">
+                <p className="font-medium">Ya existe una regla parecida; para no duplicarla, el agente propone actualizarla:</p>
+                <p className="mt-1 text-xs">Hoy dice: «{borrador.regla_actual}»</p>
+              </div>
+            )}
+            <div><label className="label">{borrador.actualiza ? "Regla actualizada (puede ajustarla)" : "Regla que aprenderá el agente (puede ajustarla)"}</label>
               <textarea className="input" rows={4} maxLength={2000} value={borrador.texto} onChange={(e) => setBorrador({ ...borrador, texto: e.target.value })} /></div>
             <div><label className="label">Cuentas que menciona</label>
               <input className="input" maxLength={200} value={borrador.cuentas} onChange={(e) => setBorrador({ ...borrador, cuentas: e.target.value })} /></div>
@@ -74,8 +82,9 @@ export function AprenderCorrecciones({ facturaId, correcciones, productos, onCer
             {error && <Alerta>{error}</Alerta>}
             <div className="flex justify-end gap-2">
               <button className="btn-secundario" disabled={ocupado} onClick={siguiente}>No guardar</button>
-              <button className="btn-primario" disabled={ocupado || borrador.texto.trim().length < 5} onClick={guardar}>
-                {ocupado ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />} Guardar la regla</button>
+              {borrador.actualiza && <button className="btn-secundario" disabled={ocupado || borrador.texto.trim().length < 5} onClick={() => guardar(true)}>Crear como regla nueva</button>}
+              <button className="btn-primario" disabled={ocupado || borrador.texto.trim().length < 5} onClick={() => guardar()}>
+                {ocupado ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />} {borrador.actualiza ? "Actualizar la regla" : "Guardar la regla"}</button>
             </div>
           </>
         )}

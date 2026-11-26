@@ -86,6 +86,8 @@ class CtbFactura(BaseEmpresa):
     # Para el plano: nota del encabezado (la propone la IA) y avisos de la lectura
     nota: Mapped[str] = mapped_column(String(300), default="")
     avisos: Mapped[list] = mapped_column(JSON, default=list)
+    # Reglas de la empresa que el agente aplicó al proponerla (ids), para medir si las reglas aciertan
+    reglas_aplicadas: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     # Contabilización: el número del documento (AAMM + consecutivo) y la fecha de cargue en World Office
     documento_numero: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fecha_contable: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -135,6 +137,8 @@ class CtbRegla(BaseEmpresa):
     origen: Mapped[str] = mapped_column(String(20), default="manual")  # manual | correccion
     ejemplo: Mapped[str] = mapped_column(String(400), default="")  # la factura/línea de la que salió
     usos: Mapped[int] = mapped_column(Integer, default=0)  # veces que el agente dijo aplicarla
+    # Veces que contabilidad corrigió una factura donde el agente la aplicó: si sube, la regla hay que revisarla
+    corregida: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

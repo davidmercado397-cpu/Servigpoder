@@ -25,16 +25,19 @@ Para registrar una factura de compra en World Office propones, para CADA product
 - "nota": una nota corta en minúsculas de lo que se compró (p. ej. "compra de vuelos").
 Y para la factura, "nota": una nota corta en MAYÚSCULAS (p. ej. "COMPRA DE VUELO").
 Si el HISTORIAL muestra cómo se registró antes este proveedor, síguelo salvo que el producto sea claramente distinto.
-Si dudas, escoge lo más probable y explícalo en "dudas". En "reglas_aplicadas" pon los números de las REGLAS DE LA
-EMPRESA que usaste. Responde SOLO un JSON:
+Los EJEMPLOS DE OTROS PROVEEDORES muestran cómo se contabilizaron conceptos parecidos: úsalos como referencia.
+Si dudas, escoge lo más probable y explícalo en "dudas". En "reglas_aplicadas" pon los números (entre corchetes) de las
+REGLAS DE LA EMPRESA que usaste. Responde SOLO un JSON:
 {"nota": "…", "lineas": [{"n": 1, "producto": "código", "centro_costos": "nombre", "nota": "…"}], "reglas_aplicadas": [1],
  "dudas": ["…"]}"""
 
 INSTRUCCIONES_REGLA = """Eres el agente contable de la empresa. Contabilidad corrigió una cuenta que tú propusiste y quiere que
 aprendas a hacerlo así en adelante. Redacta UNA regla corta (1 a 3 frases), general pero precisa, que explique cuándo
 aplica (el concepto, no una factura puntual: no pongas números de factura ni valores) y a qué cuenta o grupo de cuentas va.
-Usa los nombres de las cuentas del catálogo. Si contabilidad explicó el motivo, úsalo. Responde SOLO un JSON:
-{"texto": "…", "cuentas": "códigos que menciona la regla, separados por coma"}"""
+Usa los nombres de las cuentas del catálogo. Si contabilidad explicó el motivo, úsalo.
+Si una de las REGLAS PARECIDAS ya trata lo mismo, no crees otra: devuelve en "texto" esa regla actualizada (que incluya la
+corrección sin perder lo que ya decía) y en "actualiza" su número; si no, "actualiza": null. Responde SOLO un JSON:
+{"texto": "…", "cuentas": "códigos que menciona la regla, separados por coma", "actualiza": null}"""
 
 INSTRUCCIONES_LEER = """Lees una factura electrónica colombiana (PDF o imagen) y devuelves sus datos EXACTOS como aparecen.
 No inventes: si un dato no aparece, null. Valores como números (sin $ ni puntos de miles; decimales con punto).
@@ -62,32 +65,41 @@ def _json(texto: str) -> dict:
 def _reglas_texto(reglas: list[tuple[int, str]]) -> str:
     if not reglas:
         return "(todavía no hay reglas de la empresa)"
-    return "\n".join(f"{i}. {t}" for i, t in reglas)
+    return "\n".join(f"[{i}] {t}" for i, t in reglas)
 
 
 def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str], historial: list[dict], modelo: str = "",
-             reglas: list[tuple[int, str]] | None = None) -> dict:
+             reglas: list[tuple[int, str]] | None = None, ejemplos: list[dict] | None = None) -> tuple[dict, ia.Respuesta]:
     """factura: {"proveedor", "nit", "lineas": [{"n", "descripcion", "cantidad", "valor", "iva_pct"}]}.
-    reglas: [(número, texto)] de las reglas activas de la empresa."""
+    reglas: [(número, texto)] de las reglas de la empresa que vienen al caso (RAG); productos: las cuentas candidatas.
+    El orden del contexto va de lo más estable a lo más cambiante (aprovecha el caché de instrucciones del proveedor)."""
     contexto = ("REGLAS DE LA EMPRESA (mandan sobre la norma general):\n" + _reglas_texto(reglas or [])
                 + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos)
                 + "\n\nCENTROS DE COSTOS: " + json.dumps(centros, ensure_ascii=False)
-                + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:30], ensure_ascii=False))
+                + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:15], ensure_ascii=False)
+                + "\n\nEJEMPLOS DE OTROS PROVEEDORES (conceptos parecidos ya contabilizados):\n" + json.dumps(ejemplos or [], ensure_ascii=False))
     r = ia.completar(INSTRUCCIONES_PROPONER + "\n\n" + contexto,
-                     [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo=modelo, max_tokens=4000)
-    return _json(r.texto)
+                     [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo=modelo, max_tokens=2500)
+    return _json(r.texto), r
 
 
-def redactar_regla(caso: dict, productos: list[tuple[str, str]], reglas: list[tuple[int, str]], modelo: str = "") -> dict:
-    """caso: {"proveedor", "descripcion", "cuenta_agente", "cuenta_correcta", "motivo"} → {"texto", "cuentas"}"""
+def redactar_regla(caso: dict, productos: list[tuple[str, str]], reglas: list[tuple[int, str]], modelo: str = "") -> tuple[dict, ia.Respuesta]:
+    """caso: {"proveedor", "descripcion", "cuenta_agente", "cuenta_correcta", "motivo"} → {"texto", "cuentas", "actualiza"}.
+    reglas: las reglas existentes más parecidas (para actualizar en vez de duplicar)."""
     nombres = dict(productos)
     caso = {**caso, "nombre_cuenta_agente": nombres.get(caso.get("cuenta_agente", ""), ""),
             "nombre_cuenta_correcta": nombres.get(caso.get("cuenta_correcta", ""), "")}
-    r = ia.completar(INSTRUCCIONES_REGLA + "\n\nREGLAS QUE YA EXISTEN (no las repitas):\n" + _reglas_texto(reglas)
+    r = ia.completar(INSTRUCCIONES_REGLA + "\n\nREGLAS PARECIDAS QUE YA EXISTEN:\n" + _reglas_texto(reglas)
                      + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos),
                      [{"role": "user", "content": "CORRECCIÓN:\n" + json.dumps(caso, ensure_ascii=False)}], modelo=modelo, max_tokens=1500)
     d = _json(r.texto)
-    return {"texto": str(d.get("texto") or "").strip()[:2000], "cuentas": str(d.get("cuentas") or "").strip()[:200]}
+    try:
+        actualiza = int(d.get("actualiza")) if d.get("actualiza") not in (None, "", "null") else None
+    except (TypeError, ValueError):
+        actualiza = None
+    if actualiza not in {i for i, _ in reglas}:
+        actualiza = None
+    return {"texto": str(d.get("texto") or "").strip()[:2000], "cuentas": str(d.get("cuentas") or "").strip()[:200], "actualiza": actualiza}, r
 
 
 def _n(v) -> float:

@@ -17,7 +17,14 @@ export type Linea = {
 /** Regla contable de la empresa que el agente aplica por encima de la norma general */
 export type Regla = {
   id: number; texto: string; cuentas: string; activa: boolean; origen: "manual" | "correccion"; ejemplo: string; usos: number;
+  /** Veces que se corrigió una factura donde el agente la aplicó (si sube, hay que revisarla) */
+  corregida: number;
   creado_en: string | null; actualizado_en: string | null;
+};
+/** Consumo del agente contable en el mes */
+export type UsoAgente = {
+  desde: string; modelo: string; modelo_vectores: string; tokens_entrada: number; tokens_salida: number;
+  por_tipo: Record<string, { veces: number; tokens_entrada: number; tokens_salida: number }>;
 };
 /** Una cuenta que contabilidad corrigió al guardar: el agente ofrece aprenderla como regla */
 export type Correccion = { linea_id: number; orden: number; descripcion: string; cuenta_agente: string; cuenta_correcta: string };

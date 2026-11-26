@@ -125,6 +125,7 @@ def cargar_modelos() -> None:
 
     from app.apps import APPS
 
+    importlib.import_module("app.core.vectores")  # memoria vectorial y consumo de los agentes de IA
     for app in APPS:
         modulo = f"app.apps.{app.codigo}.models"
         if importlib.util.find_spec(modulo):

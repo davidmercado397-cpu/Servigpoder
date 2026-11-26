@@ -145,6 +145,7 @@ class Respuesta:
     tokens_entrada: int = 0
     tokens_salida: int = 0
     modelo: str = ""
+    fin: str = ""  # finish_reason: "length" = se quedó sin tokens (los modelos que razonan los gastan pensando)
 
 
 def configurada() -> bool:
@@ -258,7 +259,7 @@ def completar(instrucciones: str, mensajes: list[dict], *, modelo: str = "", max
     eleccion = (datos.get("choices") or [{}])[0]
     return Respuesta(texto=((eleccion.get("message") or {}).get("content") or "").strip(),
                      tokens_entrada=uso.get("prompt_tokens") or 0, tokens_salida=uso.get("completion_tokens") or 0,
-                     modelo=datos.get("model") or cuerpo["model"])
+                     modelo=datos.get("model") or cuerpo["model"], fin=str(eleccion.get("finish_reason") or ""))
 
 
 def embeber(textos: list[str]) -> tuple[list[list[float]], int]:

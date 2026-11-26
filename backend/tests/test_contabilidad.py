@@ -480,3 +480,29 @@ def test_productos_por_proveedor_de_world_office(speed, monkeypatch):
     assert d["lineas"][0]["producto"] == "15281001"
     sistema = next(p for p in pedidos if "OPCIONES DE ESTE PROVEEDOR" in p["messages"][0]["content"])["messages"][0]["content"]
     assert '["15281001", "EQUIPOS TELECOMUNICACIONES", 1, "2025-06-04"]' in sistema and '"734525"' in sistema
+
+
+def test_respuesta_cortada_de_la_ia_se_reintenta(speed, monkeypatch):
+    """Un modelo que razona puede gastarse los tokens pensando y dejar el JSON cortado: se reintenta una vez."""
+    monkeypatch.setattr(get_settings(), "ia_api_key", "sk-or-prueba")
+    pedidos = []
+
+    def falso(request: httpx.Request) -> httpx.Response:
+        cuerpo = json.loads(request.content)
+        pedidos.append(cuerpo)
+        if len(pedidos) == 1:
+            return httpx.Response(200, json={"model": "m", "usage": {"completion_tokens": 6000},
+                                             "choices": [{"message": {"content": '{"nota": "COMPRA DE INSUMOS", "lineas": [{"n'}, "finish_reason": "length"}]})
+        respuesta = {"nota": "INSUMOS IMPRESORA", "lineas": [{"n": 1, "producto": "519530", "centro_costos": "Administracion", "nota": "toner ricoh"}]}
+        return httpx.Response(200, json={"model": "m", "usage": {}, "choices": [{"message": {"content": json.dumps(respuesta)}, "finish_reason": "stop"}]})
+
+    monkeypatch.setattr(ia, "cliente_http", lambda: httpx.Client(transport=httpx.MockTransport(falso)))
+    tipo = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    speed.post(f"{API}/productos/importar", files={"archivo": ("c.xlsx", xlsx([["519530 UTILES, PAPELERIA Y FOTOCOPIAS"], ["514520 EQUIPO DE OFICINA"]]), tipo)})
+    xml = factura_xml(cufe="ricoh", lineas=((2, "TONER RICOH 4503", 250000.0, 19, 47500.0),))
+    f = _cargar(speed, attached(xml), "ricoh.xml").json()["data"]["nuevas"][0]
+    d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
+    assert d["lineas"][0]["producto"] == "519530" and not any("no pudo proponer" in a for a in d["avisos"])
+    assert len(pedidos) == 2 and pedidos[1]["max_tokens"] == 2 * pedidos[0]["max_tokens"]
+    assert "solo el objeto JSON" in pedidos[1]["messages"][-1]["content"] or "únicamente con el objeto JSON" in pedidos[1]["messages"][-1]["content"]
+    assert "RICOH MPC 4503" in pedidos[0]["messages"][0]["content"]  # el agente sabe identificar el producto por la marca

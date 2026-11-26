@@ -24,6 +24,11 @@ Para registrar una factura de compra en World Office propones, para CADA product
 - "centro_costos": uno de los CENTROS DE COSTOS (exacto);
 - "nota": una nota corta en minúsculas de lo que se compró (p. ej. "compra de vuelos").
 Y para la factura, "nota": una nota corta en MAYÚSCULAS (p. ej. "COMPRA DE VUELO").
+Antes de escoger la cuenta, identifica QUÉ es cada producto aunque la descripción traiga marcas, modelos o referencias:
+p. ej. «RICOH MPC 4503», «KYOCERA», «HP LaserJet», «EPSON» son impresoras o fotocopiadoras, así que tóner, cilindro, cuchilla
+de limpieza, rodillo y unidad de imagen son insumos de impresión y fotocopiado (útiles, papelería y fotocopias o insumos de
+mantenimiento de equipo de oficina, según las opciones del proveedor y las reglas de la empresa). Haz lo mismo con repuestos
+de vehículos, de radios, de cámaras, etc.: primero qué es y para qué sirve, después la cuenta.
 Si el HISTORIAL muestra cómo se registró antes este proveedor, síguelo salvo que el producto sea claramente distinto.
 OPCIONES DE ESTE PROVEEDOR EN WORLD OFFICE son los productos (cuentas) con que contabilidad lo ha registrado, los más usados
 primero: elige entre ellos el que corresponda a cada producto de la factura; usa otra cuenta solo si claramente no encaja.
@@ -64,6 +69,28 @@ def _json(texto: str) -> dict:
     return datos
 
 
+SOLO_JSON = "Responde únicamente con el objeto JSON pedido, completo y sin texto antes ni después."
+
+
+def completar_json(instrucciones: str, mensajes: list[dict], modelo: str, max_tokens: int) -> tuple[dict, ia.Respuesta]:
+    """Pide un JSON a la IA. Los modelos que razonan antes de responder pueden gastarse los tokens pensando y dejar la
+    respuesta cortada o vacía: si no se puede leer, se reintenta una vez con el doble de espacio pidiendo solo el JSON."""
+    r = ia.completar(instrucciones, mensajes, modelo=modelo, max_tokens=max_tokens)
+    try:
+        return _json(r.texto), r
+    except ia.IAError:
+        log.warning("Respuesta ilegible de la IA (fin=%s, %s tokens de salida, %s caracteres); se reintenta",
+                    r.fin or "?", r.tokens_salida, len(r.texto))
+    r2 = ia.completar(instrucciones, [*mensajes, {"role": "user", "content": SOLO_JSON}], modelo=modelo, max_tokens=max_tokens * 2)
+    r2.tokens_entrada += r.tokens_entrada
+    r2.tokens_salida += r.tokens_salida
+    try:
+        return _json(r2.texto), r2
+    except ia.IAError as e:
+        motivo = "se quedó sin espacio para responder (pruebe otro modelo en Buzón y catálogos)" if r2.fin == "length" else "no devolvió una respuesta legible"
+        raise ia.IAError(502, f"La IA {motivo}") from e
+
+
 def _reglas_texto(reglas: list[tuple[int, str]]) -> str:
     if not reglas:
         return "(todavía no hay reglas de la empresa)"
@@ -83,9 +110,8 @@ def proponer(factura: dict, productos: list[tuple[str, str]], centros: list[str]
                 + json.dumps([[o["producto"], o["nombre"], o["compras"], o["ultima_fecha"]] for o in opciones or []], ensure_ascii=False)
                 + "\n\nHISTORIAL DE ESTE PROVEEDOR (cómo se registró antes):\n" + json.dumps(historial[:15], ensure_ascii=False)
                 + "\n\nEJEMPLOS DE OTROS PROVEEDORES (conceptos parecidos ya contabilizados):\n" + json.dumps(ejemplos or [], ensure_ascii=False))
-    r = ia.completar(INSTRUCCIONES_PROPONER + "\n\n" + contexto,
-                     [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo=modelo, max_tokens=2500)
-    return _json(r.texto), r
+    return completar_json(INSTRUCCIONES_PROPONER + "\n\n" + contexto,
+                          [{"role": "user", "content": "FACTURA:\n" + json.dumps(factura, ensure_ascii=False)}], modelo, 6000)
 
 
 def redactar_regla(caso: dict, productos: list[tuple[str, str]], reglas: list[tuple[int, str]], modelo: str = "") -> tuple[dict, ia.Respuesta]:
@@ -94,10 +120,9 @@ def redactar_regla(caso: dict, productos: list[tuple[str, str]], reglas: list[tu
     nombres = dict(productos)
     caso = {**caso, "nombre_cuenta_agente": nombres.get(caso.get("cuenta_agente", ""), ""),
             "nombre_cuenta_correcta": nombres.get(caso.get("cuenta_correcta", ""), "")}
-    r = ia.completar(INSTRUCCIONES_REGLA + "\n\nREGLAS PARECIDAS QUE YA EXISTEN:\n" + _reglas_texto(reglas)
-                     + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos),
-                     [{"role": "user", "content": "CORRECCIÓN:\n" + json.dumps(caso, ensure_ascii=False)}], modelo=modelo, max_tokens=1500)
-    d = _json(r.texto)
+    d, r = completar_json(INSTRUCCIONES_REGLA + "\n\nREGLAS PARECIDAS QUE YA EXISTEN:\n" + _reglas_texto(reglas)
+                          + "\n\nCATÁLOGO DE CUENTAS (código nombre):\n" + "\n".join(f"{c} {n}" for c, n in productos),
+                          [{"role": "user", "content": "CORRECCIÓN:\n" + json.dumps(caso, ensure_ascii=False)}], modelo, 3000)
     try:
         actualiza = int(d.get("actualiza")) if d.get("actualiza") not in (None, "", "null") else None
     except (TypeError, ValueError):
@@ -124,9 +149,8 @@ def _fecha(v) -> date | None:
 def leer_pdf(nombre: str, contenido: bytes, modelo: str = "") -> Factura:
     """Factura sin XML: la IA lee el PDF. Se marca para verificar."""
     parte = {"type": "file", "file": {"filename": nombre, "file_data": "data:application/pdf;base64," + base64.b64encode(contenido).decode()}}
-    r = ia.completar(INSTRUCCIONES_LEER, [{"role": "user", "content": [{"type": "text", "text": f"Archivo: {nombre}"}, parte]}],
-                     modelo=modelo, max_tokens=6000)
-    d = _json(r.texto)
+    d, _ = completar_json(INSTRUCCIONES_LEER, [{"role": "user", "content": [{"type": "text", "text": f"Archivo: {nombre}"}, parte]}],
+                          modelo, 8000)
     lineas = []
     for i, x in enumerate(d.get("lineas") or [], start=1):
         if not isinstance(x, dict):

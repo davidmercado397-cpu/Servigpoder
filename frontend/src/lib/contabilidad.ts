@@ -11,6 +11,8 @@ export const ESTADOS: [Estado, string][] = [
 export type Linea = {
   id: number; orden: number; codigo_proveedor: string; descripcion: string; cantidad: number; valor_unitario: number; subtotal: number;
   iva_pct: number; iva_valor: number; producto: string; centro_costos: string; nota: string;
+  /** No va en el plano (la quitó contabilidad o es un negativo mínimo) */
+  excluida?: boolean;
   /** La cuenta que propuso el agente (si contabilidad la cambia, el agente ofrece aprender) */
   producto_ia?: string;
 };

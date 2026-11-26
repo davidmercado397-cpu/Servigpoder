@@ -517,9 +517,9 @@ def test_negativos_y_numero_de_factura_para_world_office(speed):
     xml = xml.replace("<cbc:ID>PTC6", "<cbc:ID>FE45-").replace("<sts:Prefix>PTC6", "<sts:Prefix>FE45").replace("1841310</cbc:ID>", "1841310-6</cbc:ID>")
     f = _cargar(speed, attached(xml), "neg.xml").json()["data"]["nuevas"][0]
     assert (f["prefijo"], f["numero"]) == ("FE45", "1841310")
-    assert any("−$6: se lleva en 0 y no sale en el plano" in a for a in f["avisos"])
+    assert any("−$6: queda fuera del plano" in a for a in f["avisos"])
     d = speed.get(f"{API}/facturas/{f['id']}").json()["data"]
-    assert d["lineas"][1]["valor_unitario"] == 0
+    assert d["lineas"][1]["excluida"] and d["lineas"][1]["valor_unitario"] == -6  # se ve, pero no va
     # La línea en 0 no pide cuenta ni sale en el plano
     r = speed.put(f"{API}/facturas/{f['id']}", json={"nota": "MONITOREO", "lista": True, "lineas": [
         {"id": d["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "monitoreo"}]})
@@ -534,3 +534,10 @@ def test_negativos_y_numero_de_factura_para_world_office(speed):
     g = _cargar(speed, attached(xml), "neg2.xml").json()["data"]["nuevas"][0]
     assert any("no se puede llevar negativo" in a for a in g["avisos"])
     assert any("viene en negativo" in x for x in g["faltantes"])
+    # Contabilidad la quita del plano a mano y ya puede pasar
+    dg = speed.get(f"{API}/facturas/{g['id']}").json()["data"]
+    r = speed.put(f"{API}/facturas/{g['id']}", json={"nota": "SERVICIO", "lista": True, "lineas": [
+        {"id": dg["lineas"][0]["id"], "producto": "513505", "centro_costos": "Administracion", "nota": "servicio"},
+        {"id": dg["lineas"][1]["id"], "excluida": True}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["estado"] == "lista" and r.json()["data"]["lineas"][1]["excluida"]

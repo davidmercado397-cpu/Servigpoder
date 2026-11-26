@@ -45,7 +45,7 @@ def _linea(x) -> dict:
     return {"id": x.id, "orden": x.orden, "codigo_proveedor": x.codigo_proveedor, "descripcion": x.descripcion,
             "cantidad": float(x.cantidad), "valor_unitario": float(x.valor_unitario), "subtotal": float(x.subtotal),
             "iva_pct": float(x.iva_pct), "iva_valor": float(x.iva_valor), "producto": x.producto,
-            "centro_costos": x.centro_costos, "nota": x.nota, "producto_ia": x.producto_ia or ""}
+            "centro_costos": x.centro_costos, "nota": x.nota, "producto_ia": x.producto_ia or "", "excluida": bool(x.excluida)}
 
 
 def _factura(f: CtbFactura, completa: bool = False) -> dict:
@@ -112,6 +112,7 @@ class LineaIn(BaseModel):
     producto: str = Field(default="", max_length=40)
     centro_costos: str = Field(default="", max_length=80)
     nota: str = Field(default="", max_length=200)
+    excluida: bool | None = None  # True = no va en el plano (None = no cambia)
 
 
 class FacturaIn(BaseModel):
@@ -137,6 +138,8 @@ def guardar(factura_id: int, data: FacturaIn, request: Request, db: DbSession, a
                 correcciones.append({"linea_id": x.id, "orden": x.orden, "descripcion": x.descripcion[:200],
                                      "cuenta_agente": x.producto_ia, "cuenta_correcta": nuevo})
             x.producto, x.centro_costos, x.nota = nuevo, ln.centro_costos.strip(), ln.nota.strip()
+            if ln.excluida is not None:
+                x.excluida = ln.excluida
     # Salud de las reglas: si se corrige una factura donde el agente aplicó reglas, esas reglas quedan para revisar
     if correcciones and f.reglas_aplicadas:
         for rg in db.scalars(select(CtbRegla).where(CtbRegla.id.in_(f.reglas_aplicadas))):

@@ -120,6 +120,8 @@ class CtbLinea(BaseEmpresa):
     nota: Mapped[str] = mapped_column(String(200), default="")
     # Lo que propuso el agente: si contabilidad lo cambia, el agente ofrece aprender la corrección
     producto_ia: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    # Fuera del plano: la quitó contabilidad o es un negativo mínimo (ajuste al peso de hasta $200). Se conserva para ver qué se omitió
+    excluida: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     factura: Mapped[CtbFactura] = relationship(back_populates="lineas")
 

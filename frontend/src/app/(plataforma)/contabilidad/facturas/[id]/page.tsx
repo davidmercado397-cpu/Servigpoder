@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Ban, CheckCircle2, Loader2, RotateCcw, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Loader2, RotateCcw, Save, Sparkles, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -37,7 +37,7 @@ export default function DetalleFactura() {
     setOcupado(lista ? "lista" : "guardar");
     try {
       const r = await api<FacturaCompleta & { correcciones?: Correccion[] }>(`/contabilidad/facturas/${f!.id}`, { method: "PUT", json: {
-        nota: f!.nota, lista, cuenta_cobro: f!.cuenta_cobro, lineas: f!.lineas.map((l) => ({ id: l.id, producto: l.producto, centro_costos: l.centro_costos, nota: l.nota })) } });
+        nota: f!.nota, lista, cuenta_cobro: f!.cuenta_cobro, lineas: f!.lineas.map((l) => ({ id: l.id, producto: l.producto, centro_costos: l.centro_costos, nota: l.nota, excluida: !!l.excluida })) } });
       setF(r);
       // Si cambió cuentas que propuso el agente, se le ofrece que las aprenda
       if (r.correcciones?.length) setCorrecciones(r.correcciones);
@@ -97,14 +97,25 @@ export default function DetalleFactura() {
         <div className="overflow-x-auto">
           <table className="tabla text-sm">
             <thead><tr><th>#</th><th>Producto de la factura</th><th className="text-right">Cant.</th><th className="text-right">Valor unitario</th><th className="text-right">IVA</th>
-              <th>Producto / cuenta WO</th><th>Centro de costos</th><th>Nota del detalle</th></tr></thead>
+              <th>Producto / cuenta WO</th><th>Centro de costos</th><th>Nota del detalle</th><th /></tr></thead>
             <tbody>
-              {f.lineas.map((l, i) => (
+              {f.lineas.map((l, i) => l.excluida ? (
+                <tr key={l.id} className="bg-slate-50 text-slate-400">
+                  <td>{l.orden}</td>
+                  <td className="max-w-xs"><p className="text-xs line-through">{l.descripcion}</p></td>
+                  <td className="text-right tabular-nums line-through">{l.cantidad.toLocaleString("es-CO")}</td>
+                  <td className={`text-right tabular-nums line-through ${l.valor_unitario < 0 ? "text-red-400" : ""}`}>{plata(l.valor_unitario)}</td>
+                  <td />
+                  <td colSpan={3} className="text-xs italic">Fuera del plano{l.valor_unitario < 0 ? " (valor negativo)" : ""}</td>
+                  <td>{editable && <button className="inline-flex items-center gap-1 text-xs text-marca-700 hover:underline" title="Volver a llevar esta línea al plano"
+                    onClick={() => setLinea(i, { excluida: false })}><Undo2 className="h-3.5 w-3.5" /> Incluir</button>}</td>
+                </tr>
+              ) : (
                 <tr key={l.id}>
                   <td>{l.orden}</td>
                   <td className="max-w-xs"><p className="text-xs">{l.descripcion}</p></td>
                   <td className="text-right tabular-nums">{l.cantidad.toLocaleString("es-CO")}</td>
-                  <td className="text-right tabular-nums">{plata(l.valor_unitario)}</td>
+                  <td className={`text-right tabular-nums ${l.valor_unitario < 0 ? "font-semibold text-red-700" : ""}`}>{plata(l.valor_unitario)}</td>
                   <td className="text-right tabular-nums">{l.iva_pct} %</td>
                   <td>
                     <input className={`input w-56 ${!l.producto ? "border-amber-400" : ""}`} list="productos-wo" disabled={!editable} value={l.producto}
@@ -117,6 +128,8 @@ export default function DetalleFactura() {
                     {l.centro_costos && !centros.some((c) => c.nombre === l.centro_costos) && <option value={l.centro_costos}>{l.centro_costos}</option>}
                   </select></td>
                   <td><input className="input w-48" maxLength={200} disabled={!editable} value={l.nota} onChange={(e) => setLinea(i, { nota: e.target.value })} /></td>
+                  <td>{editable && <button className="text-slate-400 hover:text-red-600" title="Quitar esta línea del plano"
+                    onClick={() => setLinea(i, { excluida: true })}><X className="h-4 w-4" /></button>}</td>
                 </tr>
               ))}
             </tbody>

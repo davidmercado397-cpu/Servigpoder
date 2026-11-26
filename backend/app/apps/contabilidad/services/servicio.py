@@ -73,17 +73,18 @@ def registrar(db: Session, f: dian.Factura, *, leida_con: str = "xml", origen: s
     if leida_con == "ia":
         avisos.append("Leída por la IA desde el PDF (no vino el XML): verifique los valores con la factura")
     f.prefijo, f.numero = dian.limpiar_numero(f.prefijo, f.numero)
-    # Valores negativos: los mínimos (ajustes al peso de hasta $200) van en 0 y no salen en el plano; los demás no se
-    # pueden llevar negativos y se avisa para revisarlos
+    # Valores negativos: los mínimos (ajustes al peso de hasta $200) quedan fuera del plano solos; los demás no se pueden
+    # llevar negativos: se avisa para quitarlos del plano o revisarlos
+    excluir = set()
     for x in f.lineas:
         if x.subtotal < 0 or x.valor_unitario < 0:
             valor = abs(x.subtotal or x.valor_unitario * x.cantidad)
             if valor <= MAX_NEGATIVO_A_CERO:
-                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») venía en −${valor:,.0f}: se lleva en 0 y no sale en el plano".replace(",", "."))
-                x.subtotal = x.valor_unitario = x.iva_valor = 0
+                avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${valor:,.0f}: queda fuera del plano".replace(",", "."))
+                excluir.add(x.orden)
             else:
                 avisos.append(f"Línea {x.orden} («{x.descripcion[:60]}») viene en −${valor:,.0f}: no se puede llevar negativo al plano; "
-                              f"revísela con el proveedor".replace(",", "."))
+                              f"quítela del plano o revísela con el proveedor".replace(",", "."))
     hay_terceros = db.scalar(select(CtbTercero.id).limit(1)) is not None
     if hay_terceros and not db.scalar(select(CtbTercero.id).where(CtbTercero.nit == f.emisor_nit)):
         avisos.append(f"El proveedor NIT {f.emisor_nit} no está en el listado de terceros de World Office: créelo antes de cargar el plano")
@@ -95,7 +96,8 @@ def registrar(db: Session, f: dian.Factura, *, leida_con: str = "xml", origen: s
         comprador_nit=f.comprador_nit, comprador_nombre=f.comprador_nombre, subtotal=f.subtotal, iva=f.iva, total=f.total,
         retenciones=f.retenciones, avisos=avisos,
         lineas=[CtbLinea(orden=x.orden, codigo_proveedor=x.codigo_proveedor, descripcion=x.descripcion, cantidad=x.cantidad,
-                         valor_unitario=x.valor_unitario, subtotal=x.subtotal, iva_pct=x.iva_pct, iva_valor=x.iva_valor)
+                         valor_unitario=x.valor_unitario, subtotal=x.subtotal, iva_pct=x.iva_pct, iva_valor=x.iva_valor,
+                         excluida=x.orden in excluir)
                 for x in f.lineas],
     )
     db.add(fac)
@@ -329,16 +331,18 @@ def proponer_contabilizacion(db: Session, fac: CtbFactura) -> None:
 
 
 def va_al_plano(x: CtbLinea) -> bool:
-    """Las líneas en 0 (p. ej. un ajuste al peso negativo que se llevó a 0) no salen en el plano."""
-    return float(x.valor_unitario or 0) > 0
+    """No salen en el plano las líneas quitadas (a mano o por ser un negativo mínimo) ni las que valen 0."""
+    return not x.excluida and float(x.valor_unitario or 0) > 0
 
 
 def faltantes(fac: CtbFactura) -> list[str]:
     """Lo que impide que la factura salga en el plano."""
     out = []
     for x in fac.lineas:
+        if x.excluida:
+            continue
         if float(x.valor_unitario or 0) < 0:
-            out.append(f"Línea {x.orden}: viene en negativo (−${abs(float(x.subtotal or 0)):,.0f}) y no se puede llevar al plano".replace(",", "."))
+            out.append(f"Línea {x.orden}: viene en negativo (−${abs(float(x.subtotal or 0)):,.0f}): quítela del plano o revísela".replace(",", "."))
             continue
         if not va_al_plano(x):
             continue

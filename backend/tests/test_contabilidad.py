@@ -282,8 +282,8 @@ def test_cuentas_de_cobro_y_consecutivo_desde_world_office(speed):
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
     filas = [dict(zip(plano.COLUMNAS, hoja.row_values(i))) for i in range(1, hoja.nrows)]
     docs = {(f["Encab: Tipo Documento"], f["Encab: Prefijo"], f["Encab: Documento Número"]) for f in filas}
-    # Facturas FC siguen en 2608009 y 2608010; la cuenta de cobro va como DSS / DSS con el 346
-    assert docs == {("FC", "FC", 2608009), ("FC", "FC", 2608010), ("DSS", "DSS", 346)}
+    # Facturas FC siguen en 2608009 y 2608010; la cuenta de cobro va como FC / DSS con el 346
+    assert docs == {("FC", "FC", 2608009), ("FC", "FC", 2608010), ("FC", "DSS", 346)}
     # En otro mes las facturas empiezan de nuevo; la cuenta de cobro no reinicia
     r = speed.post(f"{API}/plano", json={"fecha": "2026-11-05"})
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)

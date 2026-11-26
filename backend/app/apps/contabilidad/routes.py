@@ -345,7 +345,7 @@ class ConfigIn(BaseModel):
     empresa_nit: str = Field(min_length=5, max_length=20, pattern=r"^[\d.\-\s]+$")
     tipo_documento: str = Field(default="FC", min_length=1, max_length=10)
     prefijo: str = Field(default="FC", min_length=1, max_length=10)
-    tipo_documento_ds: str = Field(default="DSS", min_length=1, max_length=10)
+    tipo_documento_ds: str = Field(default="FC", min_length=1, max_length=10)
     prefijo_ds: str = Field(default="DSS", min_length=1, max_length=10)
     # Último número usado en World Office (AAMM + consecutivo); vacío = ninguno
     ultimo_fc: int | None = Field(default=None, ge=0, le=99999999)

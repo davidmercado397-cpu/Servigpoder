@@ -89,9 +89,9 @@ export default function DetalleFactura() {
         <div className="flex flex-wrap items-end gap-6">
           <div className="w-full max-w-xl"><label className="label">Nota del documento (encabezado)</label>
             <input className="input" maxLength={300} disabled={!editable} value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} placeholder="Ej.: COMPRA DE VUELO" /></div>
-          <label className="flex items-center gap-2 pb-2 text-sm" title="En el plano va como Tipo DSS y Prefijo DSS, con su propio consecutivo">
+          <label className="flex items-center gap-2 pb-2 text-sm" title="En el plano va con Tipo FC y Prefijo DSS, con su propio consecutivo">
             <input type="checkbox" disabled={!editable} checked={f.cuenta_cobro} onChange={(e) => setF({ ...f, cuenta_cobro: e.target.checked })} />
-            Es cuenta de cobro (en el plano: DSS / DSS)
+            Es cuenta de cobro (en el plano: FC / DSS)
           </label>
         </div>
         <div className="overflow-x-auto">

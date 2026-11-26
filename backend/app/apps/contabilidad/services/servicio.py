@@ -356,7 +356,7 @@ def armar_plano(db: Session, fecha: date, ids: list[int] | None, usuario_id: int
         siguiente[fac.cuenta_cobro] += 1
         numero = siguiente[True] if fac.cuenta_cobro else plano.documento(fecha, siguiente[False])
         tipo, prefijo = (c.tipo_documento_ds, c.prefijo_ds) if fac.cuenta_cobro else (c.tipo_documento, c.prefijo)
-        items.append({"factura_id": fac.id, "documento": numero, "serie": tipo})
+        items.append({"factura_id": fac.id, "documento": numero, "serie": prefijo})  # FC o DSS
         for x in fac.lineas:
             filas.append(plano.Fila(
                 documento=numero, nit=fac.emisor_nit, prefijo_ext=fac.prefijo, numero_ext=fac.numero, nota=fac.nota,

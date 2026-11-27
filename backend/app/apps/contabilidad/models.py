@@ -219,3 +219,118 @@ class CtbCorreo(BaseEmpresa):
     resultado: Mapped[str] = mapped_column(String(500), default="")
     facturas: Mapped[int] = mapped_column(Integer, default=0)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- Legalizaciones: anticipos y reembolsos que legalizan los colaboradores → nota contable de World Office -----
+
+LEG_COLUMNAS = {
+    # columna del formato de legalización: (nombre, cuenta por defecto)
+    "transporte": ("Transporte", "513550"),
+    "parqueo": ("Parqueo", "519565"),
+    "peajes": ("Peajes", "515595"),
+    "aseo_cafeteria": ("Elementos de aseo y cafetería", "519525"),
+    "alojamiento": ("Alojamiento", "515595"),
+    "alimentacion": ("Alimentación", "519560"),
+    "combustible": ("Combustible", "519535"),
+    "correo": ("Correo y portes", "513540"),
+    "otros": ("Otros gastos", "519595"),
+}
+
+
+class CtbLegConfig(BaseEmpresa):
+    """Datos fijos de la nota contable de legalizaciones y la cuenta de cada columna del formato (una fila)."""
+
+    __tablename__ = "ctb_leg_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo_documento: Mapped[str] = mapped_column(String(10), default="NC")
+    prefijo: Mapped[str] = mapped_column(String(10), default="LG")
+    ultimo_numero: Mapped[int] = mapped_column(Integer, default=0)  # último documento LG usado en World Office
+    nota: Mapped[str] = mapped_column(String(200), default="Legalizacion de gastos")
+    cuentas: Mapped[dict] = mapped_column(JSON, default=dict)  # columna → cuenta (vacío = la de LEG_COLUMNAS)
+    cuenta_reintegro: Mapped[str] = mapped_column(String(20), default="233595")  # lo que se le debe al colaborador
+    cuenta_anticipo: Mapped[str] = mapped_column(String(20), default="13301501")  # anticipos a trabajadores
+    cuenta_por_cobrar: Mapped[str] = mapped_column(String(20), default="13301501")  # si gastó menos que el anticipo
+
+
+class CtbPersona(BaseEmpresa):
+    """Personas: quienes elaboran el documento (tercero interno, columna F) y los colaboradores (empleados, columna G)."""
+
+    __tablename__ = "ctb_persona"
+    __table_args__ = (UniqueConstraint("tipo", "documento", name="uq_ctb_persona"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(12))  # elabora | empleado
+    documento: Mapped[str] = mapped_column(String(20), index=True)
+    nombre: Mapped[str] = mapped_column(String(200), default="")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CtbLegalizacion(BaseEmpresa):
+    """Un formato de legalización (anticipo o reembolso). Los archivos (formato y soportes) no se guardan."""
+
+    __tablename__ = "ctb_legalizacion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    estado: Mapped[str] = mapped_column(String(20), default=PENDIENTE, index=True)  # pendiente | lista | contabilizada | descartada
+    numero_formato: Mapped[str] = mapped_column(String(40), default="")
+    archivo: Mapped[str] = mapped_column(String(200), default="")  # nombre del formato cargado (el archivo no se guarda)
+    leida_con: Mapped[str] = mapped_column(String(10), default="ia")  # ia (PDF) | excel
+    colaborador_nombre: Mapped[str] = mapped_column(String(200), default="")
+    colaborador_documento: Mapped[str] = mapped_column(String(20), default="")  # tercero externo (columna G)
+    elabora_documento: Mapped[str] = mapped_column(String(20), default="")  # tercero interno (columna F)
+    sucursal: Mapped[str] = mapped_column(String(80), default="")
+    motivo: Mapped[str] = mapped_column(String(400), default="")
+    fecha_legalizacion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    anticipo_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    anticipo_valor: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    anticipo_descripcion: Mapped[str] = mapped_column(String(400), default="")
+    total: Mapped[float] = mapped_column(Numeric(16, 2), default=0)  # total del formato (para cuadrar con las líneas)
+    nota: Mapped[str] = mapped_column(String(300), default="")
+    avisos: Mapped[list] = mapped_column(JSON, default=list)
+    soportes_revisados: Mapped[bool] = mapped_column(Boolean, default=False)
+    documento_numero: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fecha_contable: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contabilizada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    contabilizada_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lineas: Mapped[list["CtbLegLinea"]] = relationship(back_populates="legalizacion", cascade="all, delete-orphan",
+                                                       order_by="CtbLegLinea.orden", lazy="selectin")
+
+
+class CtbLegLinea(BaseEmpresa):
+    """Un gasto del formato = un débito de la nota contable."""
+
+    __tablename__ = "ctb_leg_linea"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legalizacion_id: Mapped[int] = mapped_column(ForeignKey("ctb_legalizacion.id", ondelete="CASCADE"), index=True)
+    orden: Mapped[int] = mapped_column(Integer, default=1)
+    fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    beneficiario: Mapped[str] = mapped_column(String(200), default="")
+    documento: Mapped[str] = mapped_column(String(20), default="")  # tercero externo del detalle
+    columna: Mapped[str] = mapped_column(String(20), default="otros")  # LEG_COLUMNAS
+    valor: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    iva: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    retencion: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
+    detalle: Mapped[str] = mapped_column(String(600), default="")
+    cuenta: Mapped[str] = mapped_column(String(20), default="")
+    soporte: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None = no revisado
+    soporte_nota: Mapped[str] = mapped_column(String(300), default="")
+    excluida: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    legalizacion: Mapped[CtbLegalizacion] = relationship(back_populates="lineas")
+
+
+class CtbLegPlano(BaseEmpresa):
+    """Un plano de legalizaciones descargado (nota contable NC / LG)."""
+
+    __tablename__ = "ctb_leg_plano"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date)
+    items: Mapped[list] = mapped_column(JSON, default=list)  # [{"legalizacion_id": 1, "documento": 1}]
+    usuario_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

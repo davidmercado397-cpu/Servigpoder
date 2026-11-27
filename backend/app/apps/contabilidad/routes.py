@@ -565,3 +565,9 @@ def uso_agente(db: DbSession, _=Depends(require(VER))):
     hoy = date.today()
     return ok({**vectores.resumen_uso(db, servicio.AGENTE, hoy.replace(day=1)),
                "modelo": servicio.config(db).modelo or ia.ajustes().modelo, "modelo_vectores": ia.ajustes().modelo_vectores})
+
+
+# Legalizaciones (submódulo): /contabilidad/legalizaciones/...
+from app.apps.contabilidad.routes_legalizacion import router as _legalizaciones  # noqa: E402
+
+router.include_router(_legalizaciones)

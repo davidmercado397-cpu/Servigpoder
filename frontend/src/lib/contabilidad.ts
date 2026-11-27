@@ -54,3 +54,24 @@ export const fecha = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 
 export const fechaHora = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }) : "—";
 export const plata = (v: number) => "$" + v.toLocaleString("es-CO", { maximumFractionDigits: 2 });
+
+// --- Legalizaciones ---
+export type EstadoLeg = "pendiente" | "lista" | "contabilizada" | "descartada";
+export const ESTADOS_LEG: [EstadoLeg, string][] = [["pendiente", "Por revisar"], ["lista", "Listas para el plano"], ["contabilizada", "Contabilizadas"], ["descartada", "Descartadas"]];
+export type Legalizacion = {
+  id: number; estado: EstadoLeg; numero_formato: string; archivo: string; leida_con: string; colaborador_nombre: string; colaborador_documento: string;
+  elabora_documento: string; sucursal: string; motivo: string; fecha_legalizacion: string | null; anticipo_fecha: string | null; anticipo_valor: number;
+  anticipo_descripcion: string; total_formato: number; total: number; gastos: number; nota: string; avisos: string[]; faltantes: string[];
+  soportes_revisados: boolean; sin_soporte: number; documento_numero: number | null; fecha_contable: string | null; creado_en: string | null;
+};
+export type LineaLeg = {
+  id: number; orden: number; fecha: string | null; beneficiario: string; documento: string; columna: string; valor: number; iva: number; retencion: number;
+  detalle: string; cuenta: string; soporte: boolean | null; soporte_nota: string; excluida: boolean;
+};
+export type Movimiento = { cuenta: string; nota: string; tercero: string; debito: number; credito: number };
+export type LegalizacionCompleta = Legalizacion & { elabora_nombre: string; colaborador_en_listado: boolean; lineas: LineaLeg[]; movimientos: Movimiento[] };
+export type Persona = { id: number; documento: string; nombre: string; activo: boolean };
+export const COLUMNAS_LEG: Record<string, string> = {
+  transporte: "Transporte", parqueo: "Parqueo", peajes: "Peajes", aseo_cafeteria: "Aseo y cafetería", alojamiento: "Alojamiento",
+  alimentacion: "Alimentación", combustible: "Combustible", correo: "Correo y portes", otros: "Otros gastos",
+};

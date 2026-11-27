@@ -114,3 +114,18 @@ def test_formato_en_excel_va_como_texto(speed, proveedor):
     texto = pedidos[0]["messages"][1]["content"][0]["text"]
     assert "PEDRO PRUEBA" in texto and "ALIMENTACION" in texto  # el Excel va como texto (sin archivo)
     assert speed.get(f"{API}?estado=pendiente").json()["meta"]["extra"]["conteos"]["pendiente"] == 1
+
+
+def test_listado_de_empleados_con_retirados(speed):
+    from datetime import datetime as dt
+
+    listado = xlsx([["SPEED SECURITY LTDA"], ["Informe de Personal "], ["Entre el 01/01/2025 y el 31/12/2026"],
+                    ["CentroTrabajo", "Apellidos y Nombres_", "Identificacion__", "Codigo Empleado", "Fecha de Ingreso", "Fecha de Retiro_"],
+                    ["1", "PRUEBA UNO", "10000001", "1", dt(2025, 1, 1), None],
+                    ["1", "PRUEBA DOS", "10000002", "2", dt(2025, 1, 1), dt(2025, 6, 30)],  # ya se retiró
+                    ["1", "PRUEBA TRES", "10000003", "3", dt(2025, 1, 1), dt(2099, 1, 1)]])
+    r = speed.post(f"{API}/personas/importar?tipo=empleado", files={"archivo": ("empleados.xlsx", listado, TIPO)})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["personas"] == 3
+    activos = {p["documento"]: p["activo"] for p in speed.get(f"{API}/personas/lista?tipo=empleado").json()["data"]}
+    assert activos == {"10000001": True, "10000002": False, "10000003": True}

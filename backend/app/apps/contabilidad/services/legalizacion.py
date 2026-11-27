@@ -26,6 +26,7 @@ from app.apps.contabilidad.models import (
     CONTABILIZADA, LEG_COLUMNAS, LISTA, PENDIENTE, CtbLegalizacion, CtbLegConfig, CtbLegLinea, CtbLegPlano, CtbPersona,
 )
 from app.apps.contabilidad.services.dian import solo_nit
+from app.apps.contabilidad.services.servicio import _fecha_excel
 from app.apps.contabilidad.services.ia_contable import completar_json
 from app.core import ia
 
@@ -310,21 +311,30 @@ def importar_personas(db: Session, tipo: str, filas: list[list]) -> int:
         raise ValueError("No se encontraron las columnas de nombre y cédula/identificación")
     i_nom = next(j for j, c in enumerate(enc) if "nombre" in c)
     i_doc = next(j for j, c in enumerate(enc) if re.search(r"c[eé]dula|identificaci|documento|nit", c))
-    vistos: dict[str, str] = {}
+    # Informe de personal de World Office: quien ya tiene fecha de retiro pasada queda inactivo
+    i_ret = next((j for j, c in enumerate(enc) if "retiro" in c), None)
+    hoy = date.today()
+    vistos: dict[str, tuple[str, bool]] = {}
     for f in filas[i_enc + 1:]:
         doc = _doc(f[i_doc] if len(f) > i_doc else "")
         if re.search(r"\s\d$", str(f[i_doc] or "").strip()) and len(doc) > 6:  # «NIT 900731891 7»: el último dígito es el DV
             doc = doc[:-1]
-        if doc:
-            vistos[doc] = str(f[i_nom] if len(f) > i_nom else "").strip()[:200]
+        if not doc:
+            continue
+        retiro = f[i_ret] if i_ret is not None and len(f) > i_ret else None
+        retiro = _fecha_excel(retiro) or _fecha(retiro) if retiro not in (None, "") else None
+        activo = retiro is None or retiro >= hoy
+        if doc in vistos and vistos[doc][1] and not activo:
+            continue  # la misma persona con un contrato vigente y otro retirado: queda activa
+        vistos[doc] = (str(f[i_nom] if len(f) > i_nom else "").strip()[:200], activo)
     if not vistos:
         raise ValueError("El listado no trae personas")
     existentes = {p.documento: p for p in db.scalars(select(CtbPersona).where(CtbPersona.tipo == tipo))}
-    for doc, nombre in vistos.items():
+    for doc, (nombre, activo) in vistos.items():
         if doc in existentes:
-            existentes[doc].nombre, existentes[doc].activo = nombre or existentes[doc].nombre, True
+            existentes[doc].nombre, existentes[doc].activo = nombre or existentes[doc].nombre, activo
         else:
-            db.add(CtbPersona(tipo=tipo, documento=doc, nombre=nombre))
+            db.add(CtbPersona(tipo=tipo, documento=doc, nombre=nombre, activo=activo))
     return len(vistos)
 
 

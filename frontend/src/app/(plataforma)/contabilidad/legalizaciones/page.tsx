@@ -35,7 +35,11 @@ export default function Legalizaciones() {
   }, [estado, pag.query]);
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
-    api<Persona[]>("/contabilidad/legalizaciones/personas/lista?tipo=elabora").then((p) => setPersonas(p.filter((x) => x.activo))).catch(() => {});
+    api<Persona[]>("/contabilidad/legalizaciones/personas/lista?tipo=elabora").then((p) => {
+      const activas = p.filter((x) => x.activo);
+      setPersonas(activas);
+      if (activas.length === 1) setElabora(activas[0].documento);  // una sola persona elabora: queda escogida
+    }).catch(() => {});
   }, []);
 
   async function leer() {

@@ -299,6 +299,12 @@ def eliminar_plano(db: Session, p: CtbLegPlano) -> list[CtbLegalizacion]:
     return devueltas
 
 
+def elabora_unica(db: Session) -> str:
+    """Si una sola persona activa elabora los documentos, su cédula (se pone sola en cada legalización)."""
+    docs = list(db.scalars(select(CtbPersona.documento).where(CtbPersona.tipo == "elabora", CtbPersona.activo.is_(True)).limit(2)))
+    return docs[0] if len(docs) == 1 else ""
+
+
 def importar_personas(db: Session, tipo: str, filas: list[list]) -> int:
     """Listado de personas (quienes elaboran o empleados): columnas de nombre y de cédula/identificación."""
     i_enc, enc = None, []

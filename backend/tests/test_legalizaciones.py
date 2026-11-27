@@ -108,8 +108,10 @@ def test_formato_en_excel_va_como_texto(speed, proveedor):
     respuestas.append(json.dumps(FORMATO))
     formato = xlsx([["FORMATO REEMBOLSO", None, "NO. 031"], ["FECHA", "PROVEEDOR", "ALIMENTACION", "NIT", "DETALLE"],
                     ["9/11/2026", "PEDRO PRUEBA", 20000, 11111111, "auxilio de comida"]])
+    speed.put(f"{API}/personas/lista", json={"tipo": "elabora", "documento": "55555555", "nombre": "PERSONA QUE ELABORA"})
     r = speed.post(API, files={"formato": ("formato.xlsx", formato, TIPO)})
     assert r.status_code == 200, r.text
+    assert r.json()["data"]["elabora_documento"] == "55555555"  # una sola persona elabora: queda puesta sola
     assert r.json()["data"]["leida_con"] == "excel" and not r.json()["data"]["soportes_revisados"]
     texto = pedidos[0]["messages"][1]["content"][0]["text"]
     assert "PEDRO PRUEBA" in texto and "ALIMENTACION" in texto  # el Excel va como texto (sin archivo)

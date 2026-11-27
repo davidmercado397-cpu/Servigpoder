@@ -111,7 +111,8 @@ async def cargar(request: Request, db: DbSession, formato: UploadFile = File(...
     def procesar():
         datos = lg.leer_formato(nombre, contenido, modelo)
         leg = lg.registrar(db, datos, nombre, "excel" if nombre.lower().endswith(lg.EXT_EXCEL) else "ia", actual.id)
-        leg.elabora_documento = lg._doc(elabora_documento)
+        # Quien elabora: el elegido; si no se eligió y hay una sola persona activa en la lista, esa
+        leg.elabora_documento = lg._doc(elabora_documento) or lg.elabora_unica(db)
         if sop:
             try:
                 lg.revisar_soportes(leg, sop[0], sop[1], modelo)
